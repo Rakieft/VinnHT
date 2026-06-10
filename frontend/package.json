@@ -1,0 +1,27 @@
+{
+  "name": "vinnht-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --port 3000"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "framer-motion": "^12.40.0",
+    "lottie-react": "^2.4.1",
+    "lucide-react": "^0.513.0",
+    "react": "^19.1.0",
+    "react-countup": "^6.5.3",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.2",
+    "swiper": "^12.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.5.1",
+    "prettier": "^3.8.3",
+    "vite": "^6.3.5"
+  }
+}
