@@ -74,11 +74,13 @@ import {
   SellerDashboardContent,
   SellerOrdersContent,
   SellerPayoutsContent,
+  SellerProfileContent,
   SellerProductsContent,
   SellerSalesContent,
   SellerSettingsContent,
   SellerShopContent,
   SupervisorRequestsContent,
+  SupervisorRequestDetailContent,
 } from "./components/SellerFlow.jsx";
 import {
   DeliveryDashboardContent,
@@ -86,8 +88,24 @@ import {
   DeliveryMissionsContent,
   DeliveryProfileContent,
 } from "./components/DeliveryFlow.jsx";
+import {
+  AdminCategoriesContent,
+  AdminDashboardContent,
+  AdminPaymentsContent,
+  AdminProfileContent,
+  AdminProductsContent,
+  AdminResourceContent,
+  AdminSettingsContent,
+  AdminUsersContent,
+  OperationsDashboardContent,
+  ReportsContent,
+  SellersOverviewContent,
+  StaffProfileContent,
+  StaffSettingsContent,
+} from "./components/AdminFlow.jsx";
 import BecomeSellerPage from "./pages/client/BecomeSeller.jsx";
 import MarketplaceMessages from "./components/MarketplaceMessages.jsx";
+import { apiOrigin, assetUrl } from "./config/runtime.js";
 import "./styles/responsive-overrides.css";
 import "./styles/auth-search.css";
 import "./styles/brand-auth-fixes.css";
@@ -95,9 +113,39 @@ import "./styles/dashboard-navigation.css";
 import "./styles/client-space.css";
 import "./styles/seller-flow.css";
 import "./styles/delivery-flow.css";
+import "./styles/admin-flow.css";
 
-const api = axios.create({ baseURL: "http://localhost:5056/api" });
-const assetUrl = (url) => (url?.startsWith("/uploads") ? `http://localhost:5056${url}` : url);
+const api = axios.create({ baseURL: `${apiOrigin}/api`, withCredentials: true });
+const whatsappNumber = (value = "") => {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 8 ? `509${digits}` : digits;
+};
+const productPrice = (product) => {
+  const promotionIsActive =
+    product?.is_featured &&
+    Number(product?.promotional_price) > 0 &&
+    Number(product.promotional_price) < Number(product.price) &&
+    (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date());
+
+  return promotionIsActive ? Number(product.promotional_price) : Number(product?.price || 0);
+};
+
+function WhatsAppIcon({ size = 19 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        fill="currentColor"
+        d="M12 2a9.7 9.7 0 0 0-8.42 14.52L2 22l5.63-1.48A9.9 9.9 0 1 0 12 2Zm0 17.82a8 8 0 0 1-4.08-1.12l-.29-.17-3.34.88.89-3.25-.19-.31A7.84 7.84 0 1 1 12 19.82Zm4.3-5.87c-.24-.12-1.4-.69-1.61-.77-.22-.08-.38-.12-.54.12-.16.23-.61.77-.75.93-.14.16-.28.18-.52.06-2.03-1.01-3.36-1.81-4.7-4.11-.36-.62.36-.58 1.03-1.92.11-.23.05-.43-.03-.55-.06-.12-.53-1.3-.73-1.77-.2-.47-.39-.4-.54-.41h-.46c-.16 0-.42.06-.64.29-.22.24-.84.82-.84 2 0 1.17.86 2.31.97 2.47.12.16 1.68 2.56 4.07 3.59 1.51.65 2.1.71 2.85.6.46-.07 1.4-.57 1.6-1.13.2-.55.2-1.03.14-1.13-.06-.1-.22-.16-.46-.28Z"
+      />
+    </svg>
+  );
+}
 const AuthContext = createContext(null);
 const CartContext = createContext(null);
 const FavoritesContext = createContext(null);
@@ -111,6 +159,12 @@ const roleHome = {
   supervisor: "/supervisor",
   manager: "/manager",
   admin: "/admin",
+};
+const switchableAccountRoles = ["client", "seller", "delivery"];
+const roleDisplay = {
+  client: { label: "Espace client", icon: CircleUserRound },
+  seller: { label: "Espace vendeur", icon: Store },
+  delivery: { label: "Espace livreur", icon: Truck },
 };
 
 const lottiePulse = {
@@ -319,21 +373,9 @@ function Providers({ children }) {
   const [activeRole, setActiveRole] = useState(
     () => localStorage.getItem("vinnht_active_role") || user?.role || "client"
   );
-  const [cart, setCart] = useState(() => JSON.parse(localStorage.getItem("vinnht_cart") || "[]"));
-  const [favorites, setFavorites] = useState(() =>
-    JSON.parse(localStorage.getItem("vinnht_favorites") || "[]")
-  );
-  useEffect(() => localStorage.setItem("vinnht_cart", JSON.stringify(cart)), [cart]);
-  useEffect(() => localStorage.setItem("vinnht_favorites", JSON.stringify(favorites)), [favorites]);
+  const [cart, setCart] = useState([]);
+  const [favorites, setFavorites] = useState([]);
   useEffect(() => {
-    api.interceptors.request.use((config) => {
-      const token = localStorage.getItem("vinnht_token");
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-      return config;
-    });
-  }, []);
-  useEffect(() => {
-    if (!localStorage.getItem("vinnht_token")) return;
     api
       .get("/auth/me")
       .then(({ data }) => {
@@ -345,13 +387,45 @@ function Providers({ children }) {
           setActiveRole(nextRole);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        localStorage.removeItem("vinnht_user");
+        localStorage.removeItem("vinnht_active_role");
+        setUser(null);
+      });
   }, []);
+  useEffect(() => {
+    if (!user?.roles?.includes("client")) return;
+    const syncClientData = async () => {
+      const localCart = JSON.parse(localStorage.getItem("vinnht_cart") || "[]");
+      const localFavorites = JSON.parse(localStorage.getItem("vinnht_favorites") || "[]");
+      if (localCart.length) {
+        await api.post("/cart/sync", {
+          items: localCart.map((item) => ({
+            productId: item.id,
+            quantity: item.quantity || 1,
+          })),
+        });
+      }
+      if (localFavorites.length) {
+        await api.post("/favorites/sync", {
+          productIds: localFavorites.map((item) => item.id),
+        });
+      }
+      const [{ data: serverCart }, { data: serverFavorites }] = await Promise.all([
+        api.get("/cart"),
+        api.get("/favorites"),
+      ]);
+      setCart(serverCart);
+      setFavorites(serverFavorites);
+      localStorage.removeItem("vinnht_cart");
+      localStorage.removeItem("vinnht_favorites");
+    };
+    syncClientData().catch(() => {});
+  }, [user?.id]);
   const auth = useMemo(
     () => ({
       user,
       login(data) {
-        localStorage.setItem("vinnht_token", data.token);
         localStorage.setItem("vinnht_user", JSON.stringify(data.user));
         setUser(data.user);
         const nextRole = data.user.roles?.includes(data.user.role)
@@ -370,8 +444,8 @@ function Providers({ children }) {
         localStorage.setItem("vinnht_active_role", role);
         setActiveRole(role);
       },
-      logout() {
-        localStorage.removeItem("vinnht_token");
+      async logout() {
+        await api.post("/auth/logout").catch(() => {});
         localStorage.removeItem("vinnht_user");
         localStorage.removeItem("vinnht_active_role");
         setUser(null);
@@ -383,23 +457,31 @@ function Providers({ children }) {
   const cartValue = useMemo(
     () => ({
       cart,
-      add(product) {
-        setCart((items) =>
-          items.some((i) => i.id === product.id)
-            ? items.map((i) => (i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i))
-            : [...items, { ...product, quantity: 1 }]
-        );
+      async add(product) {
+        if (Number(product.stock) < 1) return;
+        const current = cart.find((item) => item.id === product.id);
+        const quantity = Math.min((current?.quantity || 0) + 1, Number(product.stock));
+        await api.put(`/cart/${product.id}`, { quantity });
+        const { data } = await api.get("/cart");
+        setCart(data);
       },
-      remove(id) {
+      async remove(id) {
+        await api.delete(`/cart/${id}`);
         setCart((items) => items.filter((i) => i.id !== id));
       },
-      updateQuantity(id, quantity) {
-        const nextQuantity = Math.max(1, Number(quantity) || 1);
+      async updateQuantity(id, quantity) {
+        const item = cart.find((product) => product.id === id);
+        const maximum = Math.max(1, Number(item?.stock) || 1);
+        const nextQuantity = Math.min(maximum, Math.max(1, Number(quantity) || 1));
+        await api.put(`/cart/${id}`, { quantity: nextQuantity });
         setCart((items) =>
-          items.map((item) => (item.id === id ? { ...item, quantity: nextQuantity } : item))
+          items.map((product) =>
+            product.id === id ? { ...product, quantity: nextQuantity } : product,
+          ),
         );
       },
-      clear() {
+      async clear() {
+        await api.delete("/cart");
         setCart([]);
       },
     }),
@@ -411,12 +493,16 @@ function Providers({ children }) {
       isFavorite(id) {
         return favorites.some((product) => product.id === id);
       },
-      toggle(product) {
-        setFavorites((items) =>
-          items.some((item) => item.id === product.id)
-            ? items.filter((item) => item.id !== product.id)
-            : [product, ...items]
-        );
+      async toggle(product) {
+        const exists = favorites.some((item) => item.id === product.id);
+        if (exists) {
+          await api.delete(`/favorites/${product.id}`);
+          setFavorites((items) => items.filter((item) => item.id !== product.id));
+        } else {
+          await api.post(`/favorites/${product.id}`);
+          const { data } = await api.get("/favorites");
+          setFavorites(data);
+        }
       },
     }),
     [favorites]
@@ -587,7 +673,15 @@ function ProductCard({ product }) {
     <motion.article className="product-card" whileHover={{ y: -8 }}>
       <Link className="product-media" to={`/products/${product.id}`}>
         <img src={assetUrl(product.image_url)} alt={product.name} />
-        <Badge tone="gold">Tendance</Badge>
+        {product.is_featured ? (
+          <img
+            className="best-price-ribbon"
+            src="/best-price-ribbon.png"
+            alt="Meilleur prix"
+          />
+        ) : (
+          <Badge tone="gold">Tendance</Badge>
+        )}
       </Link>
       <button
         className={`product-favorite-button ${favorite ? "active" : ""}`}
@@ -611,7 +705,7 @@ function ProductCard({ product }) {
           <ShieldCheck size={14} /> Vendeur vérifié : {product.seller_name}
         </p>
         <div className="product-bottom">
-          <strong>{Number(product.price).toLocaleString("fr-HT")} HTG</strong>
+          <strong>{productPrice(product).toLocaleString("fr-HT")} HTG</strong>
           <button className="round-btn" onClick={() => add(product)}>
             <ShoppingCart size={18} />
           </button>
@@ -935,26 +1029,43 @@ function Categories() {
 function ProductsCatalog() {
   const location = useLocation();
   const initialSearch = new URLSearchParams(location.search).get("search") || "";
+  const offersOnly = new URLSearchParams(location.search).get("offers") === "true";
   const [products, setProducts] = useState([]);
   const [query, setQuery] = useState(initialSearch);
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("recent");
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
     setLoading(true);
     api
       .get("/products", {
-        params: { category: category || undefined, search: query || undefined },
+        params: {
+          category: category || undefined,
+          search: query || undefined,
+          offers: offersOnly || undefined,
+          page,
+          limit: 48,
+        },
       })
-      .then(({ data }) => setProducts(data))
+      .then(({ data, headers }) => {
+        setProducts(data);
+        setTotal(Number(headers["x-total-count"]) || data.length);
+      })
       .catch(() => setProducts([]))
       .finally(() => setLoading(false));
-  }, [category, query]);
+  }, [category, query, offersOnly, page]);
 
   useEffect(() => {
     setQuery(new URLSearchParams(location.search).get("search") || "");
+    setPage(1);
   }, [location.search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [category, query]);
 
   const sortedProducts = [...products].sort((a, b) => {
     if (sort === "price-low") return Number(a.price) - Number(b.price);
@@ -967,8 +1078,16 @@ function ProductsCatalog() {
       <section className="catalog-hero">
         <div>
           <Badge tone="gold">Tous les vendeurs VinnHT</Badge>
-          <h1>Découvrez tout le marché, dans un seul catalogue.</h1>
-          <p>Explorez les rayons, comparez les offres et achetez auprès des boutiques vérifiées.</p>
+          <h1>
+            {offersOnly
+              ? "Les offres spéciales sélectionnées sur VinnHT."
+              : "Découvrez tout le marché, dans un seul catalogue."}
+          </h1>
+          <p>
+            {offersOnly
+              ? "Profitez de prix promotionnels actifs proposés par les boutiques vérifiées."
+              : "Explorez les rayons, comparez les offres et achetez auprès des boutiques vérifiées."}
+          </p>
         </div>
         <form onSubmit={(event) => event.preventDefault()}>
           <Search />
@@ -1022,8 +1141,14 @@ function ProductsCatalog() {
         <div className="catalog-results">
           <header>
             <div>
-              <span>{sortedProducts.length} produit(s)</span>
-              <h2>{category ? "Produits du rayon" : "Tous les produits"}</h2>
+              <span>{total} produit(s)</span>
+              <h2>
+                {offersOnly
+                  ? "Offres spéciales"
+                  : category
+                    ? "Produits du rayon"
+                    : "Tous les produits"}
+              </h2>
             </div>
             <select value={sort} onChange={(event) => setSort(event.target.value)}>
               <option value="recent">Plus récents</option>
@@ -1044,6 +1169,22 @@ function ProductsCatalog() {
               <ShoppingBag />
               <h3>Aucun produit trouvé</h3>
               <p>Essayez un autre rayon ou une autre recherche.</p>
+            </div>
+          )}
+          {total > 48 && (
+            <div className="catalog-pagination">
+              <button disabled={page === 1} onClick={() => setPage((value) => value - 1)}>
+                Précédent
+              </button>
+              <span>
+                Page {page} sur {Math.ceil(total / 48)}
+              </span>
+              <button
+                disabled={page >= Math.ceil(total / 48)}
+                onClick={() => setPage((value) => value + 1)}
+              >
+                Suivant
+              </button>
             </div>
           )}
         </div>
@@ -1119,6 +1260,11 @@ function ProductDetails() {
     navigate(`/messages?conversation=${data.id}&draft=${encodeURIComponent(draft)}`);
   };
 
+  const sellerWhatsApp = whatsappNumber(product.seller_whatsapp);
+  const whatsappMessage = encodeURIComponent(
+    `Bonjour, je vous contacte depuis VinnHT au sujet du produit « ${product.name} ».`,
+  );
+
   return (
     <MarketplaceLayout>
       <section className="product-detail">
@@ -1131,12 +1277,19 @@ function ProductDetails() {
           </div>
         </div>
         <div className="product-info">
+          {product.is_featured && (
+            <img
+              className="best-price-detail-ribbon"
+              src="/best-price-ribbon.png"
+              alt="Meilleur prix"
+            />
+          )}
           <Badge tone="gold">Vendeur vérifié</Badge>
           <h1>{product.name}</h1>
           <p className="lead">
             Une sélection premium proposée par {product.seller_name}, disponible à {product.city}.
           </p>
-          <h2>{product.price.toLocaleString("fr-HT")} HTG</h2>
+          <h2>{productPrice(product).toLocaleString("fr-HT")} HTG</h2>
           <div className="product-detail-meta">
             <span>
               <ShoppingBag /> {product.category_name || "Produit"}
@@ -1179,10 +1332,24 @@ function ProductDetails() {
                 <ShieldCheck /> Vendeur vérifié · {product.seller_name}
               </p>
             </div>
-            <button onClick={contactSeller} aria-label={`Contacter ${product.seller_name}`}>
-              <MessageCircle />
-              <span>Message</span>
-            </button>
+            <div className="product-seller-actions">
+              <button onClick={contactSeller} aria-label={`Contacter ${product.seller_name}`}>
+                <MessageCircle />
+                <span>Message</span>
+              </button>
+              {sellerWhatsApp && (
+                <a
+                  className="whatsapp"
+                  href={`https://wa.me/${sellerWhatsApp}?text=${whatsappMessage}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Discuter avec ${product.seller_name} sur WhatsApp`}
+                >
+                  <WhatsAppIcon />
+                  <span>WhatsApp</span>
+                </a>
+              )}
+            </div>
           </article>
         </div>
       </section>
@@ -1193,7 +1360,7 @@ function ProductDetails() {
           autoplay={{ delay: 2500 }}
           spaceBetween={18}
           breakpoints={{
-            320: { slidesPerView: 1.1 },
+            320: { slidesPerView: 2, spaceBetween: 10 },
             760: { slidesPerView: 2.2 },
             1100: { slidesPerView: 4 },
           }}
@@ -1622,28 +1789,35 @@ const menus = {
     ["Vue d’ensemble", "/supervisor", LayoutDashboard],
     ["Demandes vendeurs", "/supervisor/seller-requests", Store],
     ["Rapports", "/supervisor/reports", BarChart3],
+    ["Profil", "/supervisor/profile", CircleUserRound],
+    ["Paramètres", "/supervisor/settings", Settings],
   ],
   manager: [
     ["Vue d’ensemble", "/manager", LayoutDashboard],
-    ["Rapports ventes", "/manager/sales-reports", BarChart3],
+    ["Rapports opérationnels", "/manager/sales-reports", BarChart3],
     ["Gestion vendeurs", "/manager/sellers", Store],
     ["Gestion livraison", "/manager/deliveries", Truck],
+    ["Profil", "/manager/profile", CircleUserRound],
+    ["Paramètres", "/manager/settings", Settings],
   ],
   admin: [
     ["Vue d’ensemble", "/admin", LayoutDashboard],
-    ["Utilisateurs", "/admin/users", Users],
+    ["Vendeurs", "/admin/users", Users],
     ["Catégories", "/admin/categories", ShoppingBasket],
     ["Produits", "/admin/products", ShoppingBag],
-    ["Commandes", "/admin/orders", Package],
+    ["Profil", "/admin/profile", CircleUserRound],
     ["Paiements", "/admin/payments", ShieldCheck],
-    ["Payouts", "/admin/payouts", Wallet],
-    ["Paramètres", "/admin/settings", Sparkles],
+    ["Paramètres", "/admin/settings", Settings],
   ],
 };
 
 const menuItemsFor = (role) => menus[role] || [];
 
 const isMenuPathActive = (currentPath, itemPath) => {
+  if (itemPath === "/supervisor/seller-requests") {
+    return currentPath.startsWith(itemPath);
+  }
+
   if (itemPath === "/products") {
     return (
       currentPath === "/products" ||
@@ -1657,19 +1831,10 @@ const isMenuPathActive = (currentPath, itemPath) => {
 
 function Protected({ roles, children }) {
   const { user, activeRole } = useAuth();
-  const location = useLocation();
   const userRoles = user?.roles || [user?.role].filter(Boolean);
   if (!user) return <Navigate to="/login" />;
   if (roles && !roles.some((role) => userRoles.includes(role)) && !userRoles.includes("admin"))
     return <Navigate to={roleHome[activeRole] || roleHome[user.role]} />;
-  if (
-    roles?.includes("delivery") &&
-    userRoles.includes("delivery") &&
-    !user.profile_image_url &&
-    location.pathname !== "/delivery/profile"
-  ) {
-    return <Navigate to="/delivery/profile" replace />;
-  }
   return children;
 }
 function Sidebar() {
@@ -1677,7 +1842,7 @@ function Sidebar() {
   const loc = useLocation();
   const [shopLogo, setShopLogo] = useState("");
   const switchableRoles = (user.roles || [user.role]).filter((role) =>
-    ["client", "seller"].includes(role)
+    switchableAccountRoles.includes(role)
   );
 
   useEffect(() => {
@@ -1719,17 +1884,20 @@ function Sidebar() {
       </div>
       {switchableRoles.length > 1 && (
         <div className="space-switcher">
-          {switchableRoles.map((role) => (
-            <Link
-              className={activeRole === role ? "active" : ""}
-              to={roleHome[role]}
-              onClick={() => switchRole(role)}
-              key={role}
-            >
-              {role === "client" ? <CircleUserRound /> : <Store />}
-              <span>{role === "client" ? "Espace client" : "Espace vendeur"}</span>
-            </Link>
-          ))}
+          {switchableRoles.map((role) => {
+            const RoleIcon = roleDisplay[role].icon;
+            return (
+              <Link
+                className={activeRole === role ? "active" : ""}
+                to={roleHome[role]}
+                onClick={() => switchRole(role)}
+                key={role}
+              >
+                <RoleIcon />
+                <span>{roleDisplay[role].label}</span>
+              </Link>
+            );
+          })}
         </div>
       )}
       <nav>
@@ -1753,7 +1921,10 @@ function MobileDashboardNav() {
   const loc = useLocation();
   const activeItemRef = useRef(null);
   const skipNextScrollAnimation = useRef(false);
-  const items = menuItemsFor(activeRole, user);
+  const items =
+    activeRole === "seller"
+      ? [...menuItemsFor(activeRole, user), ["Profil", "/seller/profile", CircleUserRound]]
+      : menuItemsFor(activeRole, user);
 
   useEffect(() => {
     skipNextScrollAnimation.current = true;
@@ -1807,46 +1978,35 @@ function MobileDashboardNav() {
   );
 }
 
-const roleNotifications = {
-  client: [
-    ["Commande confirmée", "Votre paiement a été confirmé.", "/my-orders"],
-    ["Nouvelles offres", "Découvrez les produits sélectionnés pour vous.", "/categories"],
-  ],
-  seller: [
-    ["Catalogue vendeur", "Vérifiez vos produits avec un stock faible.", "/seller/products"],
-    ["Commandes à préparer", "Consultez les nouvelles commandes payées.", "/seller/orders"],
-  ],
-  delivery: [
-    ["Nouvelle mission", "Une livraison vient de vous être assignée.", "/delivery/assigned"],
-    ["Suivi livraison", "Mettez à jour les étapes de vos missions actives.", "/delivery/assigned"],
-  ],
-};
-
 function DashboardNotifications({ role }) {
   const [open, setOpen] = useState(false);
-  const [read, setRead] = useState(() =>
-    JSON.parse(localStorage.getItem(`vinnht_notifications_read_${role}`) || "[]")
-  );
-  const notifications = roleNotifications[role] || [
-    ["Activité VinnHT", "Consultez les dernières informations de votre espace.", roleHome[role]],
-  ];
-  const unread = notifications.filter((_, index) => !read.includes(index)).length;
+  const [notifications, setNotifications] = useState([]);
+  const unread = notifications.filter((notification) => !notification.read_at).length;
 
   useEffect(() => {
     setOpen(false);
-    setRead(JSON.parse(localStorage.getItem(`vinnht_notifications_read_${role}`) || "[]"));
+    const load = () =>
+      api
+        .get("/notifications", { params: { role } })
+        .then(({ data }) => setNotifications(data))
+        .catch(() => setNotifications([]));
+    load();
+    const interval = window.setInterval(load, 30000);
+    return () => window.clearInterval(interval);
   }, [role]);
 
-  const markRead = (index) => {
-    const next = [...new Set([...read, index])];
-    setRead(next);
-    localStorage.setItem(`vinnht_notifications_read_${role}`, JSON.stringify(next));
+  const markRead = async (id) => {
+    await api.patch(`/notifications/${id}/read`);
+    setNotifications((items) =>
+      items.map((item) => (item.id === id ? { ...item, read_at: new Date().toISOString() } : item)),
+    );
   };
 
-  const markAllRead = () => {
-    const next = notifications.map((_, index) => index);
-    setRead(next);
-    localStorage.setItem(`vinnht_notifications_read_${role}`, JSON.stringify(next));
+  const markAllRead = async () => {
+    await api.patch("/notifications/read-all", { role });
+    setNotifications((items) =>
+      items.map((item) => ({ ...item, read_at: item.read_at || new Date().toISOString() })),
+    );
   };
 
   return (
@@ -1876,26 +2036,29 @@ function DashboardNotifications({ role }) {
             <button onClick={markAllRead}>Tout marquer comme lu</button>
           </header>
           <div>
-            {notifications.map(([title, text, path], index) => (
+            {notifications.map((notification) => (
               <Link
-                className={read.includes(index) ? "read" : ""}
-                to={path}
+                className={notification.read_at ? "read" : ""}
+                to={notification.link || roleHome[role]}
                 onClick={() => {
-                  markRead(index);
+                  markRead(notification.id);
                   setOpen(false);
                 }}
-                key={`${role}-${title}`}
+                key={notification.id}
               >
                 <span>
                   <Bell />
                 </span>
                 <p>
-                  <b>{title}</b>
-                  <small>{text}</small>
+                  <b>{notification.title}</b>
+                  <small>{notification.message}</small>
                 </p>
-                {!read.includes(index) && <i />}
+                {!notification.read_at && <i />}
               </Link>
             ))}
+            {!notifications.length && (
+              <div className="notification-empty">Aucune notification pour le moment.</div>
+            )}
           </div>
         </motion.div>
       )}
@@ -1907,8 +2070,8 @@ function DashboardLayout({ children }) {
   const { user, activeRole, switchRole } = useAuth();
   const { cart } = useCart();
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
-  const alternativeRole = (user.roles || []).find(
-    (role) => ["client", "seller"].includes(role) && role !== activeRole
+  const alternativeRoles = (user.roles || []).filter(
+    (role) => switchableAccountRoles.includes(role) && role !== activeRole
   );
   return (
     <div className="dash-shell">
@@ -1916,17 +2079,21 @@ function DashboardLayout({ children }) {
       <div className="dash-main">
         <header className="dash-top">
           <div className="dash-top-actions">
-            {alternativeRole && (
-              <Link
-                className="dashboard-space-switch"
-                to={roleHome[alternativeRole]}
-                onClick={() => switchRole(alternativeRole)}
-                aria-label={`Passer à l’espace ${alternativeRole}`}
-              >
-                {alternativeRole === "client" ? <CircleUserRound /> : <Store />}
-                <span>{alternativeRole === "client" ? "Espace client" : "Espace vendeur"}</span>
-              </Link>
-            )}
+            {alternativeRoles.map((role) => {
+              const RoleIcon = roleDisplay[role].icon;
+              return (
+                <Link
+                  className={`dashboard-space-switch dashboard-space-switch-${role}`}
+                  to={roleHome[role]}
+                  onClick={() => switchRole(role)}
+                  aria-label={`Passer à l’${roleDisplay[role].label.toLowerCase()}`}
+                  key={role}
+                >
+                  <RoleIcon />
+                  <span>{roleDisplay[role].label}</span>
+                </Link>
+              );
+            })}
             {activeRole === "client" && (
               <Link className="dashboard-cart-button" to="/cart" aria-label="Ouvrir mon panier">
                 <ShoppingCart />
@@ -2247,6 +2414,7 @@ function ClientDashboardPage() {
   const { cart, add } = useCart();
   const { favorites, isFavorite, toggle } = useFavorites();
   const [products, setProducts] = useState([]);
+  const [offers, setOffers] = useState([]);
   const [shops, setShops] = useState([]);
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
 
@@ -2262,6 +2430,12 @@ function ClientDashboardPage() {
       .then(({ data }) => setShops(data))
       .catch(() => setShops([]));
   }, []);
+  useEffect(() => {
+    api
+      .get("/products", { params: { offers: true, limit: 3 } })
+      .then(({ data }) => setOffers(data))
+      .catch(() => setOffers([]));
+  }, []);
 
   return (
     <DashboardLayout>
@@ -2273,6 +2447,7 @@ function ClientDashboardPage() {
         isFavorite={isFavorite}
         onToggleFavorite={toggle}
         productData={products}
+        offerData={offers}
         shopData={shops}
       />
     </DashboardLayout>
@@ -2414,11 +2589,11 @@ function SellerMessagesPage() {
 }
 
 function ClientProfilePage() {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, logout } = useAuth();
 
   return (
     <DashboardLayout>
-      <ClientProfileContent api={api} user={user} updateUser={updateUser} />
+      <ClientProfileContent api={api} user={user} updateUser={updateUser} onLogout={logout} />
     </DashboardLayout>
   );
 }
@@ -2497,10 +2672,29 @@ function SellerSettingsPage() {
   );
 }
 
+function SellerProfilePage() {
+  const { user, updateUser, logout } = useAuth();
+
+  return (
+    <DashboardLayout>
+      <SellerProfileContent api={api} user={user} updateUser={updateUser} onLogout={logout} />
+    </DashboardLayout>
+  );
+}
+
 function SupervisorRequestsPage() {
   return (
     <DashboardLayout>
       <SupervisorRequestsContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function SupervisorRequestDetailPage() {
+  const { id } = useParams();
+  return (
+    <DashboardLayout>
+      <SupervisorRequestDetailContent api={api} requestId={id} />
     </DashboardLayout>
   );
 }
@@ -2515,26 +2709,28 @@ function DeliveryDashboardPage() {
 }
 
 function DeliveryAssignedPage() {
+  const { user } = useAuth();
   return (
     <DashboardLayout>
-      <DeliveryMissionsContent api={api} />
+      <DeliveryMissionsContent api={api} user={user} />
     </DashboardLayout>
   );
 }
 
 function DeliveryHistoryPage() {
+  const { user } = useAuth();
   return (
     <DashboardLayout>
-      <DeliveryMissionsContent api={api} history />
+      <DeliveryMissionsContent api={api} user={user} history />
     </DashboardLayout>
   );
 }
 
 function DeliveryProfilePage() {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, logout } = useAuth();
   return (
     <DashboardLayout>
-      <DeliveryProfileContent api={api} user={user} updateUser={updateUser} />
+      <DeliveryProfileContent api={api} user={user} updateUser={updateUser} onLogout={logout} />
     </DashboardLayout>
   );
 }
@@ -2547,18 +2743,121 @@ function DeliveryManagementPage() {
   );
 }
 
-const pageMap = [
-  ["/supervisor/reports", "Rapports", "Suivez la qualité du marché."],
-  ["/manager/sales-reports", "Rapports de ventes", "Analysez les performances."],
-  ["/manager/sellers", "Gestion vendeurs", "Suivez les vendeurs actifs."],
-  ["/admin/users", "Utilisateurs", "Gérez les comptes et rôles."],
-  ["/admin/categories", "Catégories", "Organisez les rayons.", "Ajouter une catégorie"],
-  ["/admin/products", "Produits", "Supervisez le catalogue."],
-  ["/admin/orders", "Commandes", "Suivez toutes les commandes."],
-  ["/admin/payments", "Paiements", "Contrôlez les transactions."],
-  ["/admin/payouts", "Payouts", "Gérez les paiements vendeurs."],
-  ["/admin/settings", "Paramètres", "Configurez la plateforme."],
-];
+function AdminDashboardPage() {
+  return (
+    <DashboardLayout>
+      <AdminDashboardContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function AdminUsersPage() {
+  const { user } = useAuth();
+  return (
+    <DashboardLayout>
+      <AdminUsersContent api={api} currentUser={user} />
+    </DashboardLayout>
+  );
+}
+
+function AdminCategoriesPage() {
+  return (
+    <DashboardLayout>
+      <AdminCategoriesContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function AdminProductsPage() {
+  return (
+    <DashboardLayout>
+      <AdminProductsContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function AdminPaymentsPage() {
+  return (
+    <DashboardLayout>
+      <AdminPaymentsContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function AdminProfilePage() {
+  const { user, updateUser, logout } = useAuth();
+  return (
+    <DashboardLayout>
+      <AdminProfileContent api={api} user={user} updateUser={updateUser} onLogout={logout} />
+    </DashboardLayout>
+  );
+}
+
+function AdminSettingsPage() {
+  return (
+    <DashboardLayout>
+      <AdminSettingsContent />
+    </DashboardLayout>
+  );
+}
+
+function AdminResourcePage({ resource }) {
+  return (
+    <DashboardLayout>
+      <AdminResourceContent api={api} resource={resource} />
+    </DashboardLayout>
+  );
+}
+
+function ReportsPage({ role }) {
+  return (
+    <DashboardLayout>
+      <ReportsContent api={api} role={role} />
+    </DashboardLayout>
+  );
+}
+
+function SellersOverviewPage() {
+  return (
+    <DashboardLayout>
+      <SellersOverviewContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function OperationsDashboardPage({ role }) {
+  const { user } = useAuth();
+  return (
+    <DashboardLayout>
+      <OperationsDashboardContent api={api} role={role} user={user} />
+    </DashboardLayout>
+  );
+}
+
+function StaffProfilePage({ role }) {
+  const { user, updateUser, logout } = useAuth();
+  return (
+    <DashboardLayout>
+      <StaffProfileContent
+        api={api}
+        user={user}
+        updateUser={updateUser}
+        onLogout={logout}
+        role={role}
+      />
+    </DashboardLayout>
+  );
+}
+
+function StaffSettingsPage({ role }) {
+  return (
+    <DashboardLayout>
+      <StaffSettingsContent role={role} />
+    </DashboardLayout>
+  );
+}
+
+const pageMap = [];
 function AppRoutes() {
   return (
     <Routes>
@@ -2701,6 +3000,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/seller/profile"
+        element={
+          <Protected roles={["seller"]}>
+            <SellerProfilePage />
+          </Protected>
+        }
+      />
+      <Route
         path="/seller/messages"
         element={
           <Protected roles={["seller"]}>
@@ -2741,10 +3048,114 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/manager"
+        element={
+          <Protected roles={["manager"]}>
+            <OperationsDashboardPage role="manager" />
+          </Protected>
+        }
+      />
+      <Route
         path="/manager/deliveries"
         element={
           <Protected roles={["manager", "admin"]}>
             <DeliveryManagementPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/manager/sales-reports"
+        element={
+          <Protected roles={["manager", "admin"]}>
+            <ReportsPage role="manager" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/manager/sellers"
+        element={
+          <Protected roles={["manager", "admin"]}>
+            <SellersOverviewPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/manager/profile"
+        element={
+          <Protected roles={["manager"]}>
+            <StaffProfilePage role="Manager" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/manager/settings"
+        element={
+          <Protected roles={["manager"]}>
+            <StaffSettingsPage role="manager" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminDashboardPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/admin/users"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminUsersPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/admin/categories"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminCategoriesPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/admin/products"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminProductsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/admin/payments"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminPaymentsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/admin/profile"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminProfilePage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/admin/settings"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminSettingsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/supervisor"
+        element={
+          <Protected roles={["supervisor"]}>
+            <OperationsDashboardPage role="supervisor" />
           </Protected>
         }
       />
@@ -2756,8 +3167,40 @@ function AppRoutes() {
           </Protected>
         }
       />
+      <Route
+        path="/supervisor/seller-requests/:id"
+        element={
+          <Protected roles={["supervisor"]}>
+            <SupervisorRequestDetailPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/supervisor/reports"
+        element={
+          <Protected roles={["supervisor"]}>
+            <ReportsPage role="superviseur" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/supervisor/profile"
+        element={
+          <Protected roles={["supervisor"]}>
+            <StaffProfilePage role="Superviseur" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/supervisor/settings"
+        element={
+          <Protected roles={["supervisor"]}>
+            <StaffSettingsPage role="superviseur" />
+          </Protected>
+        }
+      />
       {Object.keys(menus)
-        .filter((role) => !["client", "seller", "delivery"].includes(role))
+        .filter((role) => !["client", "seller", "delivery", "admin", "manager", "supervisor"].includes(role))
         .map((role) => (
           <Route
             key={role}
@@ -2769,12 +3212,12 @@ function AppRoutes() {
             }
           />
         ))}
-      {pageMap.map(([path, title, text, action]) => (
+      {pageMap.map(([path, title, text, action, roles]) => (
         <Route
           key={path}
           path={path}
           element={
-            <Protected>
+            <Protected roles={roles}>
               <ManagementPage title={title} text={text} action={action} />
             </Protected>
           }

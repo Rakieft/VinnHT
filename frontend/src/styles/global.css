@@ -513,8 +513,22 @@ main {
   object-fit: cover;
   transition: 0.4s;
 }
+.product-media .best-price-ribbon {
+  position: absolute;
+  z-index: 2;
+  top: -8px;
+  left: -8px;
+  width: 104px;
+  height: 104px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 12px rgba(127, 29, 29, 0.28));
+  pointer-events: none;
+}
 .product-card:hover .product-media img {
   transform: scale(1.06);
+}
+.product-card:hover .product-media .best-price-ribbon {
+  transform: rotate(-3deg) scale(1.04);
 }
 .product-media .badge {
   position: absolute;
@@ -1088,6 +1102,37 @@ main {
 .product-toolbar {
   margin-bottom: 28px;
 }
+
+.catalog-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.catalog-pagination button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 13px;
+  padding: 0 16px;
+  color: #ffffff;
+  background: #2563eb;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.catalog-pagination button:disabled {
+  color: #94a3b8;
+  background: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.catalog-pagination span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
 .product-detail {
   padding: 82px max(5vw, 22px);
   display: grid;
@@ -1118,6 +1163,13 @@ main {
   font-size: clamp(38px, 4.8vw, 58px);
   line-height: 1.05;
   letter-spacing: -2px;
+}
+.best-price-detail-ribbon {
+  width: 138px;
+  height: 138px;
+  object-fit: contain;
+  margin: -18px 0 -22px -20px;
+  filter: drop-shadow(0 14px 18px rgba(127, 29, 29, 0.25));
 }
 .product-info h2 {
   color: var(--blue);
@@ -1193,7 +1245,15 @@ main {
   color: #22c55e;
 }
 
-.product-seller-card > button {
+.product-seller-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.product-seller-actions button,
+.product-seller-actions a {
   min-height: 45px;
   display: inline-flex;
   align-items: center;
@@ -1205,9 +1265,15 @@ main {
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   box-shadow: 0 12px 25px rgba(37, 99, 235, 0.22);
   font-weight: 900;
+  cursor: pointer;
 }
 
-.product-seller-card > button span {
+.product-seller-actions .whatsapp {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: 0 12px 25px rgba(34, 197, 94, 0.25);
+}
+
+.product-seller-actions span {
   color: inherit;
   font-size: 11px;
   letter-spacing: 0;
@@ -1829,12 +1895,71 @@ th {
   }
   .stats-strip,
   .category-grid,
-  .product-grid,
   .contact-grid,
   .stats-grid,
   .timeline,
   .why-grid {
     grid-template-columns: 1fr;
+  }
+
+  .product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .product-card {
+    border-radius: 18px;
+  }
+
+  .product-media {
+    height: 170px;
+  }
+
+  .product-favorite-button {
+    top: 9px;
+    right: 9px;
+    width: 34px;
+    height: 34px;
+  }
+
+  .product-media .best-price-ribbon {
+    width: 76px;
+    height: 76px;
+  }
+
+  .product-body {
+    padding: 12px;
+  }
+
+  .product-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 10px;
+  }
+
+  .product-body h3 {
+    min-height: 38px;
+    margin: 9px 0 5px;
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  .product-body p {
+    margin: 5px 0;
+    font-size: 11px;
+  }
+
+  .product-bottom {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .product-bottom strong {
+    font-size: 14px;
   }
   .section {
     padding: 58px 18px;
@@ -1862,8 +1987,13 @@ th {
     grid-template-columns: auto 1fr;
   }
 
-  .product-seller-card > button {
+  .product-seller-actions {
     grid-column: 1 / -1;
+  }
+
+  .product-seller-actions button,
+  .product-seller-actions a {
+    flex: 1;
     justify-content: center;
   }
   .cart-layout {
@@ -1904,8 +2034,115 @@ th {
 .mobile-only {
   display: none !important;
 }
+
+.profile-logout-card {
+  position: relative;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(239, 68, 68, 0.16);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(239, 68, 68, 0.1), transparent 38%),
+    #ffffff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}
+
+.profile-logout-card::after {
+  content: "";
+  position: absolute;
+  right: -34px;
+  bottom: -58px;
+  width: 130px;
+  height: 130px;
+  border: 1px solid rgba(239, 68, 68, 0.12);
+  border-radius: 50%;
+}
+
+.profile-logout-icon {
+  z-index: 1;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  place-items: center;
+  border-radius: 16px;
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.profile-logout-icon svg {
+  width: 23px;
+  height: 23px;
+}
+
+.profile-logout-card div {
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-logout-card small {
+  color: #ef4444;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.profile-logout-card h2 {
+  margin: 3px 0 4px;
+  color: #0f172a;
+  font-size: 17px;
+}
+
+.profile-logout-card p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.profile-logout-card button {
+  z-index: 1;
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 15px;
+  padding: 0 16px;
+  color: #ffffff;
+  font-weight: 900;
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  box-shadow: 0 12px 24px rgba(239, 68, 68, 0.22);
+}
+
+.profile-logout-card button svg {
+  width: 18px;
+  height: 18px;
+}
+
 @media (max-width: 720px) {
   .mobile-only {
     display: flex !important;
+  }
+
+  .profile-logout-card {
+    align-items: stretch;
+    flex-wrap: wrap;
+    margin-bottom: 94px;
+  }
+
+  .profile-logout-card div {
+    width: calc(100% - 62px);
+    flex: auto;
+  }
+
+  .profile-logout-card button {
+    width: 100%;
   }
 }

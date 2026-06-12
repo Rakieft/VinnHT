@@ -39,9 +39,20 @@ import { Autoplay, Pagination } from "swiper/modules";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Link } from "react-router-dom";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
+import ProfileLogoutCard from "./ProfileLogoutCard.jsx";
+import { apiOrigin } from "../config/runtime.js";
 
 const imageSource = (url) =>
-  url?.startsWith("/uploads") ? `http://localhost:5056${url}` : url;
+  url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url;
+const clientProductPrice = (product) => {
+  const activeOffer =
+    product?.is_featured &&
+    Number(product?.promotional_price) > 0 &&
+    Number(product.promotional_price) < Number(product.price) &&
+    (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date());
+
+  return activeOffer ? Number(product.promotional_price) : Number(product.price);
+};
 
 const products = [
   {
@@ -190,6 +201,13 @@ function ClientProductCard({
     >
       <div className="client-product-image">
         <img src={product.image_url} alt={product.name} />
+        {product.is_featured && (
+          <img
+            className="client-best-price-ribbon"
+            src="/best-price-ribbon.png"
+            alt="Meilleur prix"
+          />
+        )}
         <button
           className={favorite ? "active" : ""}
           onClick={() => onToggleFavorite?.(product)}
@@ -197,7 +215,7 @@ function ClientProductCard({
         >
           <Heart size={17} fill={favorite ? "currentColor" : "none"} />
         </button>
-        {!compact && <span>Nouveau</span>}
+        {!compact && !product.is_featured && <span>Nouveau</span>}
       </div>
       <div className="client-product-info">
         <small>
@@ -210,7 +228,7 @@ function ClientProductCard({
           {product.seller_name}
         </p>
         <div>
-          <strong>{product.price.toLocaleString("fr-HT")} HTG</strong>
+          <strong>{clientProductPrice(product).toLocaleString("fr-HT")} HTG</strong>
           <button onClick={() => onAdd?.(product)} aria-label="Ajouter au panier">
             <ShoppingCart size={17} />
           </button>
@@ -254,6 +272,7 @@ export function ClientDashboardContent({
   isFavorite,
   onToggleFavorite,
   productData = [],
+  offerData = [],
   shopData = [],
 }) {
   const catalog = productData.length ? productData : products;
@@ -376,7 +395,7 @@ export function ClientDashboardContent({
           pagination={{ clickable: true }}
           spaceBetween={18}
           breakpoints={{
-            0: { slidesPerView: 1.2 },
+            0: { slidesPerView: 2, spaceBetween: 10 },
             620: { slidesPerView: 2.2 },
             980: { slidesPerView: 3.2 },
             1320: { slidesPerView: 4.2 },
@@ -403,12 +422,26 @@ export function ClientDashboardContent({
           </span>
           <h2>Des prix pensés pour votre quotidien.</h2>
           <p>Découvrez les réductions, nouveautés et produits populaires sélectionnés pour vous.</p>
-          <Link to="/categories">
+          <Link to="/products?offers=true">
             Voir les offres
             <ArrowRight size={17} />
           </Link>
         </div>
         <div className="promo-badges">
+          {offerData.length ? (
+            offerData.slice(0, 3).map((offer) => (
+              <motion.div whileHover={{ scale: 1.04 }} key={offer.id}>
+                <Link to={`/products/${offer.id}`}>
+                  <Tag />
+                  <span>
+                    <b>{offer.name}</b>
+                    {Number(offer.promotional_price).toLocaleString("fr-HT")} HTG
+                  </span>
+                </Link>
+              </motion.div>
+            ))
+          ) : (
+            <>
           <motion.span whileHover={{ scale: 1.06 }}>
             <Tag />
             Jusqu’à -30%
@@ -421,6 +454,8 @@ export function ClientDashboardContent({
             <Star />
             Populaires
           </motion.span>
+            </>
+          )}
         </div>
       </section>
 
@@ -525,8 +560,6 @@ export function ClientDashboardContent({
         </div>
         <nav>
           <Link to="/messages?support=1">Support</Link>
-          <Link to="/contact">FAQ</Link>
-          <Link to="/contact">Contact</Link>
         </nav>
       </footer>
     </div>
@@ -658,7 +691,7 @@ function ClientOrderDetail({ order }) {
           <span>
             {order.delivery_profile_image_url ? (
               <img
-                src={`http://localhost:5056${order.delivery_profile_image_url}`}
+                src={`${apiOrigin}${order.delivery_profile_image_url}`}
                 alt={`Photo de ${order.delivery_name}`}
               />
             ) : (
@@ -788,10 +821,11 @@ export function ClientCartContent({ cart, remove, updateQuantity }) {
                     <input
                       type="number"
                       min="1"
-                      max={item.stock || 99}
+                      max={Number(item.stock)}
                       value={item.quantity}
                       onChange={(event) => updateQuantity?.(item.id, event.target.value)}
                     />
+                    <small>Max. {item.stock}</small>
                   </label>
                   <strong>{(item.price * item.quantity).toLocaleString("fr-HT")} HTG</strong>
                   <button onClick={() => remove?.(item.id)}>
@@ -1099,14 +1133,14 @@ export function ClientMessagesContent() {
   );
 }
 
-export function ClientProfileContent({ api, user, updateUser }) {
+export function ClientProfileContent({ api, user, updateUser, onLogout }) {
   const [form, setForm] = useState({
     name: user?.name || "",
     phone: user?.phone || "",
   });
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState(
-    user?.profile_image_url ? `http://localhost:5056${user.profile_image_url}` : ""
+    user?.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : ""
   );
   const [message, setMessage] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -1120,7 +1154,7 @@ export function ClientProfileContent({ api, user, updateUser }) {
       data.append("profilePhoto", file);
       const { data: response } = await api.patch("/auth/profile", data);
       updateUser(response.user);
-      setPreview(`http://localhost:5056${response.user.profile_image_url}?v=${Date.now()}`);
+      setPreview(`${apiOrigin}${response.user.profile_image_url}?v=${Date.now()}`);
       setPhoto(null);
       setMessage("Photo de profil mise à jour.");
     } catch (error) {
@@ -1212,6 +1246,7 @@ export function ClientProfileContent({ api, user, updateUser }) {
           <button className="save-profile">Enregistrer les modifications</button>
         </form>
       </div>
+      <ProfileLogoutCard onLogout={onLogout} />
     </ClientPageFrame>
   );
 }

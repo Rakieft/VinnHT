@@ -408,8 +408,24 @@
   transition: transform 0.35s ease;
 }
 
+.client-product-image .client-best-price-ribbon {
+  position: absolute;
+  z-index: 2;
+  top: -8px;
+  left: -8px;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  filter: drop-shadow(0 9px 11px rgba(127, 29, 29, 0.28));
+  pointer-events: none;
+}
+
 .client-product-card:hover .client-product-image img {
   transform: scale(1.06);
+}
+
+.client-product-card:hover .client-product-image .client-best-price-ribbon {
+  transform: rotate(-3deg) scale(1.04);
 }
 
 .client-product-image button {
@@ -573,6 +589,31 @@
 .promo-badges {
   display: grid;
   gap: 12px;
+}
+
+.promo-badges > div a {
+  min-width: 230px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 13px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(12px);
+}
+
+.promo-badges > div a > span {
+  display: grid;
+  gap: 2px;
+}
+
+.promo-badges > div a b {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .promo-badges span {
@@ -2223,10 +2264,74 @@
   }
 
   .client-stats-grid,
-  .client-products-grid,
-  .client-favorites-row,
   .client-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .client-products-grid,
+  .client-favorites-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .favorites-premium-grid .favorite-product-wrap {
+    padding: 6px;
+    border-radius: 22px;
+  }
+
+  .client-product-card {
+    border-radius: 19px;
+  }
+
+  .client-product-image {
+    height: 150px;
+  }
+
+  .client-product-image .client-best-price-ribbon {
+    width: 72px;
+    height: 72px;
+  }
+
+  .client-product-image button {
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 11px;
+  }
+
+  .client-product-info {
+    gap: 6px;
+    padding: 11px;
+  }
+
+  .client-product-info > a {
+    min-height: 35px;
+    overflow: hidden;
+    font-size: 14px;
+  }
+
+  .client-product-info > div {
+    gap: 6px;
+  }
+
+  .client-product-info strong {
+    font-size: 13px;
+  }
+
+  .client-product-info button {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+  }
+
+  .client-product-card.compact {
+    display: block;
+    min-height: 0;
+  }
+
+  .client-product-card.compact .client-product-image {
+    height: 130px;
   }
 
   .client-dashboard-grid,

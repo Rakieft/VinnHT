@@ -11,6 +11,7 @@ import {
   UserCheck,
   X,
 } from "lucide-react";
+import { apiOrigin } from "../../config/runtime.js";
 
 const categories = [
   "Supermarché",
@@ -92,7 +93,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [accepted, setAccepted] = useState([]);
   const [previews, setPreviews] = useState({
-    profilePhoto: user?.profile_image_url ? `http://localhost:5056${user.profile_image_url}` : "",
+    profilePhoto: user?.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : "",
   });
 
   useEffect(() => {

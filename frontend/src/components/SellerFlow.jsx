@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   BarChart3,
@@ -24,16 +25,17 @@ import {
   Trash2,
   Wallet,
   UploadCloud,
+  UserRoundCheck,
   X,
 } from "lucide-react";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
+import ProfileLogoutCard from "./ProfileLogoutCard.jsx";
+import { apiOrigin } from "../config/runtime.js";
 
-const apiOrigin = "http://localhost:5056";
 const imageSource = (url) => (url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url);
 
 export function SellerProductsContent({ api }) {
   const [products, setProducts] = useState([]);
-  const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [editing, setEditing] = useState(null);
@@ -67,6 +69,11 @@ export function SellerProductsContent({ api }) {
     await api.patch(`/seller/products/${editing.id}`, {
       name: editing.name,
       price: Number(editing.price),
+      promotionalPrice: editing.promotional_price
+        ? Number(editing.promotional_price)
+        : "",
+      isFeatured: Boolean(editing.is_featured),
+      offerEndsAt: editing.offer_ends_at || "",
       stock: Number(editing.stock),
       description: editing.description || "",
     });
@@ -137,11 +144,16 @@ export function SellerProductsContent({ api }) {
                   <AlertTriangle /> Stock faible
                 </span>
               )}
+              {Boolean(product.is_featured) && product.promotional_price && (
+                <span className="flow-status confirmed">Offre spéciale</span>
+              )}
               <h3>{product.name}</h3>
               <p>
                 {product.category_name || "Produit"} · Stock : {product.stock}
               </p>
-              <strong>{Number(product.price).toLocaleString("fr-HT")} HTG</strong>
+              <strong>
+                {Number(product.promotional_price || product.price).toLocaleString("fr-HT")} HTG
+              </strong>
             </div>
             <footer>
               <button title="Modifier" onClick={() => setEditing({ ...product })}>
@@ -188,6 +200,35 @@ export function SellerProductsContent({ api }) {
               value={editing.stock}
               onChange={(event) => setEditing({ ...editing, stock: event.target.value })}
             />
+          </label>
+          <label>
+            Prix promotionnel HTG
+            <input
+              min="0"
+              max={editing.price}
+              type="number"
+              placeholder="Laisser vide sans promotion"
+              value={editing.promotional_price || ""}
+              onChange={(event) =>
+                setEditing({ ...editing, promotional_price: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            Fin de l’offre
+            <input
+              type="datetime-local"
+              value={editing.offer_ends_at?.slice(0, 16) || ""}
+              onChange={(event) => setEditing({ ...editing, offer_ends_at: event.target.value })}
+            />
+          </label>
+          <label className="seller-featured-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(editing.is_featured)}
+              onChange={(event) => setEditing({ ...editing, is_featured: event.target.checked })}
+            />
+            Afficher dans les offres spéciales VinnHT
           </label>
           <label className="full">
             Description
@@ -640,7 +681,6 @@ export function SellerDashboardContent({ api, user }) {
 export function SellerOrdersContent({ api }) {
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState("all");
-  const [selected, setSelected] = useState(null);
   const [message, setMessage] = useState("");
 
   const load = () => api.get("/seller/orders").then(({ data }) => setOrders(data));
@@ -747,6 +787,18 @@ export function SellerOrdersContent({ api }) {
               <strong>{selected.payment_status}</strong>
               <span>Livraison : {selected.delivery_status || "non assignée"}</span>
             </article>
+            {selected.delivery_status === "delivered" && (
+              <article className="seller-delivery-confirmed">
+                <small>Preuve de réception</small>
+                <strong>Commande finalisée</strong>
+                <span>
+                  Signée par {selected.delivery_signer_name || "le client"}
+                  {selected.delivery_confirmed_at
+                    ? ` le ${shortDate(selected.delivery_confirmed_at)}`
+                    : ""}
+                </span>
+              </article>
+            )}
           </div>
           {["confirmed", "preparing"].includes(selected.seller_status) &&
             selected.payment_status === "paid" && (
@@ -1053,6 +1105,9 @@ export function SellerShopContent({ api }) {
           <label>
             WhatsApp professionnel
             <input
+              required
+              minLength="8"
+              placeholder="Ex. +509 37 00 12 34"
               value={shop.whatsapp}
               onChange={(event) => setShop({ ...shop, whatsapp: event.target.value })}
             />
@@ -1173,7 +1228,7 @@ export function SellerShopContent({ api }) {
   );
 }
 
-export function SellerProfileContent({ api, user, updateUser }) {
+export function SellerProfileContent({ api, user, updateUser, onLogout }) {
   const [form, setForm] = useState({
     name: user?.name || "",
     phone: user?.phone || "",
@@ -1259,6 +1314,7 @@ export function SellerProfileContent({ api, user, updateUser }) {
           </button>
         </form>
       </section>
+      <ProfileLogoutCard onLogout={onLogout} />
     </SellerPageHeader>
   );
 }
@@ -1380,23 +1436,12 @@ function SellerFinanceTable({ rows, columns }) {
 export function SupervisorRequestsContent({ api }) {
   const [requests, setRequests] = useState([]);
   const [message, setMessage] = useState("");
-  const [selected, setSelected] = useState(null);
-  const [rejecting, setRejecting] = useState(null);
-  const [reason, setReason] = useState("");
 
   const load = () => api.get("/admin/seller-requests").then(({ data }) => setRequests(data));
 
   useEffect(() => {
     load();
   }, []);
-
-  const review = async (id, status, rejectionReason = "") => {
-    await api.patch(`/admin/seller-requests/${id}`, { status, reason: rejectionReason });
-    setMessage(status === "approved" ? "Vendeur approuvé." : "Demande refusée.");
-    setRejecting(null);
-    setReason("");
-    load();
-  };
 
   const details = (request) => {
     try {
@@ -1412,7 +1457,6 @@ export function SupervisorRequestsContent({ api }) {
       title="Demandes vendeurs"
       text="Examinez les candidatures et activez les nouvelles boutiques."
     >
-      {message && <div className="flow-success">{message}</div>}
       <div className="seller-request-list">
         {requests.map((request) => (
           <article key={request.id}>
@@ -1432,81 +1476,190 @@ export function SupervisorRequestsContent({ api }) {
             </div>
             <b className={`flow-status ${request.status}`}>{request.status}</b>
             <footer>
-              <button className="request-details-button" onClick={() => setSelected(request)}>
-                <Eye /> Détails
-              </button>
-              {request.status === "pending" && (
-                <>
-                  <button onClick={() => review(request.id, "approved")}>
-                    <Check /> Approuver
-                  </button>
-                  <button onClick={() => setRejecting(request)}>
-                    <X /> Refuser
-                  </button>
-                </>
-              )}
+              <Link className="request-details-button" to={`/supervisor/seller-requests/${request.id}`}>
+                <Eye /> Ouvrir le dossier de vérification
+              </Link>
             </footer>
           </article>
         ))}
       </div>
-      {selected && (
-        <section className="seller-request-detail">
-          <header>
-            <div>
-              <span>Dossier vendeur</span>
-              <h2>{selected.business_name}</h2>
-            </div>
-            <button onClick={() => setSelected(null)}>
-              <X />
-            </button>
-          </header>
+    </SellerPageHeader>
+  );
+}
+
+const requestFieldLabels = {
+  fullName: "Nom complet déclaré",
+  birthDate: "Date de naissance",
+  primaryPhone: "Téléphone principal",
+  secondaryPhone: "Téléphone secondaire",
+  email: "Adresse email déclarée",
+  fullAddress: "Adresse complète",
+  city: "Ville",
+  department: "Département",
+  activityStatus: "Situation actuelle",
+  institutionName: "École, université, entreprise ou établissement",
+  activityDetails: "Fonction, niveau ou précision",
+  shopName: "Nom de la boutique",
+  mainCategory: "Catégorie principale",
+  shopDescription: "Description de la boutique",
+  pickupAddress: "Adresse de récupération",
+};
+
+const parseRequestDetails = (description) => {
+  try {
+    return JSON.parse(description || "{}");
+  } catch {
+    const legacyDescription = description || "";
+    const recovered = {};
+    legacyDescription
+      .replace(/^\{|\}$/g, "")
+      .split(",")
+      .forEach((part) => {
+        const separator = part.indexOf(":");
+        if (separator > 0) {
+          recovered[part.slice(0, separator).trim()] = part.slice(separator + 1).trim();
+        }
+      });
+    return { ...recovered, legacyDescription };
+  }
+};
+
+export function SupervisorRequestDetailContent({ api, requestId }) {
+  const [request, setRequest] = useState(null);
+  const [message, setMessage] = useState("");
+  const [reason, setReason] = useState("");
+  const [rejecting, setRejecting] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = () => api.get(`/admin/seller-requests/${requestId}`).then(({ data }) => setRequest(data));
+  useEffect(() => { load(); }, [requestId]);
+
+  const review = async (status) => {
+    setBusy(true);
+    try {
+      const { data } = await api.patch(`/admin/seller-requests/${requestId}`, {
+        status,
+        reason: status === "rejected" ? reason : "",
+      });
+      setMessage(data.message);
+      setRejecting(false);
+      setReason("");
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!request) {
+    return <div className="seller-request-verification-loading">Chargement du dossier vendeur...</div>;
+  }
+
+  const details = parseRequestDetails(request.description);
+  const identityFields = ["fullName", "birthDate", "primaryPhone", "secondaryPhone", "email", "fullAddress", "city", "department"];
+  const activityFields = ["activityStatus", "institutionName", "activityDetails"];
+  const shopFields = ["shopName", "mainCategory", "shopDescription", "pickupAddress"];
+  const completenessFields = [...identityFields.filter((field) => field !== "secondaryPhone"), ...activityFields.slice(0, 2), ...shopFields];
+  const completed = completenessFields.filter((field) => details[field]).length;
+  const completeness = Math.round((completed / completenessFields.length) * 100);
+
+  const FieldGroup = ({ title, icon: Icon, fields }) => (
+    <section className="seller-verification-panel">
+      <header><Icon /><div><small>Informations déclarées</small><h2>{title}</h2></div></header>
+      <div>
+        {fields.map((field) => (
+          <article className={!details[field] ? "missing" : ""} key={field}>
+            <small>{requestFieldLabels[field]}</small>
+            <strong>{details[field] || "Information non fournie"}</strong>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+
+  return (
+    <div className="seller-request-verification">
+      <Link className="seller-verification-back" to="/supervisor/seller-requests">← Retour aux demandes</Link>
+      <header className="seller-verification-hero">
+        <div className="seller-verification-identity">
+          <span>
+            {request.profile_image_url ? <img src={imageSource(request.profile_image_url)} alt={request.name} /> : <UserRoundCheck />}
+          </span>
           <div>
-            {selected.rejection_reason && (
-              <article className="seller-request-rejection-reason">
-                <small>Motif du refus</small>
-                <strong>{selected.rejection_reason}</strong>
-              </article>
-            )}
-            {Object.entries(details(selected)).map(([key, value]) =>
-              value && typeof value !== "object" ? (
-                <article key={key}>
-                  <small>{key}</small>
-                  <strong>{String(value)}</strong>
-                </article>
-              ) : null
-            )}
+            <small>Dossier vendeur #{request.id}</small>
+            <h1>{request.name}</h1>
+            <p>{request.email} · {request.phone || "Téléphone non renseigné"}</p>
           </div>
-        </section>
-      )}
+        </div>
+        <div className="seller-verification-status">
+          <b className={`flow-status ${request.status}`}>{request.status}</b>
+          <small>Soumise le {new Date(request.created_at).toLocaleDateString("fr-HT")}</small>
+        </div>
+      </header>
+
+      {message && <div className="flow-success">{message}</div>}
+
+      <section className="seller-verification-summary">
+        <article><ShieldCheck /><span><small>Complétude du dossier</small><b>{completeness}%</b></span></article>
+        <article><Store /><span><small>Boutique demandée</small><b>{request.business_name}</b></span></article>
+        <article><UserRoundCheck /><span><small>Compte VinnHT</small><b>{request.account_status}</b></span></article>
+        <article><CalendarDays /><span><small>Compte créé</small><b>{new Date(request.account_created_at).toLocaleDateString("fr-HT")}</b></span></article>
+      </section>
+
+      <div className="seller-verification-columns">
+        <main>
+          <FieldGroup title="Identité et coordonnées" icon={UserRoundCheck} fields={identityFields} />
+          <FieldGroup title="Situation actuelle" icon={ShieldCheck} fields={activityFields} />
+          <FieldGroup title="Projet de boutique" icon={Store} fields={shopFields} />
+          {details.legacyDescription && (
+            <section className="seller-verification-panel">
+              <header><Eye /><div><small>Ancienne candidature</small><h2>Description fournie</h2></div></header>
+              <p>{details.legacyDescription}</p>
+            </section>
+          )}
+        </main>
+        <aside>
+          <section className="seller-verification-shop-card">
+            <span>{request.shop_logo_url ? <img src={imageSource(request.shop_logo_url)} alt={request.business_name} /> : <Store />}</span>
+            <small>Boutique proposée</small>
+            <h2>{request.business_name}</h2>
+            <p>{details.mainCategory || "Catégorie non renseignée"}</p>
+          </section>
+          <section className="seller-verification-checklist">
+            <h2>Points de contrôle</h2>
+            {[
+              ["Identité cohérente", Boolean(details.fullName && request.name)],
+              ["Coordonnées disponibles", Boolean(request.email && request.phone)],
+              ["Situation actuelle précisée", Boolean(details.activityStatus && details.institutionName)],
+              ["Projet commercial décrit", Boolean(details.shopDescription && details.mainCategory)],
+              ["Adresse de récupération", Boolean(details.pickupAddress)],
+              ["Conditions acceptées", Boolean(details.acceptedTerms)],
+            ].map(([label, valid]) => <p className={valid ? "valid" : "missing"} key={label}><span>{valid ? "✓" : "!"}</span>{label}</p>)}
+          </section>
+          {request.reviewed_at && (
+            <section className="seller-verification-history">
+              <small>Dernière décision</small>
+              <b>{request.status}</b>
+              <p>{request.reviewer_name || "Superviseur VinnHT"} · {new Date(request.reviewed_at).toLocaleDateString("fr-HT")}</p>
+              {request.rejection_reason && <strong>{request.rejection_reason}</strong>}
+            </section>
+          )}
+          {request.status === "pending" && (
+            <section className="seller-verification-actions">
+              <button disabled={busy} onClick={() => review("approved")}><Check /> Approuver le vendeur</button>
+              <button className="danger" onClick={() => setRejecting(true)}><X /> Refuser la demande</button>
+            </section>
+          )}
+        </aside>
+      </div>
+
       {rejecting && (
         <section className="seller-rejection-panel">
-          <header>
-            <div>
-              <span>Refus de candidature</span>
-              <h2>{rejecting.business_name}</h2>
-            </div>
-            <button onClick={() => setRejecting(null)}>
-              <X />
-            </button>
-          </header>
-          <label>
-            Motif obligatoire
-            <textarea
-              rows="5"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder="Expliquez clairement ce que le candidat doit corriger."
-            />
-          </label>
-          <button
-            disabled={reason.trim().length < 8}
-            onClick={() => review(rejecting.id, "rejected", reason)}
-          >
-            Confirmer le refus
-          </button>
+          <header><div><span>Décision motivée</span><h2>Refuser {request.business_name}</h2></div><button onClick={() => setRejecting(false)}><X /></button></header>
+          <label>Motif obligatoire<textarea rows="5" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Expliquez précisément les informations à corriger." /></label>
+          <button disabled={busy || reason.trim().length < 8} onClick={() => review("rejected")}>Confirmer le refus</button>
         </section>
       )}
-    </SellerPageHeader>
+    </div>
   );
 }
 

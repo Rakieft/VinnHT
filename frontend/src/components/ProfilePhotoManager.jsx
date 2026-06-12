@@ -1,7 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Camera, Check, Trash2, X } from "lucide-react";
-
-const apiOrigin = "http://localhost:5056";
+import { apiOrigin } from "../config/runtime.js";
 
 export default function ProfilePhotoManager({ api, user, updateUser, onMessage }) {
   const [source, setSource] = useState("");
