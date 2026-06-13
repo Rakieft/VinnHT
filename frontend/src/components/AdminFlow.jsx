@@ -14,6 +14,7 @@ import {
   Edit3,
   FileText,
   Mail,
+  MessageCircle,
   Package,
   Phone,
   Plus,
@@ -436,6 +437,14 @@ export function AdminUsersContent({ api, currentUser }) {
   const [busyUser, setBusyUser] = useState(null);
   const [campaigns, setCampaigns] = useState([]);
   const [selectedSeller, setSelectedSeller] = useState(null);
+  const [staffForm, setStaffForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    password: "",
+    role: "supervisor",
+  });
+  const [creatingStaff, setCreatingStaff] = useState(false);
   const [sponsorship, setSponsorship] = useState({
     amount: "",
     startsAt: new Date().toISOString().slice(0, 10),
@@ -490,6 +499,29 @@ export function AdminUsersContent({ api, currentUser }) {
       setError(requestError.response?.data?.message || "Impossible de modifier ce compte.");
     } finally {
       setBusyUser(null);
+    }
+  };
+
+  const createStaff = async (event) => {
+    event.preventDefault();
+    setCreatingStaff(true);
+    setMessage("");
+    setError("");
+    try {
+      const { data } = await api.post("/admin/staff", staffForm);
+      setMessage(data.message);
+      setStaffForm({
+        name: "",
+        email: "",
+        phone: "",
+        password: "",
+        role: "supervisor",
+      });
+      setQuery(staffForm.email);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible de créer ce compte.");
+    } finally {
+      setCreatingStaff(false);
     }
   };
 
@@ -549,9 +581,9 @@ export function AdminUsersContent({ api, currentUser }) {
   return (
     <div className="admin-flow">
       <AdminHeading
-        eyebrow="Réseau des marchands"
-        title="Vendeurs VinnHT"
-        text="Suivez les vendeurs, gérez leur compte et contrôlez leurs campagnes de visibilité."
+        eyebrow="Utilisateurs opérationnels"
+        title="Vendeurs et équipe VinnHT"
+        text="Créez les managers et superviseurs, puis suivez les vendeurs validés."
       >
         <button onClick={load}>
           <RefreshCw /> Actualiser
@@ -559,6 +591,42 @@ export function AdminUsersContent({ api, currentUser }) {
       </AdminHeading>
       {message && <div className="admin-message">{message}</div>}
       {error && <div className="admin-error">{error}</div>}
+      <form className="admin-staff-create-form" onSubmit={createStaff}>
+        <header>
+          <span><UserPlus /></span>
+          <div>
+            <small>Équipe opérationnelle</small>
+            <h2>Créer un manager ou superviseur</h2>
+            <p>Le compte sera actif immédiatement avec le rôle sélectionné.</p>
+          </div>
+        </header>
+        <label>
+          Nom complet
+          <input required minLength="2" value={staffForm.name} onChange={(event) => setStaffForm({ ...staffForm, name: event.target.value })} />
+        </label>
+        <label>
+          Adresse email
+          <input required type="email" value={staffForm.email} onChange={(event) => setStaffForm({ ...staffForm, email: event.target.value })} />
+        </label>
+        <label>
+          Téléphone
+          <input value={staffForm.phone} onChange={(event) => setStaffForm({ ...staffForm, phone: event.target.value })} />
+        </label>
+        <label>
+          Rôle
+          <select value={staffForm.role} onChange={(event) => setStaffForm({ ...staffForm, role: event.target.value })}>
+            <option value="supervisor">Superviseur</option>
+            <option value="manager">Manager</option>
+          </select>
+        </label>
+        <label className="full">
+          Mot de passe initial
+          <input required minLength="10" type="password" value={staffForm.password} onChange={(event) => setStaffForm({ ...staffForm, password: event.target.value })} />
+        </label>
+        <button disabled={creatingStaff}>
+          <UserPlus /> {creatingStaff ? "Création..." : "Créer le compte"}
+        </button>
+      </form>
       {query.trim().length < 2 && (
         <section className="admin-user-summary">
           {[
@@ -1115,22 +1183,31 @@ export function AdminProfileContent({
   );
 }
 
-export function AdminSettingsContent({ role = "admin" }) {
-  const [preferences, setPreferences] = useState(() =>
-    JSON.parse(
-      localStorage.getItem(`vinnht_${role}_settings`) ||
-        JSON.stringify({
-          sellerRequests: true,
-          paymentAlerts: true,
-          weeklyReport: true,
-          securityAlerts: true,
-        })
-    )
-  );
+export function AdminSettingsContent({ api, role = "admin" }) {
+  const defaults = {
+    sellerRequests: true,
+    paymentAlerts: true,
+    weeklyReport: true,
+    securityAlerts: true,
+  };
+  const [preferences, setPreferences] = useState(defaults);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    localStorage.setItem(`vinnht_${role}_settings`, JSON.stringify(preferences));
-  }, [preferences]);
+    api.get(`/preferences/${role}`).then(({ data }) => setPreferences({ ...defaults, ...data }));
+  }, [role]);
+
+  const togglePreference = async (key) => {
+    const next = { ...preferences, [key]: !preferences[key] };
+    setPreferences(next);
+    try {
+      const { data } = await api.put(`/preferences/${role}`, { preferences: next });
+      setMessage(data.message);
+    } catch (error) {
+      setPreferences(preferences);
+      setMessage(error.response?.data?.message || "Impossible d’enregistrer ce paramètre.");
+    }
+  };
 
   const settings =
     role === "manager"
@@ -1162,11 +1239,62 @@ export function AdminSettingsContent({ role = "admin" }) {
           <article key={key}>
             <span><Icon /></span>
             <div><h3>{title}</h3><p>{text}</p></div>
-            <label><input type="checkbox" checked={preferences[key]} onChange={() => setPreferences((current) => ({ ...current, [key]: !current[key] }))} /><i /></label>
+            <label><input type="checkbox" checked={preferences[key]} onChange={() => togglePreference(key)} /><i /></label>
           </article>
         ))}
       </section>
       <section className="admin-settings-note"><Bell /><div><h2>Centre de notifications</h2><p>Ces préférences contrôlent les alertes visibles dans votre espace administrateur.</p></div></section>
+      {message && <div className="admin-message">{message}</div>}
+    </div>
+  );
+}
+
+export function AdminContactRequestsContent({ api }) {
+  const [requests, setRequests] = useState([]);
+  const [message, setMessage] = useState("");
+
+  const load = () =>
+    api.get("/admin/contact-requests").then(({ data }) => setRequests(data));
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const updateStatus = async (id, status) => {
+    const { data } = await api.patch(`/admin/contact-requests/${id}`, { status });
+    setMessage(data.message);
+    load();
+  };
+
+  return (
+    <div className="admin-flow">
+      <AdminHeading
+        eyebrow="Centre de support"
+        title="Demandes Contact"
+        text="Consultez et traitez les messages envoyés depuis la page Contact."
+      />
+      {message && <div className="admin-message">{message}</div>}
+      <section className="admin-user-grid">
+        {requests.map((request) => (
+          <article key={request.id}>
+            <header>
+              <span><MessageCircle /></span>
+              <div>
+                <b>{request.subject}</b>
+                <small>{request.name} · {request.email}</small>
+              </div>
+              <Status value={request.status} />
+            </header>
+            <p>{request.message}</p>
+            <small>{shortDate(request.created_at)}</small>
+            <div className="admin-user-actions">
+              <button onClick={() => updateStatus(request.id, "in_progress")}>En traitement</button>
+              <button onClick={() => updateStatus(request.id, "resolved")}>Résolue</button>
+            </div>
+          </article>
+        ))}
+        {!requests.length && <div className="admin-message">Aucune demande Contact actuellement.</div>}
+      </section>
     </div>
   );
 }
@@ -1307,8 +1435,8 @@ export function StaffProfileContent({ api, user, updateUser, onLogout, role }) {
   );
 }
 
-export function StaffSettingsContent({ role }) {
-  return <AdminSettingsContent role={role} />;
+export function StaffSettingsContent({ api, role }) {
+  return <AdminSettingsContent api={api} role={role} />;
 }
 
 export function SellersOverviewContent({ api }) {

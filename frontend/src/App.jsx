@@ -90,6 +90,7 @@ import {
 } from "./components/DeliveryFlow.jsx";
 import {
   AdminCategoriesContent,
+  AdminContactRequestsContent,
   AdminDashboardContent,
   AdminPaymentsContent,
   AdminProfileContent,
@@ -725,6 +726,22 @@ function PageHero({ title, text }) {
 }
 
 function Home() {
+  const [products, setProducts] = useState([]);
+  const [shops, setShops] = useState([]);
+  const [stats, setStats] = useState({});
+
+  useEffect(() => {
+    Promise.all([
+      api.get("/products", { params: { limit: 4 } }),
+      api.get("/shops"),
+      api.get("/marketplace/stats"),
+    ]).then(([productsResponse, shopsResponse, statsResponse]) => {
+      setProducts(productsResponse.data);
+      setShops(shopsResponse.data);
+      setStats(statsResponse.data);
+    });
+  }, []);
+
   return (
     <PublicLayout>
       <section className="hero premium-bg">
@@ -744,7 +761,6 @@ function Home() {
               Une marketplace moderne pour connecter clients, vendeurs et livreurs dans une
               expérience simple, rapide et professionnelle.
             </p>
-            <SearchBar />
             <div className="hero-actions">
               <Button to="/categories">
                 Explorer les rayons <ArrowRight size={18} />
@@ -775,10 +791,10 @@ function Home() {
         </motion.div>
       </section>
       <AnimatedSection className="stats-strip">
-        <StatCard icon={Users} label="Clients actifs" count={4800} suffix="+" />
-        <StatCard icon={Store} label="Boutiques" count={120} suffix="+" />
-        <StatCard icon={Package} label="Commandes suivies" count={850} suffix="+" />
-        <StatCard icon={ShieldCheck} label="Vendeurs vérifiés" count={98} suffix="%" />
+        <StatCard icon={Users} label="Comptes actifs" count={Number(stats.active_users || 0)} />
+        <StatCard icon={Store} label="Boutiques" count={Number(stats.sellers || 0)} />
+        <StatCard icon={ShoppingBag} label="Produits disponibles" count={Number(stats.products || 0)} />
+        <StatCard icon={Package} label="Commandes suivies" count={Number(stats.orders || 0)} />
       </AnimatedSection>
       <AnimatedSection className="section">
         <SectionHead
@@ -810,10 +826,11 @@ function Home() {
           title="Les offres qui donnent envie de remplir son panier"
         />
         <div className="product-grid">
-          {demoProducts.slice(0, 4).map((p) => (
+          {products.map((p) => (
             <ProductCard product={p} key={p.id} />
           ))}
         </div>
+        {!products.length && <div className="empty-state"><ShoppingBag /><h3>Aucun produit disponible</h3><p>Les premiers produits apparaîtront après la validation d’un vendeur.</p></div>}
       </AnimatedSection>
       <AnimatedSection className="section why-grid">
         <div className="why-copy">
@@ -862,7 +879,7 @@ function Home() {
         <Swiper
           modules={[Autoplay]}
           autoplay={{ delay: 2200 }}
-          loop
+          loop={shops.length > 4}
           spaceBetween={18}
           breakpoints={{
             320: { slidesPerView: 1.2 },
@@ -870,20 +887,18 @@ function Home() {
             1100: { slidesPerView: 4 },
           }}
         >
-          {boutiques.map((name, i) => (
-            <SwiperSlide key={name}>
+          {shops.map((shop) => (
+            <SwiperSlide key={shop.seller_id}>
               <div className="shop-card">
-                <span>{name[0]}</span>
-                <h3>{name}</h3>
-                <p>
-                  Boutique vérifiée à{" "}
-                  {["Port-au-Prince", "Delmas", "Jacmel", "Pétion-Ville"][i % 4]}
-                </p>
+                <span>{shop.shop_name[0]}</span>
+                <h3>{shop.shop_name}</h3>
+                <p>{shop.category || "Boutique VinnHT"}</p>
                 <Badge tone="success">Professionnel</Badge>
               </div>
             </SwiperSlide>
           ))}
         </Swiper>
+        {!shops.length && <div className="empty-state"><Store /><h3>Aucune boutique active</h3><p>Les boutiques validées apparaîtront ici.</p></div>}
       </AnimatedSection>
       <AnimatedSection className="mobile-app">
         <div>
@@ -895,7 +910,11 @@ function Home() {
           <div>
             <Search size={18} /> VinnHT App
           </div>
-          <ProductCard product={demoProducts[0]} />
+          <div className="empty-state">
+            <img src="/vinnht-logo.png" alt="VinnHT" />
+            <h3>Votre marché dans votre poche</h3>
+            <p>Les produits réels de VinnHT seront disponibles dans l’application.</p>
+          </div>
         </div>
       </AnimatedSection>
     </PublicLayout>
@@ -919,6 +938,39 @@ function SectionHead({ eyebrow, title, link }) {
 
 function Contact() {
   const [open, setOpen] = useState(0);
+  const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
+  const [feedback, setFeedback] = useState("");
+  const [sending, setSending] = useState(false);
+  const faq = [
+    [
+      "Comment devenir vendeur ?",
+      "Connectez-vous à votre espace client, ouvrez Devenir vendeur puis envoyez votre dossier. Un superviseur VinnHT vérifiera ensuite votre demande.",
+    ],
+    [
+      "Comment suivre une commande ?",
+      "Ouvrez Mes commandes depuis votre espace client pour consulter le paiement, la préparation et la livraison.",
+    ],
+    [
+      "Quand MonCash sera intégré ?",
+      "Le paiement est actuellement simulé pour valider le parcours. MonCash remplacera cette simulation avant la mise en production commerciale.",
+    ],
+  ];
+
+  const submitContact = async (event) => {
+    event.preventDefault();
+    setSending(true);
+    setFeedback("");
+    try {
+      const { data } = await api.post("/contact", form);
+      setFeedback(data.message);
+      setForm({ name: "", email: "", subject: "", message: "" });
+    } catch (error) {
+      setFeedback(error.response?.data?.message || "Impossible d’envoyer votre message.");
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <PublicLayout>
       <section className="contact-hero premium-bg">
@@ -953,38 +1005,37 @@ function Contact() {
         <div className="contact-copy">
           <Badge>Contact</Badge>
           <h2>Envoyez-nous un message.</h2>
-          <p>
-            Le formulaire est prêt côté design et pourra être relié à un service email plus tard.
-          </p>
+          <p>Votre demande sera enregistrée directement dans le centre de support VinnHT.</p>
         </div>
-        <form className="glass-form">
+        <form className="glass-form" onSubmit={submitContact}>
           <label>
             Nom complet
-            <input placeholder="Votre nom" />
+            <input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Votre nom" />
           </label>
           <label>
             Email
-            <input type="email" placeholder="vous@email.com" />
+            <input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="vous@email.com" />
+          </label>
+          <label>
+            Sujet
+            <input required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Sujet de votre demande" />
           </label>
           <label>
             Message
-            <textarea rows="5" placeholder="Comment pouvons-nous aider ?" />
+            <textarea required minLength="10" rows="5" value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} placeholder="Comment pouvons-nous aider ?" />
           </label>
-          <Button>
-            Envoyer le message <ArrowRight size={18} />
-          </Button>
+          {feedback && <strong>{feedback}</strong>}
+          <button className="button primary" disabled={sending}>
+            {sending ? "Envoi en cours..." : "Envoyer le message"} <ArrowRight size={18} />
+          </button>
         </form>
       </section>
       <section className="section faq-section">
         <SectionHead eyebrow="FAQ" title="Questions fréquentes" />
-        {[
-          "Comment devenir vendeur ?",
-          "Comment suivre une commande ?",
-          "Quand MonCash sera intégré ?",
-        ].map((q, i) => (
-          <div className="faq-item" key={q}>
+        {faq.map(([question, answer], i) => (
+          <div className="faq-item" key={question}>
             <button onClick={() => setOpen(open === i ? -1 : i)}>
-              <span>{q}</span>
+              <span>{question}</span>
               <ChevronRight className={open === i ? "rotate" : ""} />
             </button>
             {open === i && (
@@ -992,8 +1043,7 @@ function Contact() {
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
               >
-                Cette section présente la réponse avec une animation légère. Les contenus définitifs
-                pourront être ajustés avec l’équipe VinnHT.
+                {answer}
               </motion.p>
             )}
           </div>
@@ -1002,7 +1052,7 @@ function Contact() {
       <section className="map-section">
         <MapPin />
         <h2>VinnHT opère depuis Haïti</h2>
-        <p>Carte/localisation prête pour intégration Google Maps ou OpenStreetMap.</p>
+        <p>Notre équipe accompagne les clients, vendeurs et livreurs depuis Port-au-Prince.</p>
       </section>
     </PublicLayout>
   );
@@ -1215,10 +1265,17 @@ function CategoryProducts() {
           <SearchBar />
         </div>
         <div className="product-grid">
-          {(products.length ? products : demoProducts).map((p) => (
+          {products.map((p) => (
             <ProductCard product={p} key={p.id} />
           ))}
         </div>
+        {!products.length && (
+          <div className="catalog-empty">
+            <ShoppingBag />
+            <h3>Aucun produit dans ce rayon</h3>
+            <p>Les produits apparaîtront après la validation des premiers vendeurs.</p>
+          </div>
+        )}
       </section>
     </MarketplaceLayout>
   );
@@ -1227,10 +1284,9 @@ function ProductDetails() {
   const { id } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [product, setProduct] = useState(
-    demoProducts.find((item) => item.id === Number(id)) || demoProducts[0]
-  );
-  const [similar, setSimilar] = useState(demoProducts);
+  const [product, setProduct] = useState(null);
+  const [similar, setSimilar] = useState([]);
+  const [missing, setMissing] = useState(false);
   const { add } = useCart();
   const { isFavorite, toggle } = useFavorites();
 
@@ -1244,8 +1300,21 @@ function ProductDetails() {
         });
         setSimilar(response.data.filter((item) => item.id !== data.id));
       })
-      .catch(() => {});
+      .catch(() => setMissing(true));
   }, [id]);
+
+  if (!product) {
+    return (
+      <MarketplaceLayout>
+        <div className="catalog-empty">
+          <ShoppingBag />
+          <h3>{missing ? "Produit introuvable" : "Chargement du produit..."}</h3>
+          <p>{missing ? "Ce produit n’est plus disponible sur VinnHT." : "Veuillez patienter."}</p>
+          {missing && <Link className="button primary" to="/products">Retour au catalogue</Link>}
+        </div>
+      </MarketplaceLayout>
+    );
+  }
 
   const contactSeller = async () => {
     if (!user) {
@@ -1807,6 +1876,7 @@ const menus = {
     ["Produits", "/admin/products", ShoppingBag],
     ["Profil", "/admin/profile", CircleUserRound],
     ["Paiements", "/admin/payments", ShieldCheck],
+    ["Support", "/admin/contact-requests", MessageCircle],
     ["Paramètres", "/admin/settings", Settings],
   ],
 };
@@ -2416,6 +2486,7 @@ function ClientDashboardPage() {
   const [products, setProducts] = useState([]);
   const [offers, setOffers] = useState([]);
   const [shops, setShops] = useState([]);
+  const [dashboard, setDashboard] = useState(null);
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
 
   useEffect(() => {
@@ -2436,6 +2507,12 @@ function ClientDashboardPage() {
       .then(({ data }) => setOffers(data))
       .catch(() => setOffers([]));
   }, []);
+  useEffect(() => {
+    api
+      .get("/client/dashboard")
+      .then(({ data }) => setDashboard(data))
+      .catch(() => setDashboard(null));
+  }, []);
 
   return (
     <DashboardLayout>
@@ -2449,6 +2526,7 @@ function ClientDashboardPage() {
         productData={products}
         offerData={offers}
         shopData={shops}
+        dashboardData={dashboard}
       />
     </DashboardLayout>
   );
@@ -2601,7 +2679,7 @@ function ClientProfilePage() {
 function ClientSettingsPage() {
   return (
     <DashboardLayout>
-      <ClientSettingsContent />
+      <ClientSettingsContent api={api} />
     </DashboardLayout>
   );
 }
@@ -2667,7 +2745,7 @@ function SellerShopPage() {
 function SellerSettingsPage() {
   return (
     <DashboardLayout>
-      <SellerSettingsContent />
+      <SellerSettingsContent api={api} />
     </DashboardLayout>
   );
 }
@@ -2784,6 +2862,14 @@ function AdminPaymentsPage() {
   );
 }
 
+function AdminContactRequestsPage() {
+  return (
+    <DashboardLayout>
+      <AdminContactRequestsContent api={api} />
+    </DashboardLayout>
+  );
+}
+
 function AdminProfilePage() {
   const { user, updateUser, logout } = useAuth();
   return (
@@ -2796,7 +2882,7 @@ function AdminProfilePage() {
 function AdminSettingsPage() {
   return (
     <DashboardLayout>
-      <AdminSettingsContent />
+      <AdminSettingsContent api={api} />
     </DashboardLayout>
   );
 }
@@ -2852,7 +2938,7 @@ function StaffProfilePage({ role }) {
 function StaffSettingsPage({ role }) {
   return (
     <DashboardLayout>
-      <StaffSettingsContent role={role} />
+      <StaffSettingsContent api={api} role={role} />
     </DashboardLayout>
   );
 }
@@ -3132,6 +3218,14 @@ function AppRoutes() {
         element={
           <Protected roles={["admin"]}>
             <AdminPaymentsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/admin/contact-requests"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminContactRequestsPage />
           </Protected>
         }
       />

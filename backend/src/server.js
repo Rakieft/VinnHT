@@ -726,6 +726,71 @@ app.get(
   }),
 );
 app.get(
+  "/api/marketplace/stats",
+  asyncRoute(async (_req, res) => {
+    const [[stats]] = await pool.query(
+      `SELECT
+        (SELECT COUNT(*) FROM users WHERE status='active') active_users,
+        (SELECT COUNT(DISTINCT user_id) FROM user_roles WHERE role='seller') sellers,
+        (SELECT COUNT(*) FROM products WHERE status='active' AND stock>0) products,
+        (SELECT COUNT(*) FROM orders) orders`,
+    );
+    res.json(stats);
+  }),
+);
+app.post(
+  "/api/contact",
+  writeRateLimiter,
+  [
+    body("name").trim().isLength({ min: 2, max: 160 }),
+    body("email").isEmail().normalizeEmail(),
+    body("subject").trim().isLength({ min: 3, max: 190 }),
+    body("message").trim().isLength({ min: 10, max: 3000 }),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const [result] = await pool.query(
+      `INSERT INTO contact_requests (name,email,subject,message)
+       VALUES (?,?,?,?)`,
+      [req.body.name, req.body.email, req.body.subject, req.body.message],
+    );
+    res.status(201).json({
+      id: result.insertId,
+      message: "Votre message a été transmis au support VinnHT.",
+    });
+  }),
+);
+app.get(
+  "/api/preferences/:group",
+  authenticate,
+  asyncRoute(async (req, res) => {
+    const [[row]] = await pool.query(
+      "SELECT preferences FROM user_preferences WHERE user_id=? AND preference_group=?",
+      [req.user.id, req.params.group],
+    );
+    res.json(row?.preferences || {});
+  }),
+);
+app.put(
+  "/api/preferences/:group",
+  authenticate,
+  writeRateLimiter,
+  [
+    body("preferences").isObject(),
+    body("preferences.*").isBoolean(),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    await pool.query(
+      `INSERT INTO user_preferences (user_id,preference_group,preferences)
+       VALUES (?,?,?)
+       ON DUPLICATE KEY UPDATE preferences=VALUES(preferences)`,
+      [req.user.id, req.params.group, JSON.stringify(req.body.preferences)],
+    );
+    res.json({ message: "Préférences enregistrées.", preferences: req.body.preferences });
+  }),
+);
+app.get(
   "/api/products",
   asyncRoute(async (req, res) => {
     const params = [];
@@ -1706,6 +1771,61 @@ app.get(
     res.json(rows);
   }),
 );
+app.get(
+  "/api/client/dashboard",
+  authenticate,
+  authorize("client"),
+  asyncRoute(async (req, res) => {
+    const [[stats]] = await pool.query(
+      `SELECT
+        (SELECT COUNT(*) FROM orders WHERE client_id=?) orders,
+        (SELECT COUNT(*) FROM favorites WHERE user_id=?) favorites,
+        (SELECT COALESCE(SUM(quantity),0) FROM cart_items WHERE user_id=?) cart_items`,
+      [req.user.id, req.user.id, req.user.id],
+    );
+    const [[activeOrder]] = await pool.query(
+      `SELECT o.id,o.order_number,o.total,o.status,o.created_at,
+        p.status payment_status,d.status delivery_status,
+        COUNT(oi.id) item_count,
+        MIN(pr.image_url) image_url,
+        GROUP_CONCAT(DISTINCT COALESCE(sp.shop_name,seller.name) ORDER BY seller.name SEPARATOR ', ') seller_names
+       FROM orders o
+       LEFT JOIN payments p ON p.order_id=o.id
+       LEFT JOIN deliveries d ON d.order_id=o.id
+       LEFT JOIN order_items oi ON oi.order_id=o.id
+       LEFT JOIN products pr ON pr.id=oi.product_id
+       LEFT JOIN users seller ON seller.id=oi.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=oi.seller_id
+       WHERE o.client_id=? AND o.status NOT IN ('delivered','cancelled')
+       GROUP BY o.id,p.status,d.status
+       ORDER BY o.created_at DESC
+       LIMIT 1`,
+      [req.user.id],
+    );
+    const [activity] = await pool.query(
+      `SELECT type,title,message,link,created_at
+       FROM notifications
+       WHERE user_id=? AND (role='client' OR role IS NULL)
+       ORDER BY created_at DESC
+       LIMIT 6`,
+      [req.user.id],
+    );
+    const [[sellerRequest]] = await pool.query(
+      `SELECT status,reviewed_at
+       FROM seller_requests
+       WHERE user_id=?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [req.user.id],
+    );
+    res.json({
+      stats,
+      activeOrder: activeOrder || null,
+      activity,
+      sellerRequest: sellerRequest || null,
+    });
+  }),
+);
 
 app.get(
   "/api/orders/:id",
@@ -2415,6 +2535,53 @@ app.get(
     res.json(rows.map((row) => ({ ...row, roles: row.roles ? row.roles.split(",") : [row.role] })));
   }),
 );
+app.post(
+  "/api/admin/staff",
+  authenticate,
+  authorize("admin"),
+  writeRateLimiter,
+  [
+    body("name").trim().isLength({ min: 2, max: 120 }),
+    body("email").isEmail().normalizeEmail(),
+    body("phone").optional({ checkFalsy: true }).trim().isLength({ max: 30 }),
+    body("password").isLength({ min: 10, max: 128 }),
+    body("role").isIn(["manager", "supervisor"]),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const passwordHash = await bcrypt.hash(req.body.password, 12);
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [result] = await connection.query(
+        `INSERT INTO users (name,email,phone,password_hash,role,status)
+         VALUES (?,?,?,?,?,'active')`,
+        [
+          req.body.name,
+          req.body.email,
+          req.body.phone || null,
+          passwordHash,
+          req.body.role,
+        ],
+      );
+      await connection.query(
+        "INSERT INTO user_roles (user_id,role) VALUES (?,?)",
+        [result.insertId, req.body.role],
+      );
+      await connection.commit();
+      await audit(req, "staff.create", "user", result.insertId, { role: req.body.role });
+      res.status(201).json({
+        id: result.insertId,
+        message: `${req.body.role === "manager" ? "Manager" : "Superviseur"} créé avec succès.`,
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
 app.get(
   "/api/admin/dashboard",
   authenticate,
@@ -3027,6 +3194,39 @@ app.get(
        LIMIT 200`,
     );
     res.json(rows);
+  }),
+);
+app.get(
+  "/api/admin/contact-requests",
+  authenticate,
+  authorize("admin"),
+  noStore,
+  asyncRoute(async (_req, res) => {
+    const [rows] = await pool.query(
+      `SELECT id,name,email,subject,message,status,created_at
+       FROM contact_requests
+       ORDER BY FIELD(status,'new','in_progress','resolved'),created_at DESC
+       LIMIT 300`,
+    );
+    res.json(rows);
+  }),
+);
+app.patch(
+  "/api/admin/contact-requests/:id",
+  authenticate,
+  authorize("admin"),
+  writeRateLimiter,
+  [body("status").isIn(["new", "in_progress", "resolved"])],
+  validate,
+  asyncRoute(async (req, res) => {
+    const [result] = await pool.query(
+      "UPDATE contact_requests SET status=? WHERE id=?",
+      [req.body.status, req.params.id],
+    );
+    if (!result.affectedRows) {
+      return res.status(404).json({ message: "Demande de support introuvable." });
+    }
+    res.json({ message: "Statut de la demande mis à jour." });
   }),
 );
 app.get(

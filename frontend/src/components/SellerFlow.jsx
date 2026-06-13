@@ -1319,22 +1319,31 @@ export function SellerProfileContent({ api, user, updateUser, onLogout }) {
   );
 }
 
-export function SellerSettingsContent() {
-  const [preferences, setPreferences] = useState(() =>
-    JSON.parse(
-      localStorage.getItem("vinnht_seller_settings") ||
-        JSON.stringify({
-          newOrders: true,
-          lowStock: true,
-          readyOrders: true,
-          weeklyReport: false,
-        })
-    )
-  );
+export function SellerSettingsContent({ api }) {
+  const defaults = {
+    newOrders: true,
+    lowStock: true,
+    readyOrders: true,
+    weeklyReport: false,
+  };
+  const [preferences, setPreferences] = useState(defaults);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    localStorage.setItem("vinnht_seller_settings", JSON.stringify(preferences));
-  }, [preferences]);
+    api.get("/preferences/seller").then(({ data }) => setPreferences({ ...defaults, ...data }));
+  }, []);
+
+  const togglePreference = async (key) => {
+    const next = { ...preferences, [key]: !preferences[key] };
+    setPreferences(next);
+    try {
+      const { data } = await api.put("/preferences/seller", { preferences: next });
+      setMessage(data.message);
+    } catch (error) {
+      setPreferences(preferences);
+      setMessage(error.response?.data?.message || "Impossible d’enregistrer ce paramètre.");
+    }
+  };
 
   return (
     <SellerPageHeader
@@ -1381,7 +1390,7 @@ export function SellerSettingsContent() {
               <input
                 type="checkbox"
                 checked={preferences[key]}
-                onChange={() => setPreferences((current) => ({ ...current, [key]: !current[key] }))}
+                onChange={() => togglePreference(key)}
               />
               <i />
             </label>
@@ -1395,6 +1404,7 @@ export function SellerSettingsContent() {
           <p>Les alertes email, WhatsApp et push seront connectées avant la mise en production.</p>
         </div>
       </section>
+      {message && <div className="seller-message">{message}</div>}
     </SellerPageHeader>
   );
 }

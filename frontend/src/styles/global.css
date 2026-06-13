@@ -1852,6 +1852,31 @@ th {
   }
   .navbar {
     height: 70px;
+    padding: 0 12px 0 15px;
+    gap: 10px;
+  }
+
+  .navbar .brand {
+    min-width: 0;
+    gap: 7px;
+    font-size: 19px;
+  }
+
+  .navbar .brand img {
+    width: 38px;
+    height: 38px;
+  }
+
+  .nav-actions {
+    margin-left: auto;
+    gap: 7px;
+  }
+
+  .cart-link,
+  .nav-actions .icon-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
   }
   .mobile-only {
     display: flex;
@@ -1872,11 +1897,33 @@ th {
     box-shadow: var(--shadow);
   }
   .hero {
-    padding-top: 45px;
+    padding: 36px 17px 28px;
     min-height: auto;
+    gap: 12px;
   }
   .hero h1 {
     letter-spacing: -2px;
+    font-size: clamp(38px, 12vw, 54px);
+    line-height: 1.02;
+    margin: 17px 0;
+  }
+
+  .hero p {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .hero-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+    margin-top: 20px;
+  }
+
+  .hero-actions .button {
+    min-height: 46px;
+    padding: 0 10px;
+    font-size: 11px;
   }
   .search-bar {
     grid-template-columns: auto 1fr;
@@ -1887,7 +1934,7 @@ th {
     justify-content: center;
   }
   .hero-visual-3d {
-    min-height: 360px;
+    min-height: 250px;
   }
   .floating-a,
   .floating-b {
@@ -1896,10 +1943,93 @@ th {
   .stats-strip,
   .category-grid,
   .contact-grid,
-  .stats-grid,
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .timeline,
   .why-grid {
     grid-template-columns: 1fr;
+  }
+
+  .stats-strip {
+    gap: 10px;
+    margin: 14px 12px 28px;
+  }
+
+  .stats-strip .stat-card {
+    min-width: 0;
+    padding: 15px;
+    border-radius: 18px;
+  }
+
+  .stats-strip .stat-card strong {
+    font-size: 21px;
+  }
+
+  .category-grid,
+  .contact-grid {
+    gap: 11px;
+  }
+
+  .category-card {
+    min-height: 190px;
+    padding: 17px;
+    border-radius: 20px;
+  }
+
+  .category-card h3,
+  .contact-card h3 {
+    font-size: 15px;
+  }
+
+  .category-card p,
+  .contact-card p,
+  .contact-card b {
+    font-size: 11px;
+  }
+
+  .contact-card {
+    min-width: 0;
+    padding: 17px;
+  }
+
+  .contact-hero {
+    gap: 16px;
+    padding: 38px 17px 26px;
+  }
+
+  .contact-hero h1 {
+    font-size: clamp(34px, 10vw, 48px);
+    letter-spacing: -2px;
+  }
+
+  .contact-lottie {
+    max-height: 220px;
+    overflow: hidden;
+  }
+
+  .page-hero {
+    padding: 48px 17px 32px;
+  }
+
+  .page-hero h1 {
+    font-size: clamp(34px, 10vw, 48px);
+  }
+
+  .contact-form-wrap {
+    padding: 42px 17px;
+  }
+
+  .glass-form {
+    padding: 18px;
+  }
+
+  .contact-grid,
+  .category-grid,
+  .stats-grid,
+  .stats-strip {
+    align-items: stretch;
   }
 
   .product-grid {

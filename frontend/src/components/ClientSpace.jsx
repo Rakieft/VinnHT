@@ -200,7 +200,7 @@ function ClientProductCard({
       whileHover={{ y: -6 }}
     >
       <div className="client-product-image">
-        <img src={product.image_url} alt={product.name} />
+        <img src={imageSource(product.image_url)} alt={product.name} />
         {product.is_featured && (
           <img
             className="client-best-price-ribbon"
@@ -238,12 +238,13 @@ function ClientProductCard({
   );
 }
 
-function ClientStats({ cartCount, favoriteCount }) {
+function ClientStats({ dashboard, seller }) {
+  const counts = dashboard?.stats || {};
   const stats = [
-    [Package, "Commandes totales", 24, "Toutes vos commandes"],
-    [Heart, "Produits favoris", favoriteCount || 0, "Sélection personnelle"],
-    [ShoppingCart, "Articles dans le panier", cartCount || 5, "Prêts à commander"],
-    [Store, "Statut vendeur", null, "Client standard"],
+    [Package, "Commandes totales", Number(counts.orders || 0), "Toutes vos commandes"],
+    [Heart, "Produits favoris", Number(counts.favorites || 0), "Sélection personnelle"],
+    [ShoppingCart, "Articles dans le panier", Number(counts.cart_items || 0), "Prêts à commander"],
+    [Store, "Statut vendeur", null, seller ? "Vendeur approuvé" : dashboard?.sellerRequest?.status || "Client standard"],
   ];
 
   return (
@@ -255,7 +256,7 @@ function ClientStats({ cartCount, favoriteCount }) {
           </span>
           <div>
             <small>{label}</small>
-            <strong>{count === null ? "Client" : <CountUp end={count} duration={1.8} />}</strong>
+            <strong>{count === null ? (seller ? "Vendeur" : "Client") : <CountUp end={count} duration={1.8} />}</strong>
             <p>{note}</p>
           </div>
         </motion.article>
@@ -274,8 +275,26 @@ export function ClientDashboardContent({
   productData = [],
   offerData = [],
   shopData = [],
+  dashboardData,
 }) {
-  const catalog = productData.length ? productData : products;
+  const catalog = productData;
+  const activeOrder = dashboardData?.activeOrder;
+  const activityItems = dashboardData?.activity || [];
+  const orderProgress = ["confirmed", "processing", "shipped", "delivered"];
+  const currentProgress = activeOrder
+    ? Math.max(
+        activeOrder.payment_status === "paid" ? 0 : -1,
+        orderProgress.indexOf(activeOrder.status),
+        activeOrder.delivery_status === "in_transit" ? 2 : -1,
+      )
+    : -1;
+  const activityIcon = (type = "") => {
+    if (type.includes("payment")) return CreditCard;
+    if (type.includes("seller")) return Store;
+    if (type.includes("delivery")) return Truck;
+    if (type.includes("favorite")) return Heart;
+    return CheckCircle2;
+  };
 
   return (
     <div className="client-space">
@@ -334,30 +353,34 @@ export function ClientDashboardContent({
         </div>
       </motion.section>
 
-      <ClientStats cartCount={cartCount} favoriteCount={favorites.length} />
+      <ClientStats dashboard={dashboardData} seller={user?.roles?.includes("seller")} />
 
       <section className="client-dashboard-grid">
         <article className="client-panel recent-order-panel">
           <SectionHeading eyebrow="Commande active" title="Suivi de votre commande" />
-          <div className="recent-order-top">
-            <img src={orders[0].image} alt="" />
-            <div>
-              <span>{orders[0].id}</span>
-              <h3>{orders[0].seller}</h3>
-              <p>
-                {orders[0].items} produits · {orders[0].date}
-              </p>
-            </div>
-            <strong>{orders[0].total.toLocaleString("fr-HT")} HTG</strong>
-          </div>
-          <div className="client-order-progress">
-            {["Payée", "Préparation", "En livraison", "Livrée"].map((step, index) => (
-              <div className={index < 3 ? "done" : ""} key={step}>
-                <span>{index < 3 ? <CheckCircle2 /> : index + 1}</span>
-                <small>{step}</small>
+          {activeOrder ? (
+            <>
+              <div className="recent-order-top">
+                <img src={imageSource(activeOrder.image_url) || "/vinnht-logo.png"} alt="" />
+                <div>
+                  <span>{activeOrder.order_number}</span>
+                  <h3>{activeOrder.seller_names || "Commande VinnHT"}</h3>
+                  <p>{activeOrder.item_count} produit(s) · {new Date(activeOrder.created_at).toLocaleDateString("fr-HT")}</p>
+                </div>
+                <strong>{Number(activeOrder.total).toLocaleString("fr-HT")} HTG</strong>
               </div>
-            ))}
-          </div>
+              <div className="client-order-progress">
+                {["Payée", "Préparation", "En livraison", "Livrée"].map((step, index) => (
+                  <div className={index <= currentProgress ? "done" : ""} key={step}>
+                    <span>{index <= currentProgress ? <CheckCircle2 /> : index + 1}</span>
+                    <small>{step}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="client-api-notice">Aucune commande active actuellement.</div>
+          )}
           <Link className="client-inline-action" to="/my-orders">
             Voir les détails
             <ChevronRight size={16} />
@@ -367,17 +390,20 @@ export function ClientDashboardContent({
         <article className="client-panel activity-panel">
           <SectionHeading eyebrow="Aujourd’hui" title="Activité récente" />
           <div className="client-activity-list">
-            {activities.map(([Icon, title, date, tone]) => (
-              <div key={title}>
-                <span className={`activity-icon ${tone}`}>
+            {activityItems.map((activity) => {
+              const Icon = activityIcon(activity.type);
+              return (
+              <div key={`${activity.type}-${activity.created_at}`}>
+                <span className="activity-icon blue">
                   <Icon />
                 </span>
                 <p>
-                  <b>{title}</b>
-                  <small>{date}</small>
+                  <b>{activity.title}</b>
+                  <small>{new Date(activity.created_at).toLocaleString("fr-HT")}</small>
                 </p>
               </div>
-            ))}
+            )})}
+            {!activityItems.length && <div className="client-api-notice">Votre activité récente apparaîtra ici.</div>}
           </div>
         </article>
       </section>
@@ -440,22 +466,7 @@ export function ClientDashboardContent({
                 </Link>
               </motion.div>
             ))
-          ) : (
-            <>
-          <motion.span whileHover={{ scale: 1.06 }}>
-            <Tag />
-            Jusqu’à -30%
-          </motion.span>
-          <motion.span whileHover={{ scale: 1.06 }}>
-            <Sparkles />
-            Nouveautés
-          </motion.span>
-          <motion.span whileHover={{ scale: 1.06 }}>
-            <Star />
-            Populaires
-          </motion.span>
-            </>
-          )}
+          ) : <span>Aucune offre spéciale active actuellement.</span>}
         </div>
       </section>
 
@@ -467,7 +478,7 @@ export function ClientDashboardContent({
           to="/favorites"
         />
         <div className="client-favorites-row">
-          {catalog.slice(0, 6).map((product) => (
+          {favorites.slice(0, 6).map((product) => (
             <ClientProductCard
               product={product}
               onAdd={onAdd}
@@ -477,6 +488,7 @@ export function ClientDashboardContent({
               key={product.id}
             />
           ))}
+          {!favorites.length && <div className="client-api-notice">Ajoutez des produits à vos favoris pour les retrouver ici.</div>}
         </div>
       </section>
 
@@ -494,8 +506,8 @@ export function ClientDashboardContent({
           <div className="seller-status-card">
             <Store />
             <span>Statut actuel</span>
-            <strong>Client standard</strong>
-            <small>Votre boutique peut commencer ici.</small>
+            <strong>{dashboardData?.sellerRequest?.status || "Client standard"}</strong>
+            <small>{dashboardData?.sellerRequest ? "Votre demande est suivie par VinnHT." : "Votre boutique peut commencer ici."}</small>
           </div>
         </section>
       )}
@@ -512,17 +524,17 @@ export function ClientDashboardContent({
             1100: { slidesPerView: 3.4 },
           }}
         >
-          {(shopData.length ? shopData : shops).map((shop) => {
-            const realShop = !Array.isArray(shop);
-            const name = realShop ? shop.shop_name : shop[0];
-            const category = realShop ? shop.category || "Boutique VinnHT" : shop[1];
+          {shopData.map((shop) => {
+            const realShop = true;
+            const name = shop.shop_name;
+            const category = shop.category || "Boutique VinnHT";
             const rating = realShop
               ? Number(shop.review_count) > 0
                 ? `${Number(shop.rating).toFixed(1)} (${shop.review_count})`
                 : "Nouveau"
-              : shop[2];
-            const initials = realShop ? name.slice(0, 2).toUpperCase() : shop[3];
-            const path = realShop ? `/shops/${shop.seller_id}` : "/products";
+              : "";
+            const initials = name.slice(0, 2).toUpperCase();
+            const path = `/shops/${shop.seller_id}`;
             return (
               <SwiperSlide key={name}>
                 <article className="client-shop-card">
@@ -1251,19 +1263,15 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
   );
 }
 
-export function ClientSettingsContent() {
+export function ClientSettingsContent({ api }) {
   const [securityMessage, setSecurityMessage] = useState("");
-  const [preferences, setPreferences] = useState(() =>
-    JSON.parse(
-      localStorage.getItem("vinnht_settings") ||
-        JSON.stringify({
-          orderUpdates: true,
-          promotions: true,
-          messages: true,
-          profileVisibility: false,
-        })
-    )
-  );
+  const defaults = {
+    orderUpdates: true,
+    promotions: true,
+    messages: true,
+    profileVisibility: false,
+  };
+  const [preferences, setPreferences] = useState(defaults);
   const settings = [
     [Bell, "Suivi des commandes", "Recevoir les changements de statut.", "orderUpdates"],
     [Sparkles, "Offres et promotions", "Recevoir les meilleures offres VinnHT.", "promotions"],
@@ -1277,8 +1285,20 @@ export function ClientSettingsContent() {
   ];
 
   useEffect(() => {
-    localStorage.setItem("vinnht_settings", JSON.stringify(preferences));
-  }, [preferences]);
+    api.get("/preferences/client").then(({ data }) => setPreferences({ ...defaults, ...data }));
+  }, []);
+
+  const togglePreference = async (key) => {
+    const next = { ...preferences, [key]: !preferences[key] };
+    setPreferences(next);
+    try {
+      const { data } = await api.put("/preferences/client", { preferences: next });
+      setSecurityMessage(data.message);
+    } catch (error) {
+      setPreferences(preferences);
+      setSecurityMessage(error.response?.data?.message || "Impossible d’enregistrer ce paramètre.");
+    }
+  };
 
   return (
     <ClientPageFrame
@@ -1300,7 +1320,7 @@ export function ClientSettingsContent() {
               <input
                 type="checkbox"
                 checked={preferences[key]}
-                onChange={() => setPreferences((current) => ({ ...current, [key]: !current[key] }))}
+                onChange={() => togglePreference(key)}
               />
               <i />
             </label>

@@ -1684,6 +1684,88 @@
   gap: 2px;
 }
 
+.admin-staff-create-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 22px;
+  border: 1px solid #dbeafe;
+  border-radius: 26px;
+  background: radial-gradient(circle at 100% 0, rgba(37, 99, 235, 0.12), transparent 34%), #fff;
+  box-shadow: 0 18px 55px rgba(15, 23, 42, 0.08);
+}
+
+.admin-staff-create-form header {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 13px;
+}
+
+.admin-staff-create-form header > span {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 16px;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.admin-staff-create-form header h2,
+.admin-staff-create-form header p {
+  margin: 0;
+}
+
+.admin-staff-create-form header small {
+  color: #2563eb;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.admin-staff-create-form header p {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.admin-staff-create-form label {
+  display: grid;
+  gap: 6px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.admin-staff-create-form label.full {
+  grid-column: span 2;
+}
+
+.admin-staff-create-form input,
+.admin-staff-create-form select {
+  min-height: 44px;
+  border: 1px solid #e2e8f0;
+  border-radius: 13px;
+  padding: 0 12px;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.admin-staff-create-form > button {
+  align-self: end;
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+  font-weight: 900;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
 @media (max-width: 900px) {
   .admin-metric-grid,
   .admin-category-grid {
@@ -1721,6 +1803,15 @@
 }
 
 @media (max-width: 620px) {
+  .admin-staff-create-form {
+    grid-template-columns: 1fr;
+    padding: 17px;
+  }
+
+  .admin-staff-create-form label.full {
+    grid-column: auto;
+  }
+
   .admin-heading {
     align-items: stretch;
     flex-direction: column;
