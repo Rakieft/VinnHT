@@ -1,6 +1,7 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
 import cors from "cors";
+import crypto from "node:crypto";
 import express from "express";
 import { body, validationResult } from "express-validator";
 import fs from "node:fs";
@@ -721,8 +722,29 @@ app.delete(
 app.get(
   "/api/categories",
   asyncRoute(async (_req, res) => {
-    const [rows] = await pool.query("SELECT * FROM categories ORDER BY name");
+    const [rows] = await pool.query(
+      `SELECT c.*,
+        COUNT(p.id) product_count,
+        SUM(p.status='active' AND p.stock>0) available_product_count,
+        MAX(p.created_at) latest_product_at
+       FROM categories c
+       LEFT JOIN products p ON p.category_id=c.id
+       GROUP BY c.id
+       ORDER BY available_product_count DESC,c.name`,
+    );
     res.json(rows);
+  }),
+);
+app.get(
+  "/api/public/config",
+  asyncRoute(async (_req, res) => {
+    res.json({
+      supportEmail: process.env.SUPPORT_EMAIL || "support@vinnht.ht",
+      supportPhone: process.env.SUPPORT_PHONE || "",
+      supportWhatsapp: process.env.SUPPORT_WHATSAPP || "",
+      supportAddress: process.env.SUPPORT_ADDRESS || "Port-au-Prince, Haïti",
+      supportHours: process.env.SUPPORT_HOURS || "Lundi au samedi, 8h00 à 18h00",
+    });
   }),
 );
 app.get(
@@ -744,19 +766,86 @@ app.post(
   [
     body("name").trim().isLength({ min: 2, max: 160 }),
     body("email").isEmail().normalizeEmail(),
+    body("category").isIn(["general", "order", "payment", "delivery", "seller", "technical", "partnership"]),
     body("subject").trim().isLength({ min: 3, max: 190 }),
     body("message").trim().isLength({ min: 10, max: 3000 }),
   ],
   validate,
   asyncRoute(async (req, res) => {
     const [result] = await pool.query(
-      `INSERT INTO contact_requests (name,email,subject,message)
-       VALUES (?,?,?,?)`,
-      [req.body.name, req.body.email, req.body.subject, req.body.message],
+      `INSERT INTO contact_requests (name,email,category,reference,subject,message)
+       VALUES (?,?,?,CONCAT('VHT-SUP-',UPPER(SUBSTRING(MD5(CONCAT(NOW(),RAND())),1,8))),?,?)`,
+      [req.body.name, req.body.email, req.body.category, req.body.subject, req.body.message],
+    );
+    const [[request]] = await pool.query(
+      "SELECT reference FROM contact_requests WHERE id=?",
+      [result.insertId],
     );
     res.status(201).json({
       id: result.insertId,
-      message: "Votre message a été transmis au support VinnHT.",
+      reference: request.reference,
+      message: `Votre demande ${request.reference} a été transmise au support VinnHT.`,
+    });
+  }),
+);
+app.get(
+  "/api/support/requests",
+  authenticate,
+  authorize("client"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const [rows] = await pool.query(
+      `SELECT cr.id,cr.reference,cr.category,cr.subject,cr.message,cr.status,
+        cr.created_at,cr.resolved_at,o.order_number
+       FROM contact_requests cr
+       LEFT JOIN orders o ON o.id=cr.order_id
+       WHERE cr.user_id=?
+       ORDER BY cr.created_at DESC`,
+      [req.user.id],
+    );
+    res.json(rows);
+  }),
+);
+app.post(
+  "/api/support/requests",
+  authenticate,
+  authorize("client"),
+  writeRateLimiter,
+  [
+    body("category").isIn(["general", "order", "payment", "delivery", "seller", "technical", "partnership"]),
+    body("orderId").optional({ checkFalsy: true }).isInt({ min: 1 }),
+    body("subject").trim().isLength({ min: 3, max: 190 }),
+    body("message").trim().isLength({ min: 10, max: 3000 }),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    if (req.body.orderId) {
+      const [[order]] = await pool.query(
+        "SELECT id FROM orders WHERE id=? AND client_id=?",
+        [req.body.orderId, req.user.id],
+      );
+      if (!order) return res.status(403).json({ message: "Commande non autorisée." });
+    }
+    const reference = `VHT-SUP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const [result] = await pool.query(
+      `INSERT INTO contact_requests
+        (user_id,name,email,category,order_id,reference,subject,message)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      [
+        req.user.id,
+        req.user.name,
+        req.user.email,
+        req.body.category,
+        req.body.orderId || null,
+        reference,
+        req.body.subject,
+        req.body.message,
+      ],
+    );
+    res.status(201).json({
+      id: result.insertId,
+      reference,
+      message: `Votre demande ${reference} a été créée.`,
     });
   }),
 );
@@ -823,6 +912,7 @@ app.get(
     const offset = (page - 1) * limit;
     const [rows] = await pool.query(
       `SELECT p.*, c.name category_name, u.name seller_name,
+        COALESCE(sp.pickup_address,'Haïti') city,
         EXISTS(
           SELECT 1 FROM seller_sponsorships ss
           WHERE ss.seller_id=p.seller_id
@@ -833,6 +923,7 @@ app.get(
        FROM products p
        JOIN categories c ON c.id=p.category_id
        JOIN users u ON u.id=p.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
        ${where}
        ORDER BY is_sponsored DESC,p.is_featured DESC,p.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -3203,9 +3294,11 @@ app.get(
   noStore,
   asyncRoute(async (_req, res) => {
     const [rows] = await pool.query(
-      `SELECT id,name,email,subject,message,status,created_at
-       FROM contact_requests
-       ORDER BY FIELD(status,'new','in_progress','resolved'),created_at DESC
+      `SELECT cr.id,cr.reference,cr.name,cr.email,cr.category,cr.subject,cr.message,
+        cr.status,cr.created_at,cr.resolved_at,o.order_number
+       FROM contact_requests cr
+       LEFT JOIN orders o ON o.id=cr.order_id
+       ORDER BY FIELD(cr.status,'new','in_progress','resolved'),cr.created_at DESC
        LIMIT 300`,
     );
     res.json(rows);
@@ -3220,8 +3313,10 @@ app.patch(
   validate,
   asyncRoute(async (req, res) => {
     const [result] = await pool.query(
-      "UPDATE contact_requests SET status=? WHERE id=?",
-      [req.body.status, req.params.id],
+      `UPDATE contact_requests
+       SET status=?,resolved_at=IF(?='resolved',NOW(),NULL)
+       WHERE id=?`,
+      [req.body.status, req.body.status, req.params.id],
     );
     if (!result.affectedRows) {
       return res.status(404).json({ message: "Demande de support introuvable." });

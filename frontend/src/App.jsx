@@ -307,6 +307,29 @@ const marketplaceDepartments = [
   ],
   ["Emplois", "emplois", Users, ["Offres d’emploi", "Freelance", "Stages", "Formations"]],
 ];
+const categoryVisuals = {
+  supermarche: [ShoppingBasket, ["Alimentation", "Boissons", "Hygiène", "Entretien"]],
+  electronique: [Smartphone, ["Téléphones", "Ordinateurs", "Audio", "Accessoires"]],
+  mode: [ShoppingBag, ["Femme", "Homme", "Enfant", "Chaussures"]],
+  "maison-meubles": [Sofa, ["Meubles", "Cuisine", "Décoration", "Literie"]],
+  vehicules: [Car, ["Voitures", "Motos", "Pièces", "Accessoires"]],
+  immobilier: [Building2, ["Maisons", "Terrains", "Locations", "Bureaux"]],
+  services: [BriefcaseBusiness, ["Réparation", "Transport", "Événement", "Professionnels"]],
+  emplois: [Users, ["Emplois", "Stages", "Freelance", "Formations"]],
+  agriculture: [ShoppingBasket, ["Semences", "Récoltes", "Matériel", "Élevage"]],
+  animaux: [Heart, ["Animaux", "Alimentation", "Soins", "Accessoires"]],
+  "beaute-soins": [Sparkles, ["Beauté", "Cheveux", "Parfums", "Bien-être"]],
+  autres: [ShoppingBag, ["Nouveautés", "Collections", "Occasions", "Autres"]],
+};
+const supportCategories = [
+  ["general", "Question générale"],
+  ["order", "Commande"],
+  ["payment", "Paiement"],
+  ["delivery", "Livraison"],
+  ["seller", "Compte vendeur"],
+  ["technical", "Problème technique"],
+  ["partnership", "Partenariat"],
+];
 
 const demoProducts = [
   {
@@ -901,19 +924,47 @@ function Home() {
         {!shops.length && <div className="empty-state"><Store /><h3>Aucune boutique active</h3><p>Les boutiques validées apparaîtront ici.</p></div>}
       </AnimatedSection>
       <AnimatedSection className="mobile-app">
-        <div>
-          <Badge tone="gold">Bientôt</Badge>
-          <h2>Une application mobile VinnHT pour suivre le marché partout.</h2>
-          <p>Notifications, commandes, livraison et dashboard vendeur directement sur téléphone.</p>
+        <div className="mobile-app-copy">
+          <Badge tone="gold">
+            <Smartphone size={15} /> Application VinnHT
+          </Badge>
+          <h2>Votre marché numérique bientôt dans votre poche.</h2>
+          <p>
+            Une expérience mobile rapide et sécurisée pour acheter, vendre et suivre chaque
+            livraison partout en Haïti.
+          </p>
+          <div className="mobile-app-features">
+            <span><ShoppingBag /> Acheter facilement</span>
+            <span><Bell /> Alertes en temps réel</span>
+            <span><Truck /> Suivre les livraisons</span>
+          </div>
+          <div className="mobile-app-status">
+            <i />
+            <div>
+              <small>Statut du projet mobile</small>
+              <strong>En préparation</strong>
+            </div>
+          </div>
         </div>
         <div className="phone-mock">
-          <div>
-            <Search size={18} /> VinnHT App
-          </div>
-          <div className="empty-state">
+          <div className="phone-mock-top">
             <img src="/vinnht-logo.png" alt="VinnHT" />
-            <h3>Votre marché dans votre poche</h3>
-            <p>Les produits réels de VinnHT seront disponibles dans l’application.</p>
+            <span><b>VinnHT</b><small>Le marché numérique d’Haïti</small></span>
+            <Bell />
+          </div>
+          <div className="phone-mock-screen">
+            <span>Bonjour 👋</span>
+            <h3>Que recherchez-vous aujourd’hui ?</h3>
+            <div className="phone-mock-search"><Search /> Rechercher sur VinnHT</div>
+            <div className="phone-mock-actions">
+              <span><ShoppingBag /><small>Acheter</small></span>
+              <span><Store /><small>Vendre</small></span>
+              <span><Truck /><small>Suivre</small></span>
+            </div>
+            <div className="phone-mock-banner">
+              <ShieldCheck />
+              <span><b>Marketplace sécurisée</b><small>Commerces vérifiés par VinnHT</small></span>
+            </div>
           </div>
         </div>
       </AnimatedSection>
@@ -937,39 +988,107 @@ function SectionHead({ eyebrow, title, link }) {
 }
 
 function Contact() {
+  const { user } = useAuth();
   const [open, setOpen] = useState(0);
-  const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
+  const [form, setForm] = useState({
+    name: user?.name || "",
+    email: user?.email || "",
+    category: "general",
+    orderId: "",
+    subject: "",
+    message: "",
+  });
   const [feedback, setFeedback] = useState("");
   const [sending, setSending] = useState(false);
+  const [config, setConfig] = useState({});
+  const [orders, setOrders] = useState([]);
+  const [requests, setRequests] = useState([]);
+  const [faqQuery, setFaqQuery] = useState("");
+  const [faqCategory, setFaqCategory] = useState("all");
   const faq = [
     [
       "Comment devenir vendeur ?",
       "Connectez-vous à votre espace client, ouvrez Devenir vendeur puis envoyez votre dossier. Un superviseur VinnHT vérifiera ensuite votre demande.",
+      "seller",
     ],
     [
       "Comment suivre une commande ?",
       "Ouvrez Mes commandes depuis votre espace client pour consulter le paiement, la préparation et la livraison.",
+      "order",
     ],
     [
       "Quand MonCash sera intégré ?",
       "Le paiement est actuellement simulé pour valider le parcours. MonCash remplacera cette simulation avant la mise en production commerciale.",
+      "payment",
+    ],
+    [
+      "Comment contacter directement le support ?",
+      "Utilisez ce formulaire ou ouvrez une conversation support depuis votre espace client.",
+      "general",
+    ],
+    [
+      "Comment signaler un problème de livraison ?",
+      "Choisissez Livraison comme sujet et associez la commande concernée pour accélérer le traitement.",
+      "delivery",
     ],
   ];
+
+  const loadRequests = () => {
+    if (!user) return;
+    api.get("/support/requests").then(({ data }) => setRequests(data));
+  };
+
+  useEffect(() => {
+    api.get("/public/config").then(({ data }) => setConfig(data));
+    if (user) {
+      api.get("/orders/mine").then(({ data }) => setOrders(data));
+      loadRequests();
+    }
+  }, [user?.id]);
 
   const submitContact = async (event) => {
     event.preventDefault();
     setSending(true);
     setFeedback("");
     try {
-      const { data } = await api.post("/contact", form);
+      const endpoint = user ? "/support/requests" : "/contact";
+      const payload = user
+        ? {
+            category: form.category,
+            orderId: form.orderId || undefined,
+            subject: form.subject,
+            message: form.message,
+          }
+        : form;
+      const { data } = await api.post(endpoint, payload);
       setFeedback(data.message);
-      setForm({ name: "", email: "", subject: "", message: "" });
+      setForm((current) => ({ ...current, orderId: "", subject: "", message: "" }));
+      loadRequests();
     } catch (error) {
       setFeedback(error.response?.data?.message || "Impossible d’envoyer votre message.");
     } finally {
       setSending(false);
     }
   };
+  const visibleFaq = faq.filter(
+    ([question, answer, category]) =>
+      (faqCategory === "all" || category === faqCategory) &&
+      `${question} ${answer}`.toLowerCase().includes(faqQuery.toLowerCase()),
+  );
+  const channels = [
+    [
+      MessageCircle,
+      "WhatsApp",
+      config.supportWhatsapp || "À configurer",
+      "Réponse rapide",
+      config.supportWhatsapp
+        ? `https://wa.me/${String(config.supportWhatsapp).replace(/\D/g, "")}`
+        : null,
+    ],
+    [Mail, "Email", config.supportEmail || "support@vinnht.ht", "Support officiel", `mailto:${config.supportEmail || "support@vinnht.ht"}`],
+    [Phone, "Téléphone", config.supportPhone || "À configurer", config.supportHours || "Assistance client", config.supportPhone ? `tel:${config.supportPhone}` : null],
+    [MapPin, "Adresse", config.supportAddress || "Port-au-Prince, Haïti", config.supportHours || "Bureau opérationnel", null],
+  ];
 
   return (
     <PublicLayout>
@@ -987,17 +1106,13 @@ function Contact() {
         </div>
       </section>
       <section className="section contact-grid">
-        {[
-          [MessageCircle, "WhatsApp", "+509 0000 0000", "Réponse rapide"],
-          [Mail, "Email", "support@vinnht.ht", "Support officiel"],
-          [Phone, "Téléphone", "+509 0000 0000", "Assistance client"],
-          [MapPin, "Adresse", "Port-au-Prince, Haïti", "Bureau opérationnel"],
-        ].map(([Icon, t, v, n]) => (
-          <motion.article className="contact-card" whileHover={{ y: -8 }} key={t}>
+        {channels.map(([Icon, title, value, note, href]) => (
+          <motion.article className="contact-card" whileHover={{ y: -8 }} key={title}>
             <Icon />
-            <h3>{t}</h3>
-            <b>{v}</b>
-            <p>{n}</p>
+            <h3>{title}</h3>
+            <b>{value}</b>
+            <p>{note}</p>
+            {href && <a href={href} target={href.startsWith("http") ? "_blank" : undefined}>Ouvrir <ArrowRight /></a>}
           </motion.article>
         ))}
       </section>
@@ -1008,14 +1123,10 @@ function Contact() {
           <p>Votre demande sera enregistrée directement dans le centre de support VinnHT.</p>
         </div>
         <form className="glass-form" onSubmit={submitContact}>
-          <label>
-            Nom complet
-            <input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Votre nom" />
-          </label>
-          <label>
-            Email
-            <input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="vous@email.com" />
-          </label>
+          {!user && <label>Nom complet<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Votre nom" /></label>}
+          {!user && <label>Email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="vous@email.com" /></label>}
+          <label>Type de demande<select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{supportCategories.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+          {user && <label>Commande concernée<select value={form.orderId} onChange={(event) => setForm({ ...form, orderId: event.target.value })}><option value="">Aucune commande</option>{orders.map((order) => <option value={order.id} key={order.id}>{order.order_number}</option>)}</select></label>}
           <label>
             Sujet
             <input required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Sujet de votre demande" />
@@ -1028,11 +1139,35 @@ function Contact() {
           <button className="button primary" disabled={sending}>
             {sending ? "Envoi en cours..." : "Envoyer le message"} <ArrowRight size={18} />
           </button>
+          {user && <Link className="contact-support-chat" to="/messages?support=1"><MessageCircle /> Discuter avec le support</Link>}
         </form>
       </section>
+      {user && (
+        <section className="section support-tracking-section">
+          <SectionHead eyebrow="Suivi personnel" title="Mes demandes de support" />
+          <div className="support-request-grid">
+            {requests.map((request) => (
+              <article key={request.id}>
+                <header><span>{request.reference}</span><Badge tone={request.status === "resolved" ? "success" : "gold"}>{request.status}</Badge></header>
+                <h3>{request.subject}</h3>
+                <p>{request.message}</p>
+                <footer><small>{request.order_number || "Aucune commande associée"}</small><time>{new Date(request.created_at).toLocaleDateString("fr-HT")}</time></footer>
+              </article>
+            ))}
+            {!requests.length && <div className="catalog-empty">Vous n’avez encore aucune demande de support.</div>}
+          </div>
+        </section>
+      )}
       <section className="section faq-section">
         <SectionHead eyebrow="FAQ" title="Questions fréquentes" />
-        {faq.map(([question, answer], i) => (
+        <div className="faq-tools">
+          <label className="faq-search"><Search /><input value={faqQuery} onChange={(event) => setFaqQuery(event.target.value)} placeholder="Rechercher dans la FAQ" /></label>
+          <select value={faqCategory} onChange={(event) => setFaqCategory(event.target.value)}>
+            <option value="all">Toutes les catégories</option>
+            {supportCategories.slice(0, 5).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+          </select>
+        </div>
+        {visibleFaq.map(([question, answer], i) => (
           <div className="faq-item" key={question}>
             <button onClick={() => setOpen(open === i ? -1 : i)}>
               <span>{question}</span>
@@ -1050,27 +1185,72 @@ function Contact() {
         ))}
       </section>
       <section className="map-section">
-        <MapPin />
-        <h2>VinnHT opère depuis Haïti</h2>
-        <p>Notre équipe accompagne les clients, vendeurs et livreurs depuis Port-au-Prince.</p>
+        <div><MapPin /><h2>VinnHT opère depuis Haïti</h2><p>{config.supportAddress || "Port-au-Prince, Haïti"} · {config.supportHours || "Lundi au samedi"}</p><a href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(config.supportAddress || "Port-au-Prince, Haiti")}`} target="_blank">Voir sur OpenStreetMap <ArrowRight /></a></div>
+        <iframe title="Localisation VinnHT à Port-au-Prince" src="https://www.openstreetmap.org/export/embed.html?bbox=-72.38%2C18.50%2C-72.25%2C18.62&layer=mapnik" loading="lazy" />
       </section>
     </PublicLayout>
   );
 }
 
 function Categories() {
+  const [categoryData, setCategoryData] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    Promise.all([
+      api.get("/categories"),
+      api.get("/products", { params: { limit: 100 } }),
+    ]).then(([categoryResponse, productResponse]) => {
+      setCategoryData(categoryResponse.data);
+      setProducts(productResponse.data);
+    });
+  }, []);
+
+  const visible = categoryData.filter((category) =>
+    `${category.name} ${category.slug}`.toLowerCase().includes(query.toLowerCase()),
+  );
+  const popular = categoryData.filter((category) => Number(category.available_product_count) > 0).slice(0, 4);
+
   return (
     <MarketplaceLayout>
-      <PageHero
-        title="Explorez tous les rayons"
-        text="Des catégories premium qui ressemblent à un vrai grand marché numérique."
-      />
-      <section className="section">
-        <div className="category-grid">
-          {categories.map((c) => (
-            <CategoryCard item={c} key={c[1]} />
-          ))}
+      <section className="departments-hero">
+        <div>
+          <Badge tone="gold">Grand marché VinnHT</Badge>
+          <h1>Explorez chaque rayon selon vos besoins.</h1>
+          <p>Découvrez les catégories, sous-catégories et produits réellement disponibles sur VinnHT.</p>
         </div>
+        <label>
+          <Search />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher un rayon" />
+        </label>
+      </section>
+      {!!popular.length && (
+        <section className="section category-popular">
+          <SectionHead eyebrow="Les plus actifs" title="Rayons populaires" />
+          <div>{popular.map((category) => <Link to={`/categories/${category.slug}`} key={category.id}><Flame /><span><b>{category.name}</b><small>{category.available_product_count} produit(s)</small></span><ArrowRight /></Link>)}</div>
+        </section>
+      )}
+      <section className="section departments-section">
+        <SectionHead eyebrow="Tous les univers" title={`${visible.length} rayon(s) à explorer`} />
+        <div className="departments-premium-grid">
+          {visible.map((category) => {
+            const [Icon, children] = categoryVisuals[category.slug] || [ShoppingBag, ["Produits", "Nouveautés", "Offres", "Collections"]];
+            const preview = products.filter((product) => Number(product.category_id) === Number(category.id)).slice(0, 3);
+            return (
+              <motion.article whileHover={{ y: -6 }} key={category.id}>
+                <header><span><Icon /></span><div><small>{category.available_product_count || 0} disponible(s)</small><h2>{category.name}</h2></div></header>
+                <div className="department-tags">{children.map((child) => <span key={child}>{child}</span>)}</div>
+                <div className="department-preview">
+                  {preview.map((product) => <img src={assetUrl(product.image_url)} alt={product.name} key={product.id} />)}
+                  {!preview.length && <div><ShoppingBag /><small>Ce rayon attend ses premiers produits</small></div>}
+                </div>
+                <Link to={`/categories/${category.slug}`}>Explorer ce rayon <ArrowRight /></Link>
+              </motion.article>
+            );
+          })}
+        </div>
+        {!visible.length && <div className="catalog-empty"><Search /><h3>Aucun rayon trouvé</h3><p>Essayez un autre mot-clé.</p></div>}
       </section>
     </MarketplaceLayout>
   );
@@ -1246,6 +1426,10 @@ function ProductsCatalog() {
 function CategoryProducts() {
   const { slug } = useParams();
   const [products, setProducts] = useState([]);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("recent");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [city, setCity] = useState("");
 
   useEffect(() => {
     api
@@ -1253,6 +1437,15 @@ function CategoryProducts() {
       .then(({ data }) => setProducts(data))
       .catch(() => setProducts([]));
   }, [slug]);
+  const visibleProducts = products
+    .filter((product) => product.name.toLowerCase().includes(query.toLowerCase()))
+    .filter((product) => !maxPrice || Number(product.price) <= Number(maxPrice))
+    .filter((product) => !city || product.city === city)
+    .sort((a, b) => {
+      if (sort === "price-low") return Number(a.price) - Number(b.price);
+      if (sort === "price-high") return Number(b.price) - Number(a.price);
+      return Number(b.id) - Number(a.id);
+    });
 
   return (
     <MarketplaceLayout>
@@ -1261,15 +1454,18 @@ function CategoryProducts() {
         text="Produits vérifiés, vendeurs professionnels et expérience fluide."
       />
       <section className="section">
-        <div className="product-toolbar">
-          <SearchBar />
+        <div className="category-product-filters">
+          <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans ce rayon" /></label>
+          <label>Prix maximum<input type="number" min="0" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} placeholder="Tous les prix" /></label>
+          <label>Localisation<select value={city} onChange={(event) => setCity(event.target.value)}><option value="">Toutes les zones</option>{[...new Set(products.map((product) => product.city).filter(Boolean))].map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
+          <label>Trier<select value={sort} onChange={(event) => setSort(event.target.value)}><option value="recent">Plus récents</option><option value="price-low">Prix croissant</option><option value="price-high">Prix décroissant</option></select></label>
         </div>
         <div className="product-grid">
-          {products.map((p) => (
+          {visibleProducts.map((p) => (
             <ProductCard product={p} key={p.id} />
           ))}
         </div>
-        {!products.length && (
+        {!visibleProducts.length && (
           <div className="catalog-empty">
             <ShoppingBag />
             <h3>Aucun produit dans ce rayon</h3>

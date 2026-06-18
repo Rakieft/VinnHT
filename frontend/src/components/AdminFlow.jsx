@@ -1282,6 +1282,7 @@ export function AdminContactRequestsContent({ api }) {
               <div>
                 <b>{request.subject}</b>
                 <small>{request.name} · {request.email}</small>
+                <small>{request.reference} · {request.category}{request.order_number ? ` · ${request.order_number}` : ""}</small>
               </div>
               <Status value={request.status} />
             </header>
