@@ -1,7 +1,7 @@
 const requestBuckets = new Map();
 
 const clientKey = (req) =>
-  `${req.ip || req.socket?.remoteAddress || "unknown"}:${req.path}`;
+  `${req.ip || req.socket.remoteAddress || "unknown"}:${req.path}`;
 
 export const createRateLimiter = ({
   windowMs = 15 * 60 * 1000,

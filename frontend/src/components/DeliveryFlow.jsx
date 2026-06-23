@@ -210,7 +210,7 @@ function MissionCard({ mission, onSelect }) {
   const guide = deliveryGuides[mission.status] || deliveryGuides.assigned;
   const actionLabel =
     mission.status === "delivered" && !mission.proof_confirmed_at
-      ? "Voir le détail"
+       ? "Voir le détail"
       : guide.action;
 
   return (
@@ -259,10 +259,11 @@ export function DeliveryDashboardContent({ api, user }) {
   }, []);
 
   const stats = data?.stats || {};
-  const priorityMission = (data?.recent || []).find(
+  const recentMissions = data?.recent || [];
+  const priorityMission = recentMissions.find(
     (mission) => !["delivered", "failed"].includes(mission.status)
   );
-  const priorityGuide = deliveryGuides[priorityMission?.status] || deliveryGuides.assigned;
+  const priorityGuide = priorityMission ? deliveryGuides[priorityMission.status] || deliveryGuides.assigned : deliveryGuides.assigned;
   const PriorityIcon = priorityGuide.icon;
 
   return (
@@ -292,7 +293,7 @@ export function DeliveryDashboardContent({ api, user }) {
           </h2>
           <p>
             {priorityMission
-              ? `${priorityMission.order_number} · ${priorityGuide.text}`
+               ? `${priorityMission.order_number} · ${priorityGuide.text}`
               : "Les nouvelles commandes assignées apparaîtront ici."}
           </p>
           <Link to="/delivery/assigned">
@@ -349,7 +350,7 @@ export function DeliveryDashboardContent({ api, user }) {
           </div>
           <Clock3 />
         </header>
-        {(data?.recent || []).map((mission) => (
+        {recentMissions.map((mission) => (
           <article key={mission.id}>
             <div>
               <b>{mission.order_number}</b>
@@ -361,7 +362,7 @@ export function DeliveryDashboardContent({ api, user }) {
             </span>
           </article>
         ))}
-        {data && !data.recent.length && (
+        {data && !recentMissions.length && (
           <div className="delivery-empty">Aucune mission assignée.</div>
         )}
         <footer className="delivery-dashboard-links">
@@ -420,7 +421,7 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
     () =>
       missions.filter((mission) => {
         const sectionMatch = history
-          ? ["delivered", "failed"].includes(mission.status)
+           ? ["delivered", "failed"].includes(mission.status)
           : !["delivered", "failed"].includes(mission.status);
         const searchMatch = `${mission.order_number} ${mission.client_name} ${mission.delivery_address}`
           .toLowerCase()
@@ -433,8 +434,8 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
     selected?.status === "delivered" && !selected.proof_confirmed_at
       ? {
           ...deliveryGuides.delivered,
-          title: "Livraison archivée",
-          text: "Cette ancienne livraison ne possède pas de signature enregistrée.",
+          title: "Livraison archivee",
+          text: "Cette ancienne livraison ne possede pas de signature enregistree.",
         }
       : selected
         ? deliveryGuides[selected.status] || deliveryGuides.assigned
@@ -442,13 +443,13 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
   const SelectedGuideIcon = selectedGuide.icon;
 
   const update = async (status, proof = {}) => {
-    if (!user?.profile_image_url) {
+    if (!user.profile_image_url) {
       setMessage("Ajoutez votre photo de profil avant de modifier une livraison.");
       return;
     }
     if (
       status !== "delivered" &&
-      !window.confirm("Confirmer ce changement d’étape pour cette livraison ?")
+      !window.confirm("Confirmer ce changement d’étape pour cette livraison ")
     ) {
       return;
     }
@@ -471,15 +472,15 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
   return (
     <DeliveryFrame
       eyebrow={history ? "Historique" : "Missions actives"}
-      title={history ? "Livraisons terminées" : "Commandes assignées"}
+      title={history ? "Livraisons terminees" : "Commandes assignees"}
       text={
         history
-          ? "Consultez les missions déjà traitées."
+           ? "Consultez les missions déjà traitées."
           : "Suivez chaque mission depuis la récupération jusqu’au client."
       }
     >
       {message && <div className="delivery-success">{message}</div>}
-      {!history && !user?.profile_image_url && (
+      {!history && !user.profile_image_url && (
         <section className="delivery-profile-required">
           <Camera />
           <div>
@@ -594,11 +595,11 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
                 <ShieldCheck />
                 <span>
                   <b>Livraison reçue et signée</b>
-                  {proof.signer_name} · {date(proof.confirmed_at)}
+                  {proof?.signer_name} · {date(proof?.confirmed_at)}
                 </span>
               </div>
-              <img src={proof.signature_data} alt={`Signature de ${proof.signer_name}`} />
-              {proof.delivery_notes && <p>{proof.delivery_notes}</p>}
+              <img src={proof?.signature_data} alt={`Signature de ${proof?.signer_name}`} />
+              {proof?.delivery_notes && <p>{proof?.delivery_notes}</p>}
             </section>
           )}
           {history &&
@@ -619,12 +620,12 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
           {!history && (
             <footer>
               {selected.status === "assigned" && (
-                <button disabled={!user?.profile_image_url} onClick={() => update("picked_up")}>
+                <button disabled={!user.profile_image_url} onClick={() => update("picked_up")}>
                   <Package /> Confirmer la récupération
                 </button>
               )}
               {selected.status === "picked_up" && (
-                <button disabled={!user?.profile_image_url} onClick={() => update("in_transit")}>
+                <button disabled={!user.profile_image_url} onClick={() => update("in_transit")}>
                   <Navigation /> Commencer la livraison
                 </button>
               )}
@@ -632,13 +633,13 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
                 <SignaturePad
                   clientName={selected.client_name}
                   onConfirm={(proof) => update("delivered", proof)}
-                  busy={busy || !user?.profile_image_url}
+                  busy={busy || !user.profile_image_url}
                 />
               )}
               {["assigned", "picked_up", "in_transit"].includes(selected.status) && (
                 <button
                   className="danger"
-                  disabled={!user?.profile_image_url}
+                  disabled={!user.profile_image_url}
                   onClick={() => update("failed")}
                 >
                   <XCircle /> Signaler un échec
@@ -721,10 +722,10 @@ export function DeliveryManagementContent({ api }) {
 }
 
 export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
-  const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "" });
+  const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "" });
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState(
-    user?.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : ""
+    user.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : ""
   );
   const [message, setMessage] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -739,7 +740,7 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
       data.append("profilePhoto", file);
       const { data: response } = await api.patch("/auth/profile", data);
       updateUser(response.user);
-      setPreview(`${apiOrigin}${response.user.profile_image_url}?v=${Date.now()}`);
+      setPreview(`${apiOrigin}${response.user.profile_image_url}v=${Date.now()}`);
       setPhoto(null);
       setMessage("Photo de profil enregistrée.");
     } catch (error) {
@@ -773,10 +774,10 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
       <section className={`delivery-profile-alert ${hasPhoto ? "complete" : "required"}`}>
         {hasPhoto ? <ShieldCheck /> : <Camera />}
         <div>
-          <h2>{hasPhoto ? "Profil visuel vérifié" : "Photo de profil obligatoire"}</h2>
+          <h2>{hasPhoto ? "Profil visuel verifie" : "Photo de profil obligatoire"}</h2>
           <p>
             {hasPhoto
-              ? "Votre photo pourra être affichée au client pendant la livraison."
+               ? "Votre photo pourra être affichée au client pendant la livraison."
               : "Ajoutez une photo récente, nette et professionnelle avant vos prochaines missions."}
           </p>
         </div>
@@ -797,11 +798,7 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
             <span>{preview ? <img src={preview} alt="Photo du livreur" /> : <UserRound />}</span>
             <small>
               <Camera />{" "}
-              {uploadingPhoto
-                ? "Enregistrement..."
-                : hasPhoto
-                  ? "Changer la photo"
-                  : "Ajouter ma photo"}
+              {uploadingPhoto ? "Enregistrement..." : hasPhoto ? "Changer la photo" : "Ajouter ma photo"}
             </small>
           </label>
           <ProfilePhotoManager
@@ -811,9 +808,9 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
             onMessage={setMessage}
           />
           <h2>{form.name || "Livreur VinnHT"}</h2>
-          <p>{user?.email}</p>
+          <p>{user.email}</p>
           <b className={hasPhoto ? "verified" : "missing"}>
-            {hasPhoto ? "Identité visuelle prête" : "Photo requise"}
+              {hasPhoto ? "Identite visuelle prete" : "Photo requise"}
           </b>
         </aside>
         <form className="delivery-profile-form" onSubmit={save}>
@@ -844,7 +841,7 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
           </label>
           <label className="full">
             Adresse email
-            <input value={user?.email || ""} readOnly />
+            <input value={user.email || ""} readOnly />
           </label>
           <button disabled={!hasPhoto}>
             <ShieldCheck /> Enregistrer mon profil livreur

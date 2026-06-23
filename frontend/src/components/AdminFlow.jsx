@@ -137,6 +137,7 @@ export function AdminDashboardContent({ api }) {
   };
 
   const stats = data?.stats || {};
+  const recentAudit = data?.recentAudit || [];
   const cards = [
     [Users, "Utilisateurs", stats.users, `${stats.users_today || 0} nouveau(x) aujourd’hui`],
     [Store, "Vendeurs", stats.sellers, "Comptes disposant de l’espace vendeur"],
@@ -197,7 +198,7 @@ export function AdminDashboardContent({ api }) {
   ];
   const maxDailySale = Math.max(
     1,
-    ...(data?.dailySales || []).map((item) => Number(item.total || 0))
+    ...(data.dailySales || []).map((item) => Number(item.total || 0))
   );
   const auditLabel = {
     "user.status.update": "Statut utilisateur modifié",
@@ -281,7 +282,7 @@ export function AdminDashboardContent({ api }) {
             <strong>{money(stats.paid_volume)}</strong>
           </header>
           <div className="admin-sales-chart">
-            {(data?.dailySales || []).map((item) => (
+            {(data.dailySales || []).map((item) => (
               <article key={item.sale_date}>
                 <span>
                   <i
@@ -298,7 +299,7 @@ export function AdminDashboardContent({ api }) {
                 <b>{money(item.total)}</b>
               </article>
             ))}
-            {!data?.dailySales?.length && (
+            {!data.dailySales.length && (
               <div className="admin-empty">Aucun paiement confirmé durant les sept derniers jours.</div>
             )}
           </div>
@@ -317,7 +318,7 @@ export function AdminDashboardContent({ api }) {
           <div className="admin-health-groups">
             <div>
               <h3>Paiements</h3>
-              {(data?.paymentHealth || []).map((item) => (
+              {(data.paymentHealth || []).map((item) => (
                 <p key={item.status}>
                   <Status value={item.status} />
                   <b>{item.total}</b>
@@ -327,7 +328,7 @@ export function AdminDashboardContent({ api }) {
             </div>
             <div>
               <h3>Livraisons</h3>
-              {(data?.deliveryHealth || []).map((item) => (
+              {(data.deliveryHealth || []).map((item) => (
                 <p key={item.status}>
                   <Status value={item.status} />
                   <b>{item.total}</b>
@@ -361,7 +362,7 @@ export function AdminDashboardContent({ api }) {
             <span>
               <small>Période couverte</small>
               <b>
-                {shortDate(weeklyReport?.period?.start)} au {shortDate(weeklyReport?.period?.end)}
+                {shortDate(weeklyReport.period.start)} au {shortDate(weeklyReport.period.end)}
               </b>
             </span>
             <p>
@@ -371,11 +372,11 @@ export function AdminDashboardContent({ api }) {
           </div>
           <div className="admin-report-metrics">
             {[
-              ["Marchands", weeklyReport?.totals?.merchants || 0],
-              ["Commandes marchands", weeklyReport?.totals?.orders || 0],
-              ["Ventes globales", money(weeklyReport?.totals?.grossSales)],
-              ["Commission VinnHT", money(weeklyReport?.totals?.commission)],
-              ["Net vendeurs", money(weeklyReport?.totals?.netSales)],
+              ["Marchands", weeklyReport.totals.merchants || 0],
+              ["Commandes marchands", weeklyReport.totals.orders || 0],
+              ["Ventes globales", money(weeklyReport.totals.grossSales)],
+              ["Commission VinnHT", money(weeklyReport.totals.commission)],
+              ["Net vendeurs", money(weeklyReport.totals.netSales)],
             ].map(([label, value]) => (
               <article key={label}>
                 <small>{label}</small>
@@ -389,7 +390,7 @@ export function AdminDashboardContent({ api }) {
             onClick={downloadWeeklyReport}
           >
             <Download />
-            {downloadingReport ? "Génération du PDF..." : "Télécharger le rapport PDF"}
+              {downloadingReport ? "Generation du PDF..." : "Telecharger le rapport PDF"}
           </button>
         </section>
 
@@ -404,7 +405,7 @@ export function AdminDashboardContent({ api }) {
             </div>
           </header>
           <div>
-            {(data?.recentAudit || []).map((item) => (
+            {recentAudit.map((item) => (
               <article key={item.id}>
                 <span>
                   {item.action.includes("user") ? <UserPlus /> : <Clock3 />}
@@ -417,7 +418,7 @@ export function AdminDashboardContent({ api }) {
                 </p>
               </article>
             ))}
-            {!data?.recentAudit?.length && (
+            {data && !recentAudit.length && (
               <div className="admin-empty">Aucune action administrative enregistrée.</div>
             )}
           </div>
@@ -485,7 +486,7 @@ export function AdminUsersContent({ api, currentUser }) {
   const updateStatus = async (user) => {
     const nextStatus = user.status === "active" ? "suspended" : "active";
     const action = nextStatus === "suspended" ? "suspendre" : "réactiver";
-    if (!window.confirm(`Confirmer : ${action} le compte de ${user.name} ?`)) return;
+    if (!window.confirm(`Confirmer : ${action} le compte de ${user.name} `)) return;
     setBusyUser(user.id);
     setMessage("");
     setError("");
@@ -527,7 +528,7 @@ export function AdminUsersContent({ api, currentUser }) {
 
   const toggleRole = async (user, role) => {
     const nextRoles = user.roles.includes(role)
-      ? user.roles.filter((value) => value !== role)
+       ? user.roles.filter((value) => value !== role)
       : [...user.roles, role];
     if (!nextRoles.length) return;
     setBusyUser(user.id);
@@ -548,7 +549,7 @@ export function AdminUsersContent({ api, currentUser }) {
 
   const campaignFor = (userId) => campaigns.find((campaign) => Number(campaign.seller_id) === Number(userId));
   const campaignIsActive = (campaign) =>
-    campaign?.sponsorship_status === "active" &&
+    campaign.sponsorship_status === "active" &&
     new Date(campaign.sponsorship_ends_at) > new Date();
   const openCampaign = (user) => {
     const campaign = campaignFor(user.id);
@@ -556,7 +557,7 @@ export function AdminUsersContent({ api, currentUser }) {
     end.setDate(end.getDate() + 30);
     setSelectedSeller({ ...user, campaign });
     setSponsorship({
-      amount: campaign?.sponsorship_amount || "",
+      amount: campaign.sponsorship_amount || "",
       startsAt: new Date().toISOString().slice(0, 10),
       endsAt: end.toISOString().slice(0, 10),
     });
@@ -624,7 +625,7 @@ export function AdminUsersContent({ api, currentUser }) {
           <input required minLength="10" type="password" value={staffForm.password} onChange={(event) => setStaffForm({ ...staffForm, password: event.target.value })} />
         </label>
         <button disabled={creatingStaff}>
-          <UserPlus /> {creatingStaff ? "Création..." : "Créer le compte"}
+          <UserPlus /> {creatingStaff ? "Creation..." : "Creer le compte"}
         </button>
       </form>
       {query.trim().length < 2 && (
@@ -658,7 +659,7 @@ export function AdminUsersContent({ api, currentUser }) {
       </section>
       <div className="admin-results-count">
         {query.trim().length >= 2
-          ? `${visible.length} compte(s) trouvé(s) pour votre recherche`
+           ? `${visible.length} compte(s) trouvé(s) pour votre recherche`
           : `${visible.length} vendeur(s) affiché(s)`}
       </div>
       <section className="admin-user-grid">
@@ -679,13 +680,13 @@ export function AdminUsersContent({ api, currentUser }) {
             <div className="admin-user-meta">
               <span>Compte #{user.id}</span>
               <span>Créé le {shortDate(user.created_at)}</span>
-              {user.id === currentUser?.id && <b>Votre compte</b>}
+              {user.id === currentUser.id && <b>Votre compte</b>}
             </div>
             {user.roles.includes("seller") && (
               <section className="admin-user-campaign">
                 <TrendingUp />
                 <span>
-                  <small>{sponsored ? "Visibilité prioritaire active" : "Classement naturel"}</small>
+                  <small>{sponsored ? "Visibilite prioritaire active" : "Classement naturel"}</small>
                   <b>{sponsored ? money(campaign.sponsorship_amount) : "Aucune campagne active"}</b>
                   {sponsored && <small>Jusqu'au {shortDate(campaign.sponsorship_ends_at)}</small>}
                 </span>
@@ -693,7 +694,7 @@ export function AdminUsersContent({ api, currentUser }) {
                   className={sponsored ? "danger" : ""}
                   onClick={() => sponsored ? cancelCampaign(user) : openCampaign(user)}
                 >
-                  {sponsored ? "Arrêter" : "Promouvoir"}
+                  {sponsored ? "Arreter" : "Promouvoir"}
                 </button>
               </section>
             )}
@@ -702,7 +703,7 @@ export function AdminUsersContent({ api, currentUser }) {
               {roles.map((role) => (
                 <button
                   className={user.roles.includes(role) ? "active" : ""}
-                  disabled={busyUser === user.id || (user.id === currentUser?.id && role === "admin")}
+                  disabled={busyUser === user.id || (user.id === currentUser.id && role === "admin")}
                   onClick={() => toggleRole(user, role)}
                   key={role}
                 >
@@ -713,7 +714,7 @@ export function AdminUsersContent({ api, currentUser }) {
             <footer>
               <small>{user.roles.length} rôle(s) actif(s)</small>
               <button
-                disabled={busyUser === user.id || user.id === currentUser?.id}
+                disabled={busyUser === user.id || user.id === currentUser.id}
                 onClick={() => updateStatus(user)}
               >
                 {user.status === "active" ? "Suspendre" : "Réactiver"}
@@ -726,7 +727,7 @@ export function AdminUsersContent({ api, currentUser }) {
       {!visible.length && (
         <div className="admin-empty">
           {query.trim().length === 1
-            ? "Saisissez au moins deux caractères pour rechercher un client."
+             ? "Saisissez au moins deux caractères pour rechercher un client."
             : "Aucun compte ne correspond à votre recherche."}
         </div>
       )}
@@ -799,7 +800,7 @@ export function AdminCategoriesContent({ api }) {
   };
   const remove = async (category) => {
     if (Number(category.product_count) > 0) return;
-    if (!window.confirm(`Supprimer définitivement la catégorie vide « ${category.name} » ?`)) return;
+    if (!window.confirm(`Supprimer définitivement la catégorie vide « ${category.name} » `)) return;
     setError("");
     setMessage("");
     try {
@@ -831,9 +832,9 @@ export function AdminCategoriesContent({ api }) {
       <section className="admin-category-summary">
         {[
           [Boxes, "Rayons", categories.length],
-          [Package, "Produits associés", totals.products],
+          [Package, "Produits associes", totals.products],
           [CheckCircle2, "Produits actifs", totals.active],
-          [AlertTriangle, "Produits épuisés", totals.outOfStock],
+          [AlertTriangle, "Produits epuises", totals.outOfStock],
         ].map(([Icon, label, value]) => (
           <article key={label}>
             <Icon />
@@ -847,7 +848,7 @@ export function AdminCategoriesContent({ api }) {
             <span><Edit3 /></span>
             <div>
               <small>{editing ? "Modification" : "Nouveau rayon"}</small>
-              <h2>{editing ? "Modifier la catégorie" : "Créer une catégorie"}</h2>
+                <h2>{editing ? "Modifier la categorie" : "Creer une categorie"}</h2>
             </div>
           </header>
           <label>
@@ -861,7 +862,7 @@ export function AdminCategoriesContent({ api }) {
                   ...form,
                   name,
                   slug: editing
-                    ? form.slug
+                     ? form.slug
                     : name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
                 });
               }}
@@ -931,9 +932,9 @@ export function AdminCategoriesContent({ api }) {
                   <button
                     className="danger"
                     disabled={Number(category.product_count) > 0}
-                    title={
+                      title={
                       Number(category.product_count) > 0
-                        ? "Déplacez les produits avant de supprimer cette catégorie."
+                         ? "Déplacez les produits avant de supprimer cette catégorie."
                         : "Supprimer cette catégorie vide"
                     }
                     onClick={() => remove(category)}
@@ -1015,7 +1016,7 @@ export function AdminProductsContent({ api }) {
                 <span><small>Stock</small><b>{product.stock}</b></span>
               </div>
               <footer>
-                <button onClick={() => updateStatus(product)}>{product.status === "active" ? "Désactiver" : "Activer"}</button>
+                <button onClick={() => updateStatus(product)}>{product.status === "active" ? "Desactiver" : "Activer"}</button>
               </footer>
             </article>
           );
@@ -1033,19 +1034,22 @@ export function AdminPaymentsContent({ api }) {
   const [reportEnding, setReportEnding] = useState(saturdayFor);
   const [downloadingReport, setDownloadingReport] = useState(false);
   const load = () =>
-    api.get("/admin/payment-center").then(({ data }) => setCenter(data));
+    api.get("/admin/payment-center").then(({ data }) => setCenter(data || { stats: {}, batches: [] }));
   useEffect(() => { load(); }, []);
   const prepare = async () => {
     const { data } = await api.post("/admin/payout-batches/prepare", {});
     setMessage(data.message);
     load();
   };
+  const paymentStats = center?.stats || {};
+  const payoutBatches = center?.batches || [];
+
   const openBatch = async (batch) => {
     const { data } = await api.get(`/admin/payout-batches/${batch.id}`);
     setSelectedBatch(data);
   };
   const markPaid = async () => {
-    if (!window.confirm("Confirmer que tous les vendeurs de ce lot ont réellement été payés ?")) return;
+    if (!window.confirm("Confirmer que tous les vendeurs de ce lot ont réellement été payés ")) return;
     const { data } = await api.patch(`/admin/payout-batches/${selectedBatch.batch.id}/paid`);
     setMessage(data.message);
     setSelectedBatch(null);
@@ -1087,7 +1091,7 @@ export function AdminPaymentsContent({ api }) {
           </label>
           <button onClick={downloadWeeklyReport} disabled={downloadingReport}>
             <Download />
-            {downloadingReport ? "Génération..." : "Télécharger le rapport PDF"}
+              {downloadingReport ? "Generation du PDF..." : "Telecharger le rapport PDF"}
           </button>
           <button onClick={prepare}><RefreshCw /> Préparer le lot du dimanche</button>
         </div>
@@ -1096,16 +1100,16 @@ export function AdminPaymentsContent({ api }) {
       {error && <div className="admin-error">{error}</div>}
       <section className="admin-category-summary">
         {[
-          [CircleDollarSign, "Total encaissé", money(center.stats.collected)],
-          [Clock3, "Paiements clients en attente", center.stats.pending_count || 0],
-          [AlertTriangle, "Paiements échoués", center.stats.failed_count || 0],
-          [Wallet, "Montant dû vendeurs", money(center.stats.seller_due)],
+          [CircleDollarSign, "Total encaissé", money(paymentStats.collected)],
+          [Clock3, "Paiements clients en attente", paymentStats.pending_count || 0],
+          [AlertTriangle, "Paiements échoués", paymentStats.failed_count || 0],
+          [Wallet, "Montant dû vendeurs", money(paymentStats.seller_due)],
         ].map(([Icon, label, value]) => <article key={label}><Icon /><span><small>{label}</small><b>{value}</b></span></article>)}
       </section>
       <section className="admin-panel admin-payout-batches">
         <header><div><Wallet /><span><b>Lots hebdomadaires vendeurs</b><small>Préparés le dimanche selon les ventes finalisées</small></span></div></header>
         <div>
-          {center.batches.map((batch) => (
+          {payoutBatches.map((batch) => (
             <button onClick={() => openBatch(batch)} key={batch.id}>
               <span><small>Semaine</small><b>{shortDate(batch.period_start)} au {shortDate(batch.period_end)}</b></span>
               <span><small>Vendeurs</small><b>{batch.seller_count}</b></span>
@@ -1114,7 +1118,7 @@ export function AdminPaymentsContent({ api }) {
               <ArrowRight />
             </button>
           ))}
-          {!center.batches.length && <div className="admin-empty">Aucun lot hebdomadaire préparé.</div>}
+          {!payoutBatches.length && <div className="admin-empty">Aucun lot hebdomadaire prepare.</div>}
         </div>
       </section>
       {selectedBatch && (
@@ -1135,7 +1139,7 @@ export function AdminProfileContent({
   onLogout,
   accountLabel = "Administrateur",
 }) {
-  const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "" });
+  const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "" });
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1167,12 +1171,12 @@ export function AdminProfileContent({
       <section className="admin-profile-layout">
         <aside className="admin-profile-card">
           <ProfilePhotoManager api={api} user={user} updateUser={updateUser} onMessage={setMessage} />
-          <div><small>{accountLabel} VinnHT</small><h2>{user?.name}</h2><p>{user?.email}</p></div>
+          <div><small>{accountLabel} VinnHT</small><h2>{user.name}</h2><p>{user.email}</p></div>
         </aside>
         <form className="admin-profile-form" onSubmit={save}>
           <header><Settings /><span><small>Informations personnelles</small><h2>Profil administrateur</h2></span></header>
           <label>Nom complet<input required minLength="2" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-          <label>Adresse email<input value={user?.email || ""} disabled /></label>
+          <label>Adresse email<input value={user.email || ""} disabled /></label>
           <label className="full">Téléphone<input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
           {message && <div className="admin-message full">{message}</div>}
           <button className="admin-download-report full" disabled={saving}><CheckCircle2 /> {saving ? "Enregistrement..." : "Enregistrer le profil"}</button>
@@ -1212,23 +1216,23 @@ export function AdminSettingsContent({ api, role = "admin" }) {
   const settings =
     role === "manager"
       ? [
-          [BarChart3, "Performance des ventes", "Recevoir les alertes sur l’évolution des ventes.", "weeklyReport"],
-          [Truck, "Suivi des livraisons", "Être alerté des retards et échecs de livraison.", "securityAlerts"],
-          [Store, "Performance vendeurs", "Suivre les boutiques nécessitant une attention.", "sellerRequests"],
-          [Package, "Activité des commandes", "Recevoir les résumés opérationnels utiles.", "paymentAlerts"],
+          [BarChart3, "Performance des ventes", "Recevoir les alertes sur l evolution des ventes.", "weeklyReport"],
+          [Truck, "Suivi des livraisons", "Etre alerte des retards et echecs de livraison.", "securityAlerts"],
+          [Store, "Performance vendeurs", "Suivre les boutiques necessitant une attention.", "sellerRequests"],
+          [Package, "Activite des commandes", "Recevoir les resumes operationnels utiles.", "paymentAlerts"],
         ]
       : role === "superviseur"
         ? [
-            [Store, "Demandes vendeurs", "Être alerté à chaque nouvelle candidature.", "sellerRequests"],
-            [ShieldCheck, "Décisions sensibles", "Recevoir les alertes de validation et refus.", "securityAlerts"],
-            [FileText, "Rapport opérationnel", "Recevoir un résumé hebdomadaire.", "weeklyReport"],
-            [Truck, "Incidents livraison", "Être informé des échecs de livraison.", "paymentAlerts"],
+            [Store, "Demandes vendeurs", "Etre alerte a chaque nouvelle candidature.", "sellerRequests"],
+            [ShieldCheck, "Decisions sensibles", "Recevoir les alertes de validation et refus.", "securityAlerts"],
+            [FileText, "Rapport operationnel", "Recevoir un resume hebdomadaire.", "weeklyReport"],
+            [Truck, "Incidents livraison", "Etre informe des echecs de livraison.", "paymentAlerts"],
           ]
         : [
-            [Store, "Demandes vendeurs", "Être alerté lorsqu’un client demande à devenir vendeur.", "sellerRequests"],
-            [Wallet, "Alertes financières", "Recevoir les alertes de paiements et lots vendeurs.", "paymentAlerts"],
+            [Store, "Demandes vendeurs", "Etre alerte lorsqu un client demande a devenir vendeur.", "sellerRequests"],
+            [Wallet, "Alertes financieres", "Recevoir les alertes de paiements et lots vendeurs.", "paymentAlerts"],
             [FileText, "Rapport hebdomadaire", "Recevoir le rappel du rapport officiel chaque samedi.", "weeklyReport"],
-            [ShieldCheck, "Sécurité", "Être informé des actions administratives sensibles.", "securityAlerts"],
+            [ShieldCheck, "Securite", "Etre informe des actions administratives sensibles.", "securityAlerts"],
           ];
 
   return (
@@ -1282,7 +1286,7 @@ export function AdminContactRequestsContent({ api }) {
               <div>
                 <b>{request.subject}</b>
                 <small>{request.name} · {request.email}</small>
-                <small>{request.reference} · {request.category}{request.order_number ? ` · ${request.order_number}` : ""}</small>
+                <small>{request.reference} ? {request.category}{request.order_number ? ` ? ${request.order_number}` : ""}</small>
               </div>
               <Status value={request.status} />
             </header>
@@ -1348,7 +1352,7 @@ export function AdminResourceContent({ api, resource }) {
                   {resource === "products" && (
                     <td>
                       <button className="admin-table-action" onClick={() => updateProductStatus(item)}>
-                        {item.status === "active" ? "Désactiver" : "Activer"}
+                        {item.status === "active" ? "Desactiver" : "Activer"}
                       </button>
                     </td>
                   )}
@@ -1390,12 +1394,12 @@ export function ReportsContent({ api, role }) {
         {role === "manager" && (
           <section className="admin-panel">
             <header><div><Store /><span><b>Activité des vendeurs</b><small>Indicateurs opérationnels sans données financières</small></span></div></header>
-            <div className="admin-table-wrap"><table><thead><tr><th>Boutique</th><th>Produits actifs</th><th>Commandes</th><th>Ventes terminées</th></tr></thead><tbody>{(data?.sellerActivity || []).map((seller) => <tr key={seller.seller_id}><td>{seller.seller_name}</td><td>{seller.active_products}</td><td>{seller.orders}</td><td>{seller.completed_sales}</td></tr>)}</tbody></table></div>
+            <div className="admin-table-wrap"><table><thead><tr><th>Boutique</th><th>Produits actifs</th><th>Commandes</th><th>Ventes terminées</th></tr></thead><tbody>{(data.sellerActivity || []).map((seller) => <tr key={seller.seller_id}><td>{seller.seller_name}</td><td>{seller.active_products}</td><td>{seller.orders}</td><td>{seller.completed_sales}</td></tr>)}</tbody></table></div>
           </section>
         )}
         <section className="admin-panel admin-health-list">
           <header><div><Truck /><span><b>Santé des livraisons</b><small>Répartition actuelle</small></span></div></header>
-          <div>{(data?.deliveryHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div>
+          <div>{(data.deliveryHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div>
         </section>
       </div>
     </div>
@@ -1408,17 +1412,17 @@ export function OperationsDashboardContent({ api, role, user }) {
   const stats = data?.stats || {};
   const supervisor = role === "supervisor";
   const cards = supervisor
-    ? [[Store, "Demandes en attente", stats.pending_requests], [Users, "Vendeurs", stats.sellers], [Boxes, "Produits actifs", stats.products], [Truck, "Livraisons actives", stats.active_deliveries]]
+     ? [[Store, "Demandes en attente", stats.pending_requests], [Users, "Vendeurs", stats.sellers], [Boxes, "Produits actifs", stats.products], [Truck, "Livraisons actives", stats.active_deliveries]]
     : [[Store, "Vendeurs", stats.sellers], [Boxes, "Produits actifs", stats.products], [Package, "Commandes", stats.orders], [Truck, "Livraisons actives", stats.active_deliveries]];
   return (
     <div className="admin-flow">
-      <AdminHeading eyebrow={supervisor ? "Contrôle opérationnel" : "Pilotage stratégique"} title={`Bonjour, ${user?.name || role}`} text={supervisor ? "Suivez les demandes vendeurs et la santé quotidienne du réseau." : "Suivez l’activité des vendeurs, commandes et livraisons de VinnHT."}>
+      <AdminHeading eyebrow={supervisor ? "Controle operationnel" : "Pilotage strategique"} title={`Bonjour, ${user.name || role}`} text={supervisor ? "Suivez les demandes vendeurs et la sante quotidienne du reseau." : "Suivez l?activite des vendeurs, commandes et livraisons de VinnHT."}>
         <Link to={supervisor ? "/supervisor/seller-requests" : "/manager/sales-reports"}>{supervisor ? "Examiner les demandes" : "Ouvrir les rapports"} <ArrowRight /></Link>
       </AdminHeading>
       <section className="admin-metric-grid">{cards.map(([Icon, label, value, currency]) => <article key={label}><span><Icon /></span><small>{label}</small><strong>{currency ? money(value) : Number(value || 0).toLocaleString("fr-HT")}</strong><p>Donnée actuelle</p></article>)}</section>
       <div className="admin-dashboard-columns">
-        <section className="admin-panel admin-health-list"><header><div><Store /><span><b>Demandes vendeurs</b><small>État des candidatures</small></span></div></header><div>{(data?.requestHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div></section>
-        <section className="admin-panel admin-health-list"><header><div><Truck /><span><b>Livraisons</b><small>Suivi opérationnel</small></span></div></header><div>{(data?.deliveryHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div></section>
+        <section className="admin-panel admin-health-list"><header><div><Store /><span><b>Demandes vendeurs</b><small>État des candidatures</small></span></div></header><div>{(data.requestHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div></section>
+        <section className="admin-panel admin-health-list"><header><div><Truck /><span><b>Livraisons</b><small>Suivi opérationnel</small></span></div></header><div>{(data.deliveryHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div></section>
       </div>
     </div>
   );

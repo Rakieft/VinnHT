@@ -14,7 +14,7 @@ try {
   const [tableRows] = await pool.query(
     `SELECT TABLE_NAME
      FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA=? AND TABLE_TYPE='BASE TABLE'
+     WHERE TABLE_SCHEMA= AND TABLE_TYPE='BASE TABLE'
      ORDER BY TABLE_NAME`,
     [process.env.DB_NAME || "vinnht"],
   );

@@ -12,6 +12,7 @@ import pool from "./config/database.js";
 import { authenticate } from "./middleware/authMiddleware.js";
 import { authorize } from "./middleware/roleMiddleware.js";
 import {
+  uploadPaymentProof,
   uploadProductImages,
   uploadProfileImage,
   uploadSellerImages,
@@ -513,6 +514,27 @@ const notifyUser = async (
     [userId, role, type, title, message, link, entityType, entityId],
   );
 };
+const logOrderEvent = async (
+  executor,
+  { orderId, sellerSaleId = null, actorId = null, actorRole = null, type, title, message = null, metadata = null },
+) => {
+  await executor.query(
+    `INSERT INTO order_events
+      (order_id,seller_sale_id,actor_id,actor_role,type,title,message,metadata)
+     VALUES (?,?,?,?,?,?,?,?)`,
+    [
+      orderId,
+      sellerSaleId,
+      actorId,
+      actorRole,
+      type,
+      title,
+      message,
+      metadata ? JSON.stringify(metadata) : null,
+    ],
+  );
+};
+
 const notifyRole = async (
   executor,
   role,
@@ -534,7 +556,7 @@ const notifyRole = async (
   );
 };
 const clientProductSelect = `
-  SELECT p.*,c.name category_name,u.name seller_name,
+  SELECT p.*,COALESCE(p.department,'Ouest') department,COALESCE(p.city,'Haiti') city,c.name category_name,u.name seller_name,
     CASE
       WHEN p.is_featured=TRUE
         AND p.promotional_price IS NOT NULL
@@ -888,6 +910,14 @@ app.get(
       where += " AND c.slug = ?";
       params.push(req.query.category);
     }
+    if (req.query.department) {
+      where += " AND p.department = ?";
+      params.push(req.query.department);
+    }
+    if (req.query.city) {
+      where += " AND p.city = ?";
+      params.push(req.query.city);
+    }
     if (req.query.search) {
       where += ` AND (
         p.name LIKE ? OR p.description LIKE ? OR u.name LIKE ? OR c.name LIKE ?
@@ -1031,7 +1061,7 @@ app.get(
       [req.user.id],
     );
     const [rows] = await pool.query(
-      `SELECT p.*,c.name category_name,u.name seller_name,ci.quantity,
+      `SELECT p.*,c.name category_name,COALESCE(sp.shop_name,u.name) seller_name,COALESCE(sp.whatsapp,u.phone) seller_moncash,ci.quantity,
         CASE
           WHEN p.is_featured=TRUE
             AND p.promotional_price IS NOT NULL
@@ -1226,8 +1256,8 @@ app.get(
   "/api/products/:id",
   asyncRoute(async (req, res) => {
     const [[product]] = await pool.query(
-      `SELECT p.*,c.name category_name,c.slug category_slug,u.name seller_name,u.profile_image_url seller_profile_image_url,
-        COALESCE(sp.shop_name,u.name) shop_name,sp.shop_logo_url,sp.whatsapp seller_whatsapp
+      `SELECT p.*,COALESCE(p.department,'Ouest') department,COALESCE(p.city,sp.pickup_address,'Haiti') city,c.name category_name,c.slug category_slug,u.name seller_name,u.profile_image_url seller_profile_image_url,
+        COALESCE(sp.shop_name,u.name) shop_name,sp.shop_logo_url,COALESCE(sp.whatsapp,u.phone) seller_whatsapp
        FROM products p
        JOIN categories c ON c.id=p.category_id
        JOIN users u ON u.id=p.seller_id
@@ -1254,14 +1284,16 @@ app.post(
     body("categoryId").isInt(),
     body("price").isFloat({ min: 0 }),
     body("stock").isInt({ min: 0 }),
+    body("department").trim().isLength({ min: 2, max: 80 }),
+    body("city").trim().isLength({ min: 2, max: 120 }),
   ],
   validate,
   asyncRoute(async (req, res) => {
-    const { name, categoryId, description, price, stock, imageUrl } = req.body;
+    const { name, categoryId, description, price, stock, imageUrl, department, city } = req.body;
     const uploadedImages = await storeImages(req.files, "products");
     const primaryImage = uploadedImages[0] || imageUrl || null;
     const [result] = await pool.query(
-      "INSERT INTO products (seller_id,category_id,name,slug,description,price,stock,image_url) VALUES (?,?,?,?,?,?,?,?)",
+      "INSERT INTO products (seller_id,category_id,name,slug,description,price,stock,department,city,image_url) VALUES (?,?,?,?,?,?,?,?,?,?)",
       [
         req.user.id,
         categoryId,
@@ -1270,6 +1302,8 @@ app.post(
         description || null,
         price,
         stock,
+        department,
+        city,
         primaryImage,
       ],
     );
@@ -1474,6 +1508,14 @@ app.get(
         ss.gross_amount,
         ss.net_amount,
         ss.status seller_status,
+        ss.payment_status seller_payment_status,
+        ss.payment_proof_url,
+        ss.payment_proof_note,
+        ss.payment_rejection_reason,
+        ss.payment_rejected_at,
+        ss.payment_reference,
+        ss.payment_submitted_at,
+        ss.payment_validated_at,
         ss.created_at,
         o.order_number,
         o.status order_status,
@@ -1523,7 +1565,7 @@ app.patch(
     try {
       await connection.beginTransaction();
       const [[sale]] = await connection.query(
-        `SELECT ss.*,p.status payment_status,o.client_id,o.order_number
+        `SELECT ss.*,ss.payment_status seller_payment_status,p.status payment_status,o.client_id,o.order_number
          FROM seller_sales ss
          JOIN orders o ON o.id=ss.order_id
          LEFT JOIN payments p ON p.order_id=ss.order_id
@@ -1543,10 +1585,10 @@ app.patch(
         await connection.rollback();
         return res.status(409).json({ message: "Cette vente a déjà été traitée." });
       }
-      if (req.body.status !== "cancelled" && sale.payment_status !== "paid") {
+      if (req.body.status !== "cancelled" && sale.seller_payment_status !== "paid") {
         await connection.rollback();
         return res.status(409).json({
-          message: "Cette commande doit être payée avant sa préparation.",
+          message: "Cette vente doit etre validee comme payee par votre boutique avant sa preparation.",
         });
       }
       await connection.query("UPDATE seller_sales SET status=? WHERE id=?", [
@@ -1643,6 +1685,8 @@ app.patch(
     body("isFeatured").optional().isBoolean(),
     body("offerEndsAt").optional({ checkFalsy: true }).isISO8601(),
     body("stock").optional().isInt({ min: 0 }),
+    body("department").optional({ checkFalsy: true }).trim().isLength({ min: 2, max: 80 }),
+    body("city").optional({ checkFalsy: true }).trim().isLength({ min: 2, max: 120 }),
     body("status").optional().isIn(["draft", "active", "inactive"]),
   ],
   validate,
@@ -1658,6 +1702,8 @@ app.patch(
       isFeatured: "is_featured",
       offerEndsAt: "offer_ends_at",
       stock: "stock",
+      department: "department",
+      city: "city",
       imageUrl: "image_url",
       status: "status",
     };
@@ -1691,7 +1737,7 @@ app.patch(
     );
     if (!result.affectedRows)
       return res.status(404).json({ message: "Produit introuvable." });
-    res.json({ message: "Produit mis Ã  jour." });
+    res.json({ message: "Produit mis à jour." });
   }),
 );
 app.get(
@@ -1711,6 +1757,123 @@ app.get(
     res.json(rows);
   }),
 );
+
+app.get(
+  "/api/seller/delivery-drivers",
+  authenticate,
+  authorize("seller"),
+  asyncRoute(async (req, res) => {
+    const [drivers] = await pool.query(
+      `SELECT sdd.id link_id,sdd.status,sdd.zones,sdd.vehicle_type,sdd.created_at,
+        u.id,u.name,u.email,u.phone,u.profile_image_url
+       FROM seller_delivery_drivers sdd
+       JOIN users u ON u.id=sdd.delivery_user_id
+       WHERE sdd.seller_id=?
+       ORDER BY sdd.status='active' DESC,u.name`,
+      [req.user.id],
+    );
+    res.json(drivers);
+  }),
+);
+app.post(
+  "/api/seller/delivery-drivers",
+  authenticate,
+  authorize("seller"),
+  writeRateLimiter,
+  [
+    body("name").trim().isLength({ min: 2, max: 120 }),
+    body("email").isEmail().normalizeEmail(),
+    body("phone").optional({ checkFalsy: true }).trim().isLength({ min: 8, max: 30 }),
+    body("password").isLength({ min: 8 }),
+    body("zones").optional({ checkFalsy: true }).trim().isLength({ max: 500 }),
+    body("vehicleType").optional({ checkFalsy: true }).trim().isLength({ max: 80 }),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const passwordHash = await bcrypt.hash(req.body.password, 12);
+      const [created] = await connection.query(
+        `INSERT INTO users (name,email,phone,password_hash,role,status)
+         VALUES (?,?,?,?,'delivery','active')`,
+        [req.body.name, req.body.email, req.body.phone || null, passwordHash],
+      );
+      await connection.query("INSERT IGNORE INTO user_roles (user_id,role) VALUES (?,'delivery')", [created.insertId]);
+      await connection.query(
+        `INSERT INTO seller_delivery_drivers (seller_id,delivery_user_id,zones,vehicle_type,status)
+         VALUES (?,?,?,?, 'active')`,
+        [req.user.id, created.insertId, req.body.zones || null, req.body.vehicleType || null],
+      );
+      await notifyUser(connection, created.insertId, "delivery", "delivery.seller_invite", "Compte livreur cree", `Vous etes maintenant livreur pour ${req.user.name}.`, "/delivery", "seller", req.user.id);
+      await connection.commit();
+      res.status(201).json({ message: "Livreur ajoute a votre boutique." });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+app.patch(
+  "/api/seller/sales/:id/assign-driver",
+  authenticate,
+  authorize("seller"),
+  writeRateLimiter,
+  [body("deliveryUserId").isInt({ min: 1 })],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[sale]] = await connection.query(
+        `SELECT ss.id,ss.order_id,ss.seller_id,ss.status,ss.payment_status seller_payment_status,o.order_number,o.client_id,p.status payment_status
+         FROM seller_sales ss
+         JOIN orders o ON o.id=ss.order_id
+         LEFT JOIN payments p ON p.order_id=ss.order_id
+         WHERE ss.id=? AND ss.seller_id=? FOR UPDATE`,
+        [req.params.id, req.user.id],
+      );
+      if (!sale) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Vente introuvable." });
+      }
+      if (sale.seller_payment_status !== "paid" || sale.status !== "ready") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Cette vente doit etre payee et marquee prete avant assignation." });
+      }
+      const [[driver]] = await connection.query(
+        `SELECT u.id,u.name
+         FROM seller_delivery_drivers sdd
+         JOIN users u ON u.id=sdd.delivery_user_id
+         WHERE sdd.seller_id=? AND sdd.delivery_user_id=? AND sdd.status='active' AND u.status='active'`,
+        [req.user.id, req.body.deliveryUserId],
+      );
+      if (!driver) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Livreur introuvable pour votre boutique." });
+      }
+      await connection.query(
+        `INSERT INTO seller_delivery_assignments
+          (seller_sale_id,seller_id,order_id,delivery_user_id,assigned_by,status,assigned_at)
+         VALUES (?,?,?,?,?,'assigned',NOW())
+         ON DUPLICATE KEY UPDATE delivery_user_id=VALUES(delivery_user_id),assigned_by=VALUES(assigned_by),status='assigned',assigned_at=NOW(),delivered_at=NULL,signer_name=NULL,signature_data=NULL,delivery_notes=NULL,confirmed_at=NULL`,
+        [sale.id, req.user.id, sale.order_id, driver.id, req.user.id],
+      );
+      await notifyUser(connection, driver.id, "delivery", "delivery.seller_assigned", "Nouvelle livraison boutique", `La commande ${sale.order_number} vous est assignee par la boutique.`, "/delivery/assigned", "seller_sale", sale.id);
+      await notifyUser(connection, sale.client_id, "client", "delivery.seller_assigned", "Livreur boutique assigne", `${driver.name} livrera une partie de votre commande ${sale.order_number}.`, "/my-orders", "order", sale.order_id);
+      await connection.commit();
+      res.json({ message: `Livraison assignee a ${driver.name}.` });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
 
 app.post(
   "/api/orders",
@@ -1800,13 +1963,21 @@ app.post(
         );
       }
       await connection.query(
-        "INSERT INTO payments (order_id,amount) VALUES (?,?)",
-        [order.insertId, total],
+        "INSERT INTO payments (order_id,amount,provider) VALUES (?,?,?)",
+        [order.insertId, total, "direct_seller"],
       );
       await connection.query("INSERT INTO deliveries (order_id) VALUES (?)", [
         order.insertId,
       ]);
       await connection.query("DELETE FROM cart_items WHERE user_id=?", [req.user.id]);
+      await logOrderEvent(connection, {
+        orderId: order.insertId,
+        actorId: req.user.id,
+        actorRole: "client",
+        type: "order.created",
+        title: "Commande creee",
+        message: `Commande ${orderNumber} creee pour ${total.toLocaleString("fr-HT")} HTG.`,
+      });
       await notifyUser(
         connection,
         req.user.id,
@@ -1818,6 +1989,16 @@ app.post(
         "order",
         order.insertId,
       );
+      const [paymentInstructions] = await connection.query(
+        `SELECT ss.seller_id,COALESCE(sp.shop_name,u.name) seller_name,
+          COALESCE(sp.whatsapp,u.phone) moncash_number,ss.gross_amount amount
+         FROM seller_sales ss
+         JOIN users u ON u.id=ss.seller_id
+         LEFT JOIN seller_profiles sp ON sp.seller_id=ss.seller_id
+         WHERE ss.order_id=?
+         ORDER BY seller_name`,
+        [order.insertId],
+      );
       await connection.commit();
       res
         .status(201)
@@ -1826,6 +2007,7 @@ app.post(
           orderNumber,
           total,
           paymentStatus: "pending",
+          paymentInstructions,
         });
     } catch (error) {
       await connection.rollback();
@@ -1844,18 +2026,21 @@ app.get(
       `SELECT
         o.*,
         p.status payment_status,
+        p.reference payment_reference,
+        p.proof_url payment_proof_url,
         d.status delivery_status,
         COUNT(oi.id) item_count,
         MIN(pr.image_url) image_url,
-        GROUP_CONCAT(DISTINCT seller.name ORDER BY seller.name SEPARATOR ', ') seller_names
+        GROUP_CONCAT(DISTINCT COALESCE(sp.shop_name,seller.name) ORDER BY seller.name SEPARATOR ', ') seller_names
       FROM orders o
       LEFT JOIN payments p ON p.order_id=o.id
       LEFT JOIN deliveries d ON d.order_id=o.id
       LEFT JOIN order_items oi ON oi.order_id=o.id
       LEFT JOIN products pr ON pr.id=oi.product_id
       LEFT JOIN users seller ON seller.id=oi.seller_id
+      LEFT JOIN seller_profiles sp ON sp.seller_id=oi.seller_id
       WHERE o.client_id=?
-      GROUP BY o.id,p.status,d.status
+      GROUP BY o.id,p.status,p.reference,p.proof_url,d.status
       ORDER BY o.created_at DESC`,
       [req.user.id],
     );
@@ -1929,6 +2114,9 @@ app.get(
         p.status payment_status,
         p.provider payment_provider,
         p.reference payment_reference,
+        p.proof_url payment_proof_url,
+        p.proof_note payment_proof_note,
+        p.proof_submitted_at payment_proof_submitted_at,
         d.status delivery_status,
         d.notes delivery_notes,
         driver.name delivery_name,
@@ -1949,18 +2137,364 @@ app.get(
         oi.*,
         pr.name product_name,
         pr.image_url,
-        seller.name seller_name
+        COALESCE(sp.shop_name,seller.name) seller_name
       FROM order_items oi
       JOIN products pr ON pr.id=oi.product_id
       JOIN users seller ON seller.id=oi.seller_id
+      LEFT JOIN seller_profiles sp ON sp.seller_id=oi.seller_id
       WHERE oi.order_id=?
-      ORDER BY seller.name,oi.id`,
+      ORDER BY seller_name,oi.id`,
       [order.id],
     );
-    res.json({ ...order, items });
+    const [paymentInstructions] = await pool.query(
+      `SELECT ss.seller_id,COALESCE(sp.shop_name,u.name) seller_name,
+        COALESCE(sp.whatsapp,u.phone) moncash_number,
+        ss.gross_amount amount,
+        ss.payment_status seller_payment_status,
+        ss.payment_proof_url,
+        ss.payment_rejection_reason,
+        ss.payment_rejected_at,
+        ss.payment_validated_at
+       FROM seller_sales ss
+       JOIN users u ON u.id=ss.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=ss.seller_id
+       WHERE ss.order_id=?
+       ORDER BY seller_name`,
+      [order.id],
+    );
+    const [events] = await pool.query(
+      `SELECT oe.*,COALESCE(sp.shop_name,u.name) actor_name
+       FROM order_events oe
+       LEFT JOIN users u ON u.id=oe.actor_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=oe.actor_id
+       WHERE oe.order_id=?
+       ORDER BY oe.created_at DESC
+       LIMIT 30`,
+      [order.id],
+    );
+    res.json({ ...order, items, paymentInstructions, events });
   }),
 );
 
+app.patch(
+  "/api/payments/:orderId/direct-proof",
+  authenticate,
+  authorize("client"),
+  uploadPaymentProof,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[order]] = await connection.query(
+        `SELECT o.id,o.order_number,p.status payment_status
+         FROM orders o
+         JOIN payments p ON p.order_id=o.id
+         WHERE o.id=? AND o.client_id=?
+         FOR UPDATE`,
+        [req.params.orderId, req.user.id],
+      );
+      if (!order) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Commande ou paiement introuvable." });
+      }
+      if (order.payment_status === "paid") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Cette commande est deja marquee comme payee." });
+      }
+      if (!req.file) {
+        await connection.rollback();
+        return res.status(422).json({ message: "Ajoutez une capture ou photo de la preuve MonCash." });
+      }
+
+      const proofUrl = `/uploads/payments/${req.file.filename}`;
+      const reference = `DIRECT-${Date.now()}`;
+      await connection.query(
+        `UPDATE payments
+         SET provider='direct_seller',reference=?,proof_url=?,proof_note=?,proof_submitted_at=NOW(),status='pending'
+         WHERE order_id=?`,
+        [reference, proofUrl, req.body.note || null, order.id],
+      );
+      await connection.query(
+        `UPDATE seller_sales
+         SET payment_status='proof_submitted',
+             payment_proof_url=?,
+             payment_proof_note=?,
+             payment_rejection_reason=NULL,
+             payment_reference=?,
+             payment_submitted_at=NOW(),
+             payment_rejected_at=NULL
+         WHERE order_id=? AND payment_status!='paid'`,
+        [proofUrl, req.body.note || null, reference, order.id],
+      );
+
+      const [sellers] = await connection.query(
+        "SELECT DISTINCT seller_id FROM seller_sales WHERE order_id=?",
+        [order.id],
+      );
+      await logOrderEvent(connection, {
+        orderId: order.id,
+        actorId: req.user.id,
+        actorRole: "client",
+        type: "payment.proof_submitted",
+        title: "Preuve MonCash envoyee",
+        message: req.body.note || "Le client a envoye une preuve de paiement.",
+        metadata: { reference, proofUrl },
+      });
+      await notifyUser(
+        connection,
+        req.user.id,
+        "client",
+        "payment.proof_submitted",
+        "Preuve de paiement envoyee",
+        `Votre preuve MonCash pour la commande ${order.order_number} a ete recue.`,
+        "/my-orders",
+        "payment",
+        order.id,
+      );
+      for (const seller of sellers) {
+        await notifyUser(
+          connection,
+          seller.seller_id,
+          "seller",
+          "payment.proof_received",
+          "Preuve MonCash recue",
+          `Un client a envoye une preuve pour la commande ${order.order_number}.`,
+          "/seller/orders",
+          "payment",
+          order.id,
+        );
+      }
+
+      await connection.commit();
+      res.json({
+        message: "Preuve envoyee. Chaque vendeur doit maintenant verifier et valider sa part du paiement.",
+        orderId: order.id,
+        orderNumber: order.order_number,
+        paymentStatus: "pending",
+        reference,
+        proofUrl,
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+app.patch(
+  "/api/seller/sales/:id/payment/validate",
+  authenticate,
+  authorize("seller"),
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[sale]] = await connection.query(
+        `SELECT
+           ss.id,
+           ss.order_id,
+           ss.seller_id,
+           ss.payment_status,
+           ss.payment_proof_url,
+           ss.payment_rejection_reason,
+           o.client_id,
+           o.order_number
+         FROM seller_sales ss
+         JOIN orders o ON o.id=ss.order_id
+         WHERE ss.id=? AND ss.seller_id=?
+         FOR UPDATE`,
+        [req.params.id, req.user.id],
+      );
+      if (!sale) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Vente introuvable." });
+      }
+      if (!sale.payment_proof_url) {
+        await connection.rollback();
+        return res.status(409).json({ message: "Aucune preuve MonCash n'a encore ete envoyee pour cette vente." });
+      }
+      if (sale.payment_status === "paid") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Paiement deja valide pour cette vente." });
+      }
+      if (sale.payment_status === "failed") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Cette preuve a ete refusee. Attendez une nouvelle preuve du client." });
+      }
+
+      await connection.query(
+        `UPDATE seller_sales
+         SET payment_status='paid', payment_rejection_reason=NULL, payment_rejected_at=NULL, payment_validated_at=NOW(), payment_validated_by=?
+         WHERE id=?`,
+        [req.user.id, sale.id],
+      );
+      await connection.query(
+        "UPDATE seller_sales SET status='confirmed' WHERE id=? AND status='pending'",
+        [sale.id],
+      );
+
+      const [[remaining]] = await connection.query(
+        "SELECT COUNT(*) unpaid FROM seller_sales WHERE order_id=? AND payment_status!='paid'",
+        [sale.order_id],
+      );
+      const allSellerPaymentsValidated = Number(remaining.unpaid) === 0;
+      if (allSellerPaymentsValidated) {
+        await connection.query(
+          "UPDATE payments SET status='paid',paid_at=NOW() WHERE order_id=?",
+          [sale.order_id],
+        );
+        await connection.query(
+          "UPDATE orders SET status='confirmed' WHERE id=? AND status='pending'",
+          [sale.order_id],
+        );
+      }
+
+      await logOrderEvent(connection, {
+        orderId: sale.order_id,
+        sellerSaleId: sale.id,
+        actorId: req.user.id,
+        actorRole: "seller",
+        type: "payment.validated",
+        title: "Paiement valide par le vendeur",
+        message: `Le vendeur a valide sa part du paiement pour la commande ${sale.order_number}.`,
+      });
+
+      await notifyUser(
+        connection,
+        sale.client_id,
+        "client",
+        allSellerPaymentsValidated ? "payment.paid" : "payment.part_validated",
+        allSellerPaymentsValidated ? "Paiement confirme" : "Paiement vendeur valide",
+        allSellerPaymentsValidated
+          ? `Tous les vendeurs ont valide le paiement de la commande ${sale.order_number}.`
+          : `Un vendeur a valide sa part du paiement pour la commande ${sale.order_number}.`,
+        "/my-orders",
+        "payment",
+        sale.order_id,
+      );
+      await notifyUser(
+        connection,
+        req.user.id,
+        "seller",
+        "payment.validated",
+        "Paiement valide",
+        `Vous avez valide le paiement de la commande ${sale.order_number}.`,
+        "/seller/orders",
+        "payment",
+        sale.order_id,
+      );
+
+      await connection.commit();
+      res.json({
+        message: allSellerPaymentsValidated
+          ? "Paiement valide. Tous les vendeurs ont confirme cette commande."
+          : "Votre paiement vendeur est valide. La commande attend les autres vendeurs si necessaire.",
+        saleId: sale.id,
+        orderId: sale.order_id,
+        sellerPaymentStatus: "paid",
+        paymentStatus: allSellerPaymentsValidated ? "paid" : "pending",
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+app.patch(
+  "/api/seller/sales/:id/payment/reject",
+  authenticate,
+  authorize("seller"),
+  [body("reason").trim().isLength({ min: 8, max: 500 })],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[sale]] = await connection.query(
+        `SELECT ss.id,ss.order_id,ss.seller_id,ss.payment_status,ss.payment_proof_url,
+           o.client_id,o.order_number,COALESCE(sp.shop_name,u.name) seller_name
+         FROM seller_sales ss
+         JOIN orders o ON o.id=ss.order_id
+         JOIN users u ON u.id=ss.seller_id
+         LEFT JOIN seller_profiles sp ON sp.seller_id=ss.seller_id
+         WHERE ss.id=? AND ss.seller_id=?
+         FOR UPDATE`,
+        [req.params.id, req.user.id],
+      );
+      if (!sale) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Vente introuvable." });
+      }
+      if (!sale.payment_proof_url) {
+        await connection.rollback();
+        return res.status(409).json({ message: "Aucune preuve MonCash n'a encore ete envoyee pour cette vente." });
+      }
+      if (sale.payment_status === "paid") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Un paiement deja valide ne peut pas etre refuse." });
+      }
+
+      await connection.query(
+        `UPDATE seller_sales
+         SET payment_status='failed', payment_rejection_reason=?, payment_rejected_at=NOW(), payment_validated_at=NULL, payment_validated_by=NULL
+         WHERE id=?`,
+        [req.body.reason, sale.id],
+      );
+      await connection.query(
+        "UPDATE payments SET status='pending' WHERE order_id=? AND status!='paid'",
+        [sale.order_id],
+      );
+      await logOrderEvent(connection, {
+        orderId: sale.order_id,
+        sellerSaleId: sale.id,
+        actorId: req.user.id,
+        actorRole: "seller",
+        type: "payment.rejected",
+        title: "Preuve de paiement refusee",
+        message: req.body.reason,
+        metadata: { sellerName: sale.seller_name },
+      });
+      await notifyUser(
+        connection,
+        sale.client_id,
+        "client",
+        "payment.rejected",
+        "Preuve MonCash refusee",
+        `La boutique ${sale.seller_name} a refuse la preuve de paiement pour la commande ${sale.order_number}. Motif : ${req.body.reason}`,
+        "/my-orders",
+        "payment",
+        sale.order_id,
+      );
+      await notifyUser(
+        connection,
+        req.user.id,
+        "seller",
+        "payment.rejected",
+        "Preuve refusee",
+        `Vous avez refuse la preuve de paiement de la commande ${sale.order_number}.`,
+        "/seller/orders",
+        "payment",
+        sale.order_id,
+      );
+      await connection.commit();
+      res.json({
+        message: "Preuve refusee. Le client peut envoyer une nouvelle preuve depuis Mes commandes.",
+        saleId: sale.id,
+        orderId: sale.order_id,
+        sellerPaymentStatus: "failed",
+        rejectionReason: req.body.reason,
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
 app.patch(
   "/api/payments/:orderId/simulate",
   authenticate,
@@ -2051,29 +2585,62 @@ app.get(
   authenticate,
   authorize("delivery"),
   asyncRoute(async (req, res) => {
-    const [[stats]] = await pool.query(
+    const [[mainStats]] = await pool.query(
       `SELECT
         COUNT(*) assigned_total,
-        SUM(status='assigned') awaiting_pickup,
-        SUM(status='picked_up') ready_to_depart,
-        SUM(status='in_transit') in_transit,
-        SUM(status='delivered') delivered,
-        SUM(status='failed') failed
+        COALESCE(SUM(status='assigned'),0) awaiting_pickup,
+        COALESCE(SUM(status='picked_up'),0) ready_to_depart,
+        COALESCE(SUM(status='in_transit'),0) in_transit,
+        COALESCE(SUM(status='delivered'),0) delivered,
+        COALESCE(SUM(status='failed'),0) failed
        FROM deliveries
        WHERE delivery_user_id=?`,
       [req.user.id],
     );
-    const [recent] = await pool.query(
+    const [[sellerStats]] = await pool.query(
+      `SELECT
+        COUNT(*) assigned_total,
+        COALESCE(SUM(status='assigned'),0) awaiting_pickup,
+        COALESCE(SUM(status='picked_up'),0) ready_to_depart,
+        COALESCE(SUM(status='in_transit'),0) in_transit,
+        COALESCE(SUM(status='delivered'),0) delivered,
+        COALESCE(SUM(status='failed'),0) failed
+       FROM seller_delivery_assignments
+       WHERE delivery_user_id=?`,
+      [req.user.id],
+    );
+    const stats = {
+      assigned_total: Number(mainStats.assigned_total || 0) + Number(sellerStats.assigned_total || 0),
+      awaiting_pickup: Number(mainStats.awaiting_pickup || 0) + Number(sellerStats.awaiting_pickup || 0),
+      ready_to_depart: Number(mainStats.ready_to_depart || 0) + Number(sellerStats.ready_to_depart || 0),
+      in_transit: Number(mainStats.in_transit || 0) + Number(sellerStats.in_transit || 0),
+      delivered: Number(mainStats.delivered || 0) + Number(sellerStats.delivered || 0),
+      failed: Number(mainStats.failed || 0) + Number(sellerStats.failed || 0),
+    };
+    const [mainRecent] = await pool.query(
       `SELECT d.id,d.status,d.assigned_at,d.delivered_at,o.order_number,o.delivery_address,o.total
        FROM deliveries d
        JOIN orders o ON o.id=d.order_id
-       WHERE d.delivery_user_id=?
-       ORDER BY
-         CASE WHEN d.status IN ('assigned','picked_up','in_transit') THEN 0 ELSE 1 END,
-         COALESCE(d.delivered_at,d.assigned_at) DESC
-       LIMIT 5`,
+       WHERE d.delivery_user_id=?`,
       [req.user.id],
     );
+    const [sellerRecent] = await pool.query(
+      `SELECT CONCAT('seller-',sda.id) id,sda.status,sda.assigned_at,sda.delivered_at,
+        o.order_number,o.delivery_address,ss.gross_amount total
+       FROM seller_delivery_assignments sda
+       JOIN seller_sales ss ON ss.id=sda.seller_sale_id
+       JOIN orders o ON o.id=sda.order_id
+       WHERE sda.delivery_user_id=?`,
+      [req.user.id],
+    );
+    const recent = [...sellerRecent, ...mainRecent]
+      .sort((a, b) => {
+        const activeA = ['assigned','picked_up','in_transit'].includes(a.status) ? 0 : 1;
+        const activeB = ['assigned','picked_up','in_transit'].includes(b.status) ? 0 : 1;
+        if (activeA !== activeB) return activeA - activeB;
+        return new Date(b.delivered_at || b.assigned_at || 0) - new Date(a.delivered_at || a.assigned_at || 0);
+      })
+      .slice(0, 5);
     res.json({ stats, recent });
   }),
 );
@@ -2109,7 +2676,37 @@ app.get(
        ORDER BY COALESCE(d.delivered_at,d.assigned_at) DESC`,
       [req.user.id],
     );
-    res.json(rows);
+    const [sellerRows] = await pool.query(
+      `SELECT
+        CONCAT('seller-',sda.id) id,
+        sda.status,
+        sda.assigned_at,
+        sda.delivered_at,
+        sda.signer_name,
+        sda.delivery_notes proof_notes,
+        sda.confirmed_at proof_confirmed_at,
+        o.order_number,
+        o.delivery_address,
+        ss.gross_amount total,
+        o.created_at order_created_at,
+        client.name client_name,
+        client.phone client_phone,
+        COUNT(DISTINCT oi.id) item_count,
+        COALESCE(sp.shop_name,seller.name) pickup_shops,
+        COALESCE(sp.pickup_address,'Adresse boutique non renseignee') pickup_addresses
+       FROM seller_delivery_assignments sda
+       JOIN seller_sales ss ON ss.id=sda.seller_sale_id
+       JOIN orders o ON o.id=sda.order_id
+       JOIN users client ON client.id=o.client_id
+       JOIN users seller ON seller.id=sda.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=sda.seller_id
+       LEFT JOIN order_items oi ON oi.order_id=o.id AND oi.seller_id=sda.seller_id
+       WHERE sda.delivery_user_id=?
+       GROUP BY sda.id,o.id,ss.id,client.id,seller.id,sp.shop_name,sp.pickup_address
+       ORDER BY COALESCE(sda.delivered_at,sda.assigned_at) DESC`,
+      [req.user.id],
+    );
+    res.json([...sellerRows, ...rows]);
   }),
 );
 app.get(
@@ -2117,6 +2714,16 @@ app.get(
   authenticate,
   authorize("delivery"),
   asyncRoute(async (req, res) => {
+    if (String(req.params.id).startsWith("seller-")) {
+      const assignmentId = String(req.params.id).replace("seller-", "");
+      const [[proof]] = await pool.query(
+        `SELECT signer_name,signature_data,delivery_notes,confirmed_at
+         FROM seller_delivery_assignments
+         WHERE id=? AND delivery_user_id=?`,
+        [assignmentId, req.user.id],
+      );
+      return res.json(proof || null);
+    }
     const [[proof]] = await pool.query(
       `SELECT dp.signer_name,dp.signature_data,dp.delivery_notes,dp.confirmed_at
        FROM deliveries d
@@ -2132,6 +2739,24 @@ app.get(
   authenticate,
   authorize("delivery"),
   asyncRoute(async (req, res) => {
+    if (String(req.params.id).startsWith("seller-")) {
+      const assignmentId = String(req.params.id).replace("seller-", "");
+      const [items] = await pool.query(
+        `SELECT oi.product_id,oi.quantity,oi.unit_price,oi.subtotal,
+          p.name product_name,p.image_url,
+          COALESCE(sp.shop_name,seller.name) shop_name,
+          sp.whatsapp shop_whatsapp
+         FROM seller_delivery_assignments sda
+         JOIN order_items oi ON oi.order_id=sda.order_id AND oi.seller_id=sda.seller_id
+         JOIN products p ON p.id=oi.product_id
+         JOIN users seller ON seller.id=sda.seller_id
+         LEFT JOIN seller_profiles sp ON sp.seller_id=seller.id
+         WHERE sda.id=? AND sda.delivery_user_id=?
+         ORDER BY p.name`,
+        [assignmentId, req.user.id],
+      );
+      return res.json(items);
+    }
     const [items] = await pool.query(
       `SELECT oi.product_id,oi.quantity,oi.unit_price,oi.subtotal,
         p.name product_name,p.image_url,
@@ -2254,6 +2879,64 @@ app.patch(
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      if (String(req.params.id).startsWith("seller-")) {
+        const assignmentId = String(req.params.id).replace("seller-", "");
+        const [[assignment]] = await connection.query(
+          `SELECT sda.*,ss.status sale_status,o.client_id,o.order_number,u.profile_image_url
+           FROM seller_delivery_assignments sda
+           JOIN seller_sales ss ON ss.id=sda.seller_sale_id
+           JOIN orders o ON o.id=sda.order_id
+           JOIN users u ON u.id=sda.delivery_user_id
+           WHERE sda.id=? AND sda.delivery_user_id=? FOR UPDATE`,
+          [assignmentId, req.user.id],
+        );
+        if (!assignment) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Livraison boutique introuvable." });
+        }
+        if (!assignment.profile_image_url) {
+          await connection.rollback();
+          return res.status(409).json({ message: "Ajoutez votre photo de profil avant de modifier une livraison." });
+        }
+        const allowedTransitions = {
+          assigned: ["picked_up", "failed"],
+          picked_up: ["in_transit", "failed"],
+          in_transit: ["delivered", "failed"],
+        };
+        if (!allowedTransitions[assignment.status]?.includes(req.body.status)) {
+          await connection.rollback();
+          return res.status(409).json({ message: "Cette etape de livraison n'est pas autorisee." });
+        }
+        if (req.body.status === "delivered" && !req.body.signatureData.startsWith("data:image/png;base64,")) {
+          await connection.rollback();
+          return res.status(422).json({ message: "La signature client est invalide." });
+        }
+        await connection.query(
+          `UPDATE seller_delivery_assignments
+           SET status=?,delivered_at=IF(?='delivered',NOW(),delivered_at),
+             signer_name=IF(?='delivered',?,signer_name),
+             signature_data=IF(?='delivered',?,signature_data),
+             delivery_notes=?,confirmed_at=IF(?='delivered',NOW(),confirmed_at)
+           WHERE id=?`,
+          [req.body.status, req.body.status, req.body.status, req.body.signerName || null, req.body.status, req.body.signatureData || null, req.body.notes || null, req.body.status, assignment.id],
+        );
+        if (req.body.status === "delivered") {
+          await connection.query("UPDATE seller_sales SET status='completed' WHERE id=?", [assignment.seller_sale_id]);
+          await connection.query(
+            `UPDATE orders o
+             SET o.status='delivered'
+             WHERE o.id=? AND NOT EXISTS (
+               SELECT 1 FROM seller_sales ss
+               WHERE ss.order_id=o.id AND ss.status NOT IN ('completed','cancelled')
+             )`,
+            [assignment.order_id],
+          );
+          await notifyUser(connection, assignment.seller_id, "seller", "delivery.seller_delivered", "Commande livree", `La livraison de ${assignment.order_number} est finalisee.`, "/seller/orders", "seller_sale", assignment.seller_sale_id);
+          await notifyUser(connection, assignment.client_id, "client", "delivery.seller_delivered", "Livraison confirmee", `Une partie de votre commande ${assignment.order_number} a ete livree.`, "/my-orders", "order", assignment.order_id);
+        }
+        await connection.commit();
+        return res.json({ message: "Livraison boutique mise a jour." });
+      }
       const [[delivery]] = await connection.query(
         `SELECT d.id,d.order_id,d.status,o.client_id,o.order_number,u.profile_image_url
          FROM deliveries d

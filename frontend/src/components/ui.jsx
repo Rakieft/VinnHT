@@ -36,7 +36,7 @@ export function SearchBar() {
   return (
     <div className="search-bar">
       <Search />
-      <input aria-label="Rechercher" placeholder="Que recherchez-vous aujourd’hui ?" />
+      <input aria-label="Rechercher" placeholder="Que recherchez-vous aujourd’hui " />
       <span>
         <MapPin /> Tout Haïti
       </span>

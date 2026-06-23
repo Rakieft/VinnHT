@@ -1,0 +1,41 @@
+CREATE TABLE IF NOT EXISTS seller_delivery_drivers (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  seller_id BIGINT UNSIGNED NOT NULL,
+  delivery_user_id BIGINT UNSIGNED NOT NULL,
+  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  zones TEXT,
+  vehicle_type VARCHAR(80),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY unique_seller_delivery_driver (seller_id, delivery_user_id),
+  INDEX idx_seller_delivery_drivers_seller (seller_id, status),
+  INDEX idx_seller_delivery_drivers_user (delivery_user_id, status),
+  FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (delivery_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS seller_delivery_assignments (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  seller_sale_id BIGINT UNSIGNED NOT NULL UNIQUE,
+  seller_id BIGINT UNSIGNED NOT NULL,
+  order_id BIGINT UNSIGNED NOT NULL,
+  delivery_user_id BIGINT UNSIGNED NOT NULL,
+  assigned_by BIGINT UNSIGNED NOT NULL,
+  status ENUM('assigned','picked_up','in_transit','delivered','failed') NOT NULL DEFAULT 'assigned',
+  assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  delivered_at TIMESTAMP NULL,
+  signer_name VARCHAR(160),
+  signature_data LONGTEXT,
+  delivery_notes TEXT,
+  confirmed_at TIMESTAMP NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_seller_delivery_assignments_driver (delivery_user_id, status, assigned_at),
+  INDEX idx_seller_delivery_assignments_seller (seller_id, status, assigned_at),
+  INDEX idx_seller_delivery_assignments_order (order_id),
+  FOREIGN KEY (seller_sale_id) REFERENCES seller_sales(id) ON DELETE CASCADE,
+  FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (delivery_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE CASCADE
+);

@@ -18,7 +18,7 @@ const products = [
     price: 6500,
     stock: 16,
     image:
-      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1523275335684-37898b6baf30auto=format&fit=crop&w=900&q=80",
   },
   {
     category: "mode",
@@ -28,7 +28,7 @@ const products = [
     price: 4200,
     stock: 4,
     image:
-      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62auto=format&fit=crop&w=900&q=80",
   },
 ];
 
@@ -39,7 +39,7 @@ try {
   const passwordHash = await bcrypt.hash(account.password, 12);
   await connection.query(
     `INSERT INTO users (name,email,phone,password_hash,role,status)
-     VALUES (?,?,?,?,'seller','active')
+     VALUES (,,,,'seller','active')
      ON DUPLICATE KEY UPDATE
       name=VALUES(name),
       phone=VALUES(phone),
@@ -50,18 +50,18 @@ try {
   );
 
   const [[seller]] = await connection.query(
-    "SELECT id FROM users WHERE email=?",
+    "SELECT id FROM users WHERE email=",
     [account.email],
   );
   await connection.query(
-    "INSERT IGNORE INTO user_roles (user_id,role) VALUES (?,'client'),(?,'seller')",
+    "INSERT IGNORE INTO user_roles (user_id,role) VALUES (,'client'),(,'seller')",
     [seller.id, seller.id],
   );
 
   await connection.query(
     `INSERT INTO seller_profiles
       (seller_id,shop_name,category,description,whatsapp,pickup_address,status)
-     VALUES (?,?,?,?,?,?,'active')
+     VALUES (,,,,,,'active')
      ON DUPLICATE KEY UPDATE
       shop_name=VALUES(shop_name),
       category=VALUES(category),
@@ -81,13 +81,13 @@ try {
 
   for (const product of products) {
     const [[category]] = await connection.query(
-      "SELECT id FROM categories WHERE slug=?",
+      "SELECT id FROM categories WHERE slug=",
       [product.category],
     );
     await connection.query(
       `INSERT INTO products
         (seller_id,category_id,name,slug,description,price,stock,image_url,status)
-       VALUES (?,?,?,?,?,?,?,?,'active')
+       VALUES (,,,,,,,,'active')
        ON DUPLICATE KEY UPDATE
         seller_id=VALUES(seller_id),
         category_id=VALUES(category_id),

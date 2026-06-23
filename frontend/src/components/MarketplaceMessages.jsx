@@ -1,6 +1,19 @@
 import React, { useEffect, useState } from "react";
-import { CircleUserRound, MessageCircle, Search, Send } from "lucide-react";
+import { ArrowLeft, CircleUserRound, MessageCircle, Search, Send } from "lucide-react";
 import { useLocation } from "react-router-dom";
+import { assetUrl } from "../config/runtime.js";
+
+function ConversationAvatar({ image, name, large = false }) {
+  return (
+    <span className={large ? "conversation-avatar large" : "conversation-avatar"}>
+      {image ? (
+        <img src={assetUrl(image)} alt={name} />
+      ) : (
+        (name || "??").slice(0, 2).toUpperCase() || <CircleUserRound />
+      )}
+    </span>
+  );
+}
 
 export default function MarketplaceMessages({ api, user, sellerMode = false }) {
   const location = useLocation();
@@ -14,11 +27,12 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [mobileConversationOpen, setMobileConversationOpen] = useState(Boolean(requestedConversation || openSupport));
 
   const loadConversations = async () => {
     const { data } = await api.get("/messages/conversations");
     setConversations(data);
-    setActive((current) => requestedConversation || current || data[0]?.id || null);
+    setActive((current) => requestedConversation || current || data[0].id || null);
   };
 
   const loadMessages = async (id) => {
@@ -32,6 +46,7 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
       if (openSupport && !sellerMode) {
         const { data } = await api.post("/messages/support");
         setActive(data.id);
+        setMobileConversationOpen(true);
       }
       await loadConversations();
     };
@@ -53,6 +68,7 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
     });
     await loadConversations();
     setActive(data.id);
+    setMobileConversationOpen(true);
     event.target.value = "";
   };
 
@@ -65,22 +81,13 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
   };
 
   const visible = conversations.filter((item) =>
-    item.name.toLowerCase().includes(query.toLowerCase())
+    (item.name || "").toLowerCase().includes(query.toLowerCase())
   );
   const current = conversations.find((item) => item.id === active);
 
   return (
     <div className="seller-flow marketplace-messages-page">
-      <header>
-        <span>Communication</span>
-        <h1>{sellerMode ? "Messages clients" : "Messages"}</h1>
-        <p>
-          {sellerMode
-            ? "Répondez aux questions de vos clients depuis votre boutique."
-            : "Discutez directement avec les boutiques VinnHT."}
-        </p>
-      </header>
-      <div className="client-messages-shell">
+      <div className={`client-messages-shell ${mobileConversationOpen ? "conversation-open" : ""}`}>
         <aside className="conversation-list">
           {!sellerMode && (
             <select defaultValue="" onChange={startConversation}>
@@ -105,10 +112,13 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
           {visible.map((conversation) => (
             <button
               className={active === conversation.id ? "active" : ""}
-              onClick={() => setActive(conversation.id)}
+              onClick={() => {
+                setActive(conversation.id);
+                setMobileConversationOpen(true);
+              }}
               key={conversation.id}
             >
-              <span>{conversation.name.slice(0, 2).toUpperCase()}</span>
+              <ConversationAvatar image={conversation.image_url} name={conversation.name} />
               <p>
                 <b>{conversation.name}</b>
                 <small>{conversation.last_message || "Nouvelle conversation"}</small>
@@ -121,7 +131,15 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
           {current ? (
             <>
               <header>
-                <span>{current.name.slice(0, 2).toUpperCase()}</span>
+                <button
+                  type="button"
+                  className="messages-mobile-back"
+                  onClick={() => setMobileConversationOpen(false)}
+                  aria-label="Retour aux discussions"
+                >
+                  <ArrowLeft />
+                </button>
+                <ConversationAvatar image={current.image_url} name={current.name} large />
                 <div>
                   <h3>{current.name}</h3>
                   <p>
@@ -160,7 +178,7 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
               <h3>{sellerMode ? "Aucun message client" : "Commencez une conversation"}</h3>
               <p>
                 {sellerMode
-                  ? "Les nouvelles questions de vos clients apparaîtront ici."
+                   ? "Les nouvelles questions de vos clients apparaîtront ici."
                   : "Choisissez une boutique dans la liste."}
               </p>
             </div>

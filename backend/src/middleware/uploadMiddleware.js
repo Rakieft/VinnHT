@@ -8,6 +8,7 @@ const uploadDirectories = {
   products: path.join(backendDirectory, "uploads", "products"),
   profiles: path.join(backendDirectory, "uploads", "profiles"),
   shops: path.join(backendDirectory, "uploads", "shops"),
+  payments: path.join(backendDirectory, "uploads", "payments"),
 };
 
 Object.values(uploadDirectories).forEach((directory) => {
@@ -56,6 +57,10 @@ const createImageUpload = (storage) =>
 export const uploadProfileImage = createImageUpload(
   createStorage(uploadDirectories.profiles, "profil"),
 ).single("profilePhoto");
+
+export const uploadPaymentProof = createImageUpload(
+  createStorage(uploadDirectories.payments, "preuve-paiement"),
+).single("paymentProof");
 
 export const uploadSellerImages = multer({
   storage: multer.diskStorage({

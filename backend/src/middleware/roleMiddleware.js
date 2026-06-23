@@ -1,5 +1,5 @@
 export const authorize = (...roles) => (req, res, next) => {
-  const userRoles = req.user?.roles || [req.user?.role].filter(Boolean);
+  const userRoles = req.user.roles || [req.user.role].filter(Boolean);
   const allowed =
     roles.some((role) => userRoles.includes(role)) || userRoles.includes("admin");
 

@@ -10,6 +10,7 @@ import {
   CircleUserRound,
   Clock3,
   CreditCard,
+  Edit3,
   Eye,
   Flame,
   Headphones,
@@ -46,8 +47,8 @@ const imageSource = (url) =>
   url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url;
 const clientProductPrice = (product) => {
   const activeOffer =
-    product?.is_featured &&
-    Number(product?.promotional_price) > 0 &&
+    product.is_featured &&
+    Number(product.promotional_price) > 0 &&
     Number(product.promotional_price) < Number(product.price) &&
     (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date());
 
@@ -63,7 +64,7 @@ const products = [
     category_name: "Électronique",
     seller_name: "Tech Ayiti",
     image_url:
-      "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1505740420928-5e560c06d30eauto=format&fit=crop&w=900&q=80",
   },
   {
     id: 102,
@@ -73,7 +74,7 @@ const products = [
     category_name: "Maison & Meubles",
     seller_name: "Kay Design",
     image_url:
-      "https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1567538096630-e0c55bd6374cauto=format&fit=crop&w=900&q=80",
   },
   {
     id: 103,
@@ -83,7 +84,7 @@ const products = [
     category_name: "Mode",
     seller_name: "Kreyol Chic",
     image_url:
-      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62auto=format&fit=crop&w=900&q=80",
   },
   {
     id: 104,
@@ -93,7 +94,7 @@ const products = [
     category_name: "Électronique",
     seller_name: "Mobile Plus",
     image_url:
-      "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9auto=format&fit=crop&w=900&q=80",
   },
   {
     id: 105,
@@ -103,7 +104,7 @@ const products = [
     category_name: "Supermarché",
     seller_name: "Marché Lakay",
     image_url:
-      "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1542838132-92c53300491eauto=format&fit=crop&w=900&q=80",
   },
   {
     id: 106,
@@ -113,7 +114,7 @@ const products = [
     category_name: "Mode",
     seller_name: "Urban Store",
     image_url:
-      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1523275335684-37898b6baf30auto=format&fit=crop&w=900&q=80",
   },
 ];
 
@@ -201,7 +202,7 @@ function ClientProductCard({
     >
       <div className="client-product-image">
         <img src={imageSource(product.image_url)} alt={product.name} />
-        {product.is_featured && (
+        {Boolean(product.is_featured) && (
           <img
             className="client-best-price-ribbon"
             src="/best-price-ribbon.png"
@@ -239,12 +240,13 @@ function ClientProductCard({
 }
 
 function ClientStats({ dashboard, seller }) {
-  const counts = dashboard?.stats || {};
+  const safeDashboard = dashboard || {};
+  const counts = safeDashboard.stats || {};
   const stats = [
     [Package, "Commandes totales", Number(counts.orders || 0), "Toutes vos commandes"],
     [Heart, "Produits favoris", Number(counts.favorites || 0), "Sélection personnelle"],
     [ShoppingCart, "Articles dans le panier", Number(counts.cart_items || 0), "Prêts à commander"],
-    [Store, "Statut vendeur", null, seller ? "Vendeur approuvé" : dashboard?.sellerRequest?.status || "Client standard"],
+    [Store, "Statut vendeur", null, seller ? "Vendeur approuve" : safeDashboard.sellerRequest?.status || "Client standard"],
   ];
 
   return (
@@ -278,11 +280,12 @@ export function ClientDashboardContent({
   dashboardData,
 }) {
   const catalog = productData;
-  const activeOrder = dashboardData?.activeOrder;
-  const activityItems = dashboardData?.activity || [];
+  const dashboard = dashboardData || {};
+  const activeOrder = dashboard.activeOrder || null;
+  const activityItems = dashboard.activity || [];
   const orderProgress = ["confirmed", "processing", "shipped", "delivered"];
   const currentProgress = activeOrder
-    ? Math.max(
+     ? Math.max(
         activeOrder.payment_status === "paid" ? 0 : -1,
         orderProgress.indexOf(activeOrder.status),
         activeOrder.delivery_status === "in_transit" ? 2 : -1,
@@ -308,7 +311,7 @@ export function ClientDashboardContent({
             <Sparkles size={15} />
             Votre espace personnel
           </span>
-          <h1>Bonjour, {user?.name || "Client"} 👋</h1>
+          <h1>Bonjour, {user.name || "Client"}</h1>
           <p>Découvrez les meilleures offres du moment sur VinnHT.</p>
           <div className="client-hero-actions">
             <Link className="button primary" to="/products">
@@ -353,7 +356,7 @@ export function ClientDashboardContent({
         </div>
       </motion.section>
 
-      <ClientStats dashboard={dashboardData} seller={user?.roles?.includes("seller")} />
+      <ClientStats dashboard={dashboard} seller={user.roles.includes("seller")} />
 
       <section className="client-dashboard-grid">
         <article className="client-panel recent-order-panel">
@@ -448,7 +451,7 @@ export function ClientDashboardContent({
           </span>
           <h2>Des prix pensés pour votre quotidien.</h2>
           <p>Découvrez les réductions, nouveautés et produits populaires sélectionnés pour vous.</p>
-          <Link to="/products?offers=true">
+          <Link to="/productsoffers=true">
             Voir les offres
             <ArrowRight size={17} />
           </Link>
@@ -492,7 +495,7 @@ export function ClientDashboardContent({
         </div>
       </section>
 
-      {!user?.roles?.includes("seller") && (
+      {!user.roles.includes("seller") && (
         <section className="client-seller-banner">
           <div>
             <span>Votre prochaine étape</span>
@@ -506,8 +509,8 @@ export function ClientDashboardContent({
           <div className="seller-status-card">
             <Store />
             <span>Statut actuel</span>
-            <strong>{dashboardData?.sellerRequest?.status || "Client standard"}</strong>
-            <small>{dashboardData?.sellerRequest ? "Votre demande est suivie par VinnHT." : "Votre boutique peut commencer ici."}</small>
+            <strong>{dashboard.sellerRequest?.status || "Client standard"}</strong>
+            <small>{dashboard.sellerRequest ? "Votre demande est suivie par VinnHT." : "Votre boutique peut commencer ici."}</small>
           </div>
         </section>
       )}
@@ -528,11 +531,10 @@ export function ClientDashboardContent({
             const realShop = true;
             const name = shop.shop_name;
             const category = shop.category || "Boutique VinnHT";
-            const rating = realShop
-              ? Number(shop.review_count) > 0
+            const rating =
+              Number(shop.review_count) > 0
                 ? `${Number(shop.rating).toFixed(1)} (${shop.review_count})`
-                : "Nouveau"
-              : "";
+                : "Nouveau";
             const initials = name.slice(0, 2).toUpperCase();
             const path = `/shops/${shop.seller_id}`;
             return (
@@ -566,12 +568,12 @@ export function ClientDashboardContent({
         <div>
           <Headphones />
           <span>
-            <b>Besoin d’aide ?</b>
+            <b>Besoin d’aide </b>
             Notre équipe est disponible pour vous accompagner.
           </span>
         </div>
         <nav>
-          <Link to="/messages?support=1">Support</Link>
+          <Link to="/messagessupport=1">Support</Link>
         </nav>
       </footer>
     </div>
@@ -592,6 +594,10 @@ export function ClientOrdersContent({
   loading = false,
   selectedOrder,
   onSelect,
+  onSubmitPaymentProof,
+  proofProcessing = false,
+  proofError = "",
+  proofSuccess = "",
 }) {
   const [filter, setFilter] = useState("Toutes");
   const [query, setQuery] = useState("");
@@ -600,7 +606,7 @@ export function ClientOrdersContent({
     ...order,
     displayId: order.order_number || order.id,
     displayDate: order.created_at
-      ? new Date(order.created_at).toLocaleDateString("fr-HT")
+       ? new Date(order.created_at).toLocaleDateString("fr-HT")
       : order.date,
     items: Number(order.item_count || order.items || 0),
     seller: order.seller_names || order.seller,
@@ -671,14 +677,44 @@ export function ClientOrdersContent({
           </motion.article>
         ))}
       </div>
-      {selectedOrder && <ClientOrderDetail order={selectedOrder} />}
+      {selectedOrder && (
+        <ClientOrderDetail
+          order={selectedOrder}
+          onSubmitPaymentProof={onSubmitPaymentProof}
+          proofProcessing={proofProcessing}
+          proofError={proofError}
+          proofSuccess={proofSuccess}
+        />
+      )}
     </ClientPageFrame>
   );
 }
 
-function ClientOrderDetail({ order }) {
+function ClientOrderDetail({
+  order,
+  onSubmitPaymentProof,
+  proofProcessing = false,
+  proofError = "",
+  proofSuccess = "",
+}) {
+  const [proofFile, setProofFile] = useState(null);
+  const [proofNote, setProofNote] = useState("");
+  const [showPaymentProof, setShowPaymentProof] = useState(false);
   const steps = ["confirmed", "processing", "shipped", "delivered"];
   const currentIndex = steps.indexOf(order.status);
+  const paymentInstructions = order.paymentInstructions || [];
+  const hasRejectedPayment = paymentInstructions.some(
+    (instruction) => instruction.seller_payment_status === "failed"
+  );
+  const proofAlreadySent = Boolean(order.payment_proof_url || order.payment_reference) && !hasRejectedPayment;
+  const paymentPaid = order.payment_status === "paid";
+  const canSendProof = !paymentPaid && onSubmitPaymentProof;
+
+  const submitProof = (event) => {
+    event.preventDefault();
+    if (!proofFile || !canSendProof) return;
+    onSubmitPaymentProof(order.id, { file: proofFile, note: proofNote });
+  };
 
   return (
     <section className="client-order-detail">
@@ -698,6 +734,122 @@ function ClientOrderDetail({ order }) {
           </div>
         ))}
       </div>
+      <section className="client-order-payment-panel">
+        <header>
+          <div>
+            <span>Paiement MonCash</span>
+            <h3>{paymentPaid ? "Paiement confirme" : hasRejectedPayment ? "Preuve a corriger" : proofAlreadySent ? "Preuve envoyee" : "Envoyer la preuve"}</h3>
+            <p>
+              Payez chaque vendeur sur son numero MonCash, puis envoyez une capture ou photo de la transaction.
+            </p>
+          </div>
+          <b className={paymentPaid ? "paid" : hasRejectedPayment ? "failed" : proofAlreadySent ? "pending" : "waiting"}>
+            {paymentPaid ? "Valide" : hasRejectedPayment ? "Preuve refusee" : proofAlreadySent ? "En verification vendeur" : "Action requise"}
+          </b>
+        </header>
+        <div className="client-order-moncash-grid">
+          {paymentInstructions.map((instruction) => (
+            <article key={instruction.seller_id || instruction.seller_name}>
+              <small>{instruction.seller_name}</small>
+              <strong>{Number(instruction.amount || 0).toLocaleString("fr-HT")} HTG</strong>
+              <p>MonCash : {instruction.moncash_number || "A confirmer avec le vendeur"}</p>
+              <span className={`client-seller-payment ${instruction.seller_payment_status || "pending"}`}>
+                {instruction.seller_payment_status === "paid"
+                  ? "Valide par le vendeur"
+                  : instruction.seller_payment_status === "failed"
+                    ? "Preuve refusee"
+                    : instruction.seller_payment_status === "proof_submitted"
+                      ? "Preuve recue"
+                      : "En attente"}
+              </span>
+              {instruction.payment_rejection_reason && (
+                <em className="client-payment-rejection-reason">
+                  Motif : {instruction.payment_rejection_reason}
+                </em>
+              )}
+            </article>
+          ))}
+          {!paymentInstructions.length && (
+            <article>
+              <small>VinnHT</small>
+              <strong>{Number(order.total || 0).toLocaleString("fr-HT")} HTG</strong>
+              <p>Les instructions MonCash seront affichees ici.</p>
+            </article>
+          )}
+        </div>
+        {proofAlreadySent && (
+          <div className="client-order-proof-status">
+            <CheckCircle2 />
+            <span>
+              <b>Preuve deja envoyee</b>
+              Reference : {order.payment_reference || "en verification"}
+            </span>
+            {order.payment_proof_url && (
+              <button type="button" onClick={() => setShowPaymentProof((current) => !current)}>
+                {showPaymentProof ? "Masquer la preuve" : "Voir la preuve"}
+              </button>
+            )}
+          </div>
+        )}
+        {showPaymentProof && order.payment_proof_url && (
+          <div className="client-payment-proof-preview">
+            <img src={imageSource(order.payment_proof_url)} alt="Preuve de paiement MonCash" />
+          </div>
+        )}
+        {hasRejectedPayment && (
+          <div className="client-payment-feedback error">
+            Une boutique a refuse la preuve. Corrigez le paiement ou envoyez une nouvelle preuve.
+          </div>
+        )}
+        {canSendProof && (!proofAlreadySent || hasRejectedPayment) && (
+          <form className="payment-proof-form order-payment-proof-form" onSubmit={submitProof}>
+            <label>
+              Capture ou photo MonCash
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(event) => setProofFile(event.target.files?.[0] || null)}
+                required
+              />
+            </label>
+            <label>
+              Note optionnelle
+              <input
+                value={proofNote}
+                onChange={(event) => setProofNote(event.target.value)}
+                placeholder="Ex: paiement envoye a 3 vendeurs"
+              />
+            </label>
+            <button type="submit" disabled={proofProcessing || !proofFile}>
+              <Send size={16} />
+              {proofProcessing ? "Envoi..." : "Envoyer la preuve"}
+            </button>
+          </form>
+        )}
+        {proofError && <div className="client-payment-feedback error">{proofError}</div>}
+        {proofSuccess && <div className="client-payment-feedback success">{proofSuccess}</div>}
+      </section>
+      {Array.isArray(order.events) && order.events.length > 0 && (
+        <section className="client-order-events">
+          <header>
+            <span>Historique</span>
+            <h3>Actions importantes</h3>
+          </header>
+          {order.events.map((event) => (
+            <article key={event.id}>
+              <Clock3 />
+              <div>
+                <strong>{event.title}</strong>
+                {event.message && <p>{event.message}</p>}
+                <small>
+                  {event.actor_name ? `${event.actor_name} - ` : ""}
+                  {event.created_at ? new Date(event.created_at).toLocaleString("fr-HT") : ""}
+                </small>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
       {order.delivery_name && (
         <article className="client-delivery-person">
           <span>
@@ -723,7 +875,7 @@ function ClientOrderDetail({ order }) {
         </article>
       )}
       <div className="order-detail-items">
-        {order.items?.map((item) => (
+        {order.items.map((item) => (
           <article key={item.id}>
             <img src={item.image_url || products[0].image_url} alt={item.product_name} />
             <div>
@@ -788,88 +940,113 @@ export function ClientFavoritesContent({ onAdd, favorites = [], isFavorite, onTo
 }
 
 export function ClientCartContent({ cart, remove, updateQuantity }) {
-  const displayCart = cart;
+  const displayCart = Array.isArray(cart) ? cart : [];
   const groups = useMemo(
     () =>
       displayCart.reduce((result, item) => {
-        result[item.seller_name] = [...(result[item.seller_name] || []), item];
+        const seller = item.shop_name || item.seller_name || "Boutique VinnHT";
+        result[seller] = [...(result[seller] || []), item];
         return result;
       }, {}),
     [displayCart]
   );
-  const subtotal = displayCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const subtotal = displayCart.reduce(
+    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+    0,
+  );
   const delivery = displayCart.length ? 650 : 0;
 
   return (
     <ClientPageFrame
-      eyebrow="Prêt à commander"
+      eyebrow="Pret a commander"
       title="Mon panier"
-      text="Vos articles sont organisés par vendeur pour une commande plus claire."
+      text="Vos articles sont organises par boutique pour une commande plus claire."
     >
       <div className="client-cart-layout">
         <div className="client-cart-groups">
-          {Object.entries(groups).map(([seller, items]) => (
-            <section className="client-cart-seller" key={seller}>
-              <header>
-                <span>
-                  <Store />
-                </span>
-                <div>
-                  <small>Boutique vérifiée</small>
-                  <h3>{seller}</h3>
-                </div>
-                <ShieldCheck />
-              </header>
-              {items.map((item) => (
-                <article className="client-cart-item" key={item.id}>
-                  <img src={item.image_url} alt={item.name} />
+          {displayCart.length ? (
+            Object.entries(groups).map(([seller, items]) => (
+              <section className="client-cart-seller" key={seller}>
+                <header>
+                  <span>
+                    <Store />
+                  </span>
                   <div>
-                    <small>{item.category_name}</small>
-                    <h4>{item.name}</h4>
-                    <p>{item.city}</p>
+                    <small>Boutique verifiee</small>
+                    <h3>{seller}</h3>
                   </div>
-                  <label className="cart-quantity-control">
-                    Qté
-                    <input
-                      type="number"
-                      min="1"
-                      max={Number(item.stock)}
-                      value={item.quantity}
-                      onChange={(event) => updateQuantity?.(item.id, event.target.value)}
-                    />
-                    <small>Max. {item.stock}</small>
-                  </label>
-                  <strong>{(item.price * item.quantity).toLocaleString("fr-HT")} HTG</strong>
-                  <button onClick={() => remove?.(item.id)}>
-                    <Trash2 size={16} />
-                  </button>
-                </article>
-              ))}
+                  <ShieldCheck />
+                </header>
+                {items.map((item) => {
+                  const quantity = Number(item.quantity || 1);
+                  const price = Number(item.price || 0);
+                  const stock = Math.max(1, Number(item.stock || 1));
+
+                  return (
+                    <article className="client-cart-item" key={item.id}>
+                      <img src={imageSource(item.image_url) || "/vinnht-logo.png"} alt={item.name} />
+                      <div>
+                        <small>{item.category_name || "Produit"}</small>
+                        <h4>{item.name}</h4>
+                        <p>{item.city || "Haiti"}</p>
+                      </div>
+                      <label className="cart-quantity-control">
+                        Qte
+                        <input
+                          type="number"
+                          min="1"
+                          max={stock}
+                          value={quantity}
+                          onChange={(event) => updateQuantity?.(item.id, event.target.value)}
+                        />
+                        <small>Max. {stock}</small>
+                      </label>
+                      <strong>{(price * quantity).toLocaleString("fr-HT")} HTG</strong>
+                      <button onClick={() => remove?.(item.id)} aria-label={`Retirer ${item.name}`}>
+                        <Trash2 size={16} />
+                      </button>
+                    </article>
+                  );
+                })}
+              </section>
+            ))
+          ) : (
+            <section className="client-cart-empty">
+              <ShoppingCart />
+              <h2>Votre panier est vide</h2>
+              <p>Ajoutez des produits depuis le catalogue pour commencer votre commande.</p>
+              <Link to="/products">Explorer le catalogue</Link>
             </section>
-          ))}
+          )}
         </div>
         <aside className="client-cart-summary">
-          <span>Résumé de commande</span>
+          <span>Resume de commande</span>
           <h3>Votre total</h3>
           <div>
             <small>Sous-total</small>
             <b>{subtotal.toLocaleString("fr-HT")} HTG</b>
           </div>
           <div>
-            <small>Livraison estimée</small>
+            <small>Livraison estimee</small>
             <b>{delivery.toLocaleString("fr-HT")} HTG</b>
           </div>
           <div className="summary-total">
             <small>Total</small>
             <strong>{(subtotal + delivery).toLocaleString("fr-HT")} HTG</strong>
           </div>
-          <Link to="/checkout">
-            Passer au paiement
-            <ArrowRight size={17} />
-          </Link>
+          {displayCart.length ? (
+            <Link to="/checkout">
+              Passer au paiement
+              <ArrowRight size={17} />
+            </Link>
+          ) : (
+            <button className="client-cart-disabled" disabled>
+              Panier vide
+            </button>
+          )}
           <p>
             <ShieldCheck size={14} />
-            Paiement sécurisé et suivi VinnHT
+            Paiement securise et suivi VinnHT
           </p>
         </aside>
       </div>
@@ -884,51 +1061,105 @@ export function ClientCheckoutContent({
   result,
   error,
   onSubmit,
-  onSimulatePayment,
+  onSubmitPaymentProof,
 }) {
   const [form, setForm] = useState({
     address: "",
     city: "Port-au-Prince",
     phone: user?.phone || "",
   });
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const [proof, setProof] = useState(null);
+  const [proofNote, setProofNote] = useState("");
+  const total = cart.reduce(
+    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+    0,
+  );
+  const sellerInstructions = useMemo(() => {
+    const rows = new Map();
+    for (const item of cart) {
+      const seller = item.seller_name || "Boutique VinnHT";
+      const current = rows.get(seller) || {
+        seller_name: seller,
+        moncash_number: item.seller_moncash || "",
+        amount: 0,
+      };
+      current.amount += Number(item.price || 0) * Number(item.quantity || 0);
+      if (!current.moncash_number && item.seller_moncash) current.moncash_number = item.seller_moncash;
+      rows.set(seller, current);
+    }
+    return [...rows.values()];
+  }, [cart]);
 
   if (result) {
+    const proofSent = Boolean(result.proofUrl || result.reference);
     return (
       <ClientPageFrame
-        eyebrow="Commande créée"
-        title="Finaliser le paiement"
-        text="Votre commande est enregistrée. Confirmez maintenant le paiement simulé."
+        eyebrow="Commande creee"
+        title="Payer directement le vendeur"
+        text="Payez chaque boutique sur son MonCash personnel, puis envoyez une preuve pour confirmer la commande."
       >
         <section className="checkout-result-card">
           <span>
             <CheckCircle2 />
           </span>
           <div>
-            <small>Numéro de commande</small>
+            <small>Numero de commande</small>
             <h2>{result.orderNumber}</h2>
             <p>Total : {Number(result.total).toLocaleString("fr-HT")} HTG</p>
           </div>
-          <button
-            disabled={processing || result.paymentStatus === "paid"}
-            onClick={() => onSimulatePayment(result.id, "paid")}
-          >
-            <CreditCard />
-            {result.paymentStatus === "paid" ? "Paiement confirmé" : "Simuler le paiement"}
-          </button>
-          <button
-            className="payment-fail-button"
-            disabled={processing || result.paymentStatus === "paid"}
-            onClick={() => onSimulatePayment(result.id, "failed")}
-          >
-            Simuler un échec
-          </button>
-          {result.paymentStatus === "paid" && (
-            <Link to="/my-orders">
-              Suivre ma commande
-              <ArrowRight />
-            </Link>
+          <div className="direct-payment-list">
+            {(result.paymentInstructions || []).map((instruction) => (
+              <article key={instruction.seller_id || instruction.seller_name}>
+                <small>{instruction.seller_name}</small>
+                <b>{Number(instruction.amount).toLocaleString("fr-HT")} HTG</b>
+                <span>MonCash : {instruction.moncash_number || "A confirmer avec le vendeur"}</span>
+              </article>
+            ))}
+          </div>
+          {proofSent && (
+            <div className="payment-proof-success">
+              <CheckCircle2 />
+              <span>
+                <b>Preuve envoyee</b>
+                Elle est conservee avec la commande. Le vendeur ou l'equipe VinnHT pourra verifier le paiement avant preparation.
+              </span>
+            </div>
           )}
+          {!proofSent && result.paymentStatus !== "paid" && (
+            <form
+              className="payment-proof-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (proof) onSubmitPaymentProof(result.id, { file: proof, note: proofNote });
+              }}
+            >
+              <label>
+                Preuve de paiement
+                <input
+                  required
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => setProof(event.target.files?.[0] || null)}
+                />
+              </label>
+              <label>
+                Note ou reference MonCash
+                <input
+                  value={proofNote}
+                  onChange={(event) => setProofNote(event.target.value)}
+                  placeholder="Transaction, numero, heure du paiement"
+                />
+              </label>
+              <button disabled={processing || !proof} type="submit">
+                <CreditCard />
+                {processing ? "Envoi..." : "Envoyer la preuve"}
+              </button>
+            </form>
+          )}
+          <Link to="/my-orders">
+            Suivre ma commande
+            <ArrowRight />
+          </Link>
         </section>
       </ClientPageFrame>
     );
@@ -936,9 +1167,9 @@ export function ClientCheckoutContent({
 
   return (
     <ClientPageFrame
-      eyebrow="Paiement sécurisé"
+      eyebrow="Paiement securise"
       title="Finaliser la commande"
-      text="Vérifiez votre adresse et le résumé avant de créer la commande."
+      text="Verifiez votre adresse et les numeros MonCash des boutiques avant de creer la commande."
     >
       {error && <div className="client-api-error">{error}</div>}
       <form
@@ -951,16 +1182,16 @@ export function ClientCheckoutContent({
         <section className="checkout-address-card">
           <div>
             <span>Livraison</span>
-            <h2>Adresse de réception</h2>
+            <h2>Adresse de reception</h2>
           </div>
           <label>
-            Adresse complète
+            Adresse complete
             <input
               required
               minLength="8"
               value={form.address}
               onChange={(event) => setForm({ ...form, address: event.target.value })}
-              placeholder="Rue, numéro, quartier"
+              placeholder="Rue, numero, quartier"
             />
           </label>
           <label>
@@ -972,7 +1203,7 @@ export function ClientCheckoutContent({
             />
           </label>
           <label>
-            Téléphone
+            Telephone
             <input
               required
               value={form.phone}
@@ -983,21 +1214,31 @@ export function ClientCheckoutContent({
           <div className="checkout-payment-method">
             <CreditCard />
             <span>
-              <b>Paiement simulé</b>
-              Préparé pour l’intégration MonCash.
+              <b>Paiement direct vendeur</b>
+              Le vendeur recoit son argent sur son MonCash personnel.
             </span>
             <ShieldCheck />
           </div>
+          <div className="checkout-seller-moncash">
+            <span>Numeros MonCash a payer</span>
+            {sellerInstructions.map((instruction) => (
+              <article key={instruction.seller_name}>
+                <strong>{instruction.seller_name}</strong>
+                <b>{instruction.moncash_number || "A confirmer avec le vendeur"}</b>
+                <small>{instruction.amount.toLocaleString("fr-HT")} HTG</small>
+              </article>
+            ))}
+          </div>
         </section>
         <aside className="client-cart-summary checkout-summary">
-          <span>Résumé</span>
+          <span>Resume</span>
           <h3>{cart.length} article(s)</h3>
           {cart.map((item) => (
             <div key={item.id}>
               <small>
-                {item.name} × {item.quantity}
+                {item.name} x {item.quantity}
               </small>
-              <b>{(item.price * item.quantity).toLocaleString("fr-HT")} HTG</b>
+              <b>{(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString("fr-HT")} HTG</b>
             </div>
           ))}
           <div className="summary-total">
@@ -1005,7 +1246,7 @@ export function ClientCheckoutContent({
             <strong>{total.toLocaleString("fr-HT")} HTG</strong>
           </div>
           <button disabled={processing || !cart.length} type="submit">
-            {processing ? "Création en cours..." : "Créer la commande"}
+            {processing ? "Creation en cours..." : "Creer la commande"}
             <ArrowRight />
           </button>
         </aside>
@@ -1020,7 +1261,7 @@ export function ClientMessagesContent() {
   const [draft, setDraft] = useState("");
   const [conversations, setConversations] = useState(() =>
     JSON.parse(
-      localStorage.getItem("vinnht_messages") ||
+      null ||
         JSON.stringify([
           {
             name: "Tech Ayiti",
@@ -1028,7 +1269,7 @@ export function ClientMessagesContent() {
             online: true,
             messages: [
               { type: "received", text: "Bonjour, merci d’avoir choisi notre boutique." },
-              { type: "sent", text: "Ma commande sera-t-elle livrée aujourd’hui ?" },
+              { type: "sent", text: "Ma commande sera-t-elle livrée aujourd’hui " },
               { type: "received", text: "Oui, elle sera confiée au livreur cet après-midi." },
             ],
           },
@@ -1042,14 +1283,14 @@ export function ClientMessagesContent() {
             name: "Support VinnHT",
             initials: "VH",
             online: true,
-            messages: [{ type: "received", text: "Comment pouvons-nous vous aider ?" }],
+            messages: [{ type: "received", text: "Comment pouvons-nous vous aider " }],
           },
         ])
     )
   );
 
   useEffect(() => {
-    localStorage.setItem("vinnht_messages", JSON.stringify(conversations));
+    return undefined;
   }, [conversations]);
 
   const visibleConversations = conversations.filter((conversation) =>
@@ -1063,7 +1304,7 @@ export function ClientMessagesContent() {
     setConversations((items) =>
       items.map((conversation, index) =>
         index === active
-          ? {
+           ? {
               ...conversation,
               messages: [...conversation.messages, { type: "sent", text: draft.trim() }],
             }
@@ -1091,7 +1332,7 @@ export function ClientMessagesContent() {
           </label>
           {visibleConversations.map((conversation) => {
             const index = conversations.indexOf(conversation);
-            const lastMessage = conversation.messages.at(-1)?.text;
+            const lastMessage = conversation.messages.at(-1).text;
             return (
               <button
                 className={active === index ? "active" : ""}
@@ -1150,65 +1391,30 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
     name: user?.name || "",
     phone: user?.phone || "",
   });
-  const [photo, setPhoto] = useState(null);
-  const [preview, setPreview] = useState(
-    user?.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : ""
-  );
   const [message, setMessage] = useState("");
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-
-  const uploadPhoto = async (file) => {
-    if (!file) return;
-    setUploadingPhoto(true);
-    setMessage("");
-    try {
-      const data = new FormData();
-      data.append("profilePhoto", file);
-      const { data: response } = await api.patch("/auth/profile", data);
-      updateUser(response.user);
-      setPreview(`${apiOrigin}${response.user.profile_image_url}?v=${Date.now()}`);
-      setPhoto(null);
-      setMessage("Photo de profil mise à jour.");
-    } catch (error) {
-      setMessage(error.response?.data?.message || "Impossible d’enregistrer cette photo.");
-    } finally {
-      setUploadingPhoto(false);
-    }
-  };
 
   const save = async (event) => {
     event.preventDefault();
     const data = new FormData();
     data.append("name", form.name);
     data.append("phone", form.phone);
-    if (photo) data.append("profilePhoto", photo);
-    const { data: response } = await api.patch("/auth/profile", data);
-    updateUser(response.user);
-    setMessage(response.message);
+    try {
+      const { data: response } = await api.patch("/auth/profile", data);
+      updateUser?.(response.user);
+      setMessage(response.message);
+    } catch (error) {
+      setMessage(error.response?.data?.message || "Impossible de mettre le profil a jour.");
+    }
   };
 
   return (
     <ClientPageFrame
       eyebrow="Informations personnelles"
       title="Mon profil"
-      text="Gardez vos informations à jour pour faciliter vos achats et livraisons."
+      text="Gardez vos informations a jour pour faciliter vos achats et livraisons."
     >
       <div className="client-profile-grid">
         <aside className="client-profile-card">
-          <div className="profile-photo-picker legacy-photo-picker">
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                setPhoto(file || null);
-                if (file) setPreview(URL.createObjectURL(file));
-                uploadPhoto(file);
-              }}
-            />
-            <span>{preview ? <img src={preview} alt="Photo de profil" /> : <UserRound />}</span>
-            <small>{uploadingPhoto ? "Enregistrement..." : "Changer la photo"}</small>
-          </div>
           <ProfilePhotoManager
             api={api}
             user={user}
@@ -1217,7 +1423,7 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
           />
           <h2>{user?.name || "Client VinnHT"}</h2>
           <p>{user?.email || "client@vinnht.ht"}</p>
-          <b>Client vérifié</b>
+          <b>Client verifie</b>
         </aside>
         <form className="client-profile-form" onSubmit={save}>
           <header>
@@ -1237,10 +1443,10 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
             </label>
             <label>
               Adresse email
-              <input defaultValue={user?.email || "client@vinnht.ht"} />
+              <input value={user?.email || "client@vinnht.ht"} disabled />
             </label>
             <label>
-              Téléphone
+              Telephone
               <input
                 value={form.phone}
                 onChange={(event) => setForm({ ...form, phone: event.target.value })}
@@ -1255,10 +1461,12 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
               <input defaultValue="Delmas 60, Port-au-Prince" />
             </label>
           </div>
-          <button className="save-profile">Enregistrer les modifications</button>
+          <button className="client-profile-save-button">
+            <Edit3 /> Modifier profil
+          </button>
+          <ProfileLogoutCard onLogout={onLogout} />
         </form>
       </div>
-      <ProfileLogoutCard onLogout={onLogout} />
     </ClientPageFrame>
   );
 }
@@ -1363,3 +1571,4 @@ function ClientPageFrame({ eyebrow, title, text, children }) {
     </div>
   );
 }
+

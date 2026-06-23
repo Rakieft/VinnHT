@@ -10,6 +10,10 @@ import {
   Car,
   ChevronRight,
   CircleUserRound,
+  Clock3,
+  CheckCircle2,
+  Flame,
+  Headphones,
   Heart,
   LayoutDashboard,
   LockKeyhole,
@@ -21,6 +25,7 @@ import {
   Package,
   Phone,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   ShoppingBag,
@@ -64,7 +69,6 @@ import {
   ClientCheckoutContent,
   ClientDashboardContent,
   ClientFavoritesContent,
-  ClientMessagesContent,
   ClientOrdersContent,
   ClientProfileContent,
   ClientSettingsContent,
@@ -107,6 +111,8 @@ import {
 import BecomeSellerPage from "./pages/client/BecomeSeller.jsx";
 import MarketplaceMessages from "./components/MarketplaceMessages.jsx";
 import { apiOrigin, assetUrl } from "./config/runtime.js";
+import sousHeroImage from "./assets/images/sous-hero-vinnht-student.png";
+import contactSupportImage from "./assets/images/contact-support-hands-vinnht.png";
 import "./styles/responsive-overrides.css";
 import "./styles/auth-search.css";
 import "./styles/brand-auth-fixes.css";
@@ -118,17 +124,17 @@ import "./styles/admin-flow.css";
 
 const api = axios.create({ baseURL: `${apiOrigin}/api`, withCredentials: true });
 const whatsappNumber = (value = "") => {
-  const digits = value.replace(/\D/g, "");
+  const digits = String(value || "").replace(/\D/g, "");
   return digits.length === 8 ? `509${digits}` : digits;
 };
 const productPrice = (product) => {
   const promotionIsActive =
-    product?.is_featured &&
-    Number(product?.promotional_price) > 0 &&
+    product.is_featured &&
+    Number(product.promotional_price) > 0 &&
     Number(product.promotional_price) < Number(product.price) &&
     (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date());
 
-  return promotionIsActive ? Number(product.promotional_price) : Number(product?.price || 0);
+  return promotionIsActive ? Number(product.promotional_price) : Number(product.price || 0);
 };
 
 function WhatsAppIcon({ size = 19 }) {
@@ -278,6 +284,19 @@ const categories = [
   ["Services", "services", BriefcaseBusiness, "Professionnels et prestations"],
   ["Beauté & Soins", "beaute-soins", Sparkles, "Produits beauté, soins et bien-être"],
 ];
+const haitiDepartments = [
+  "Artibonite",
+  "Centre",
+  "Grand'Anse",
+  "Nippes",
+  "Nord",
+  "Nord-Est",
+  "Nord-Ouest",
+  "Ouest",
+  "Sud",
+  "Sud-Est",
+];
+
 const marketplaceDepartments = [
   ["Mode femme", "mode", ShoppingBag, ["Robes", "Chaussures", "Sacs", "Bijoux"]],
   ["Mode homme", "mode", BriefcaseBusiness, ["Chemises", "Pantalons", "Montres", "Chaussures"]],
@@ -340,7 +359,7 @@ const demoProducts = [
     category_name: "Supermarché",
     seller_name: "Marché Lakay",
     image_url:
-      "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1542838132-92c53300491eauto=format&fit=crop&w=900&q=80",
   },
   {
     id: 2,
@@ -350,7 +369,7 @@ const demoProducts = [
     category_name: "Électronique",
     seller_name: "Tech Ayiti",
     image_url:
-      "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1505740420928-5e560c06d30eauto=format&fit=crop&w=900&q=80",
   },
   {
     id: 3,
@@ -360,7 +379,7 @@ const demoProducts = [
     category_name: "Maison & Meubles",
     seller_name: "Kay Design",
     image_url:
-      "https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1567538096630-e0c55bd6374cauto=format&fit=crop&w=900&q=80",
   },
   {
     id: 4,
@@ -370,7 +389,7 @@ const demoProducts = [
     category_name: "Mode",
     seller_name: "Kreyol Chic",
     image_url:
-      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1553062407-98eeb64c6a62auto=format&fit=crop&w=900&q=80",
   },
   {
     id: 5,
@@ -380,7 +399,7 @@ const demoProducts = [
     category_name: "Électronique",
     seller_name: "Mobile Plus",
     image_url:
-      "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=900&q=80",
+      "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9auto=format&fit=crop&w=900&q=80",
   },
 ];
 const boutiques = [
@@ -393,101 +412,97 @@ const boutiques = [
 ];
 
 function Providers({ children }) {
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem("vinnht_user") || "null"));
-  const [activeRole, setActiveRole] = useState(
-    () => localStorage.getItem("vinnht_active_role") || user?.role || "client"
-  );
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [activeRole, setActiveRole] = useState("client");
   const [cart, setCart] = useState([]);
   const [favorites, setFavorites] = useState([]);
+  useEffect(() => {
+    localStorage.removeItem("vinnht_messages");
+    localStorage.removeItem("vinnht_user");
+    localStorage.removeItem("vinnht_active_role");
+    localStorage.removeItem("vinnht_cart");
+    localStorage.removeItem("vinnht_favorites");
+  }, []);
   useEffect(() => {
     api
       .get("/auth/me")
       .then(({ data }) => {
-        localStorage.setItem("vinnht_user", JSON.stringify(data));
-        setUser(data);
-        if (!data.roles?.includes(activeRole)) {
-          const nextRole = data.role || data.roles?.[0] || "client";
-          localStorage.setItem("vinnht_active_role", nextRole);
+        if (!data.user) {
+          setUser(null);
+          setActiveRole("client");
+          return;
+        }
+
+        setUser(data.user);
+        if (!data.user.roles.includes(activeRole)) {
+          const nextRole = data.user.role || data.user.roles?.[0] || "client";
           setActiveRole(nextRole);
         }
       })
       .catch(() => {
-        localStorage.removeItem("vinnht_user");
-        localStorage.removeItem("vinnht_active_role");
         setUser(null);
-      });
+      })
+      .finally(() => setAuthLoading(false));
   }, []);
   useEffect(() => {
     if (!user?.roles?.includes("client")) return;
     const syncClientData = async () => {
-      const localCart = JSON.parse(localStorage.getItem("vinnht_cart") || "[]");
-      const localFavorites = JSON.parse(localStorage.getItem("vinnht_favorites") || "[]");
-      if (localCart.length) {
-        await api.post("/cart/sync", {
-          items: localCart.map((item) => ({
-            productId: item.id,
-            quantity: item.quantity || 1,
-          })),
-        });
-      }
-      if (localFavorites.length) {
-        await api.post("/favorites/sync", {
-          productIds: localFavorites.map((item) => item.id),
-        });
-      }
       const [{ data: serverCart }, { data: serverFavorites }] = await Promise.all([
         api.get("/cart"),
         api.get("/favorites"),
       ]);
       setCart(serverCart);
       setFavorites(serverFavorites);
-      localStorage.removeItem("vinnht_cart");
-      localStorage.removeItem("vinnht_favorites");
     };
     syncClientData().catch(() => {});
   }, [user?.id]);
   const auth = useMemo(
     () => ({
       user,
+      authLoading,
       login(data) {
-        localStorage.setItem("vinnht_user", JSON.stringify(data.user));
         setUser(data.user);
-        const nextRole = data.user.roles?.includes(data.user.role)
+        const nextRole = data.user.roles.includes(data.user.role)
           ? data.user.role
           : data.user.roles?.[0] || "client";
-        localStorage.setItem("vinnht_active_role", nextRole);
         setActiveRole(nextRole);
       },
       updateUser(nextUser) {
-        localStorage.setItem("vinnht_user", JSON.stringify(nextUser));
         setUser(nextUser);
       },
       activeRole,
       switchRole(role) {
-        if (!user?.roles?.includes(role) && !user?.roles?.includes("admin")) return;
-        localStorage.setItem("vinnht_active_role", role);
+        const roles = user?.roles || [];
+        if (!roles.includes(role) && !roles.includes("admin")) return;
         setActiveRole(role);
       },
       async logout() {
         await api.post("/auth/logout").catch(() => {});
-        localStorage.removeItem("vinnht_user");
-        localStorage.removeItem("vinnht_active_role");
         setUser(null);
         setActiveRole("client");
       },
     }),
-    [user, activeRole]
+    [user, activeRole, authLoading]
   );
   const cartValue = useMemo(
     () => ({
       cart,
       async add(product) {
-        if (Number(product.stock) < 1) return;
-        const current = cart.find((item) => item.id === product.id);
-        const quantity = Math.min((current?.quantity || 0) + 1, Number(product.stock));
+        if (!user?.roles?.includes("client")) {
+          throw new Error("CLIENT_REQUIRED");
+        }
+        const stock = Math.max(0, Number(product.stock) || 0);
+        if (stock < 1) {
+          throw new Error("OUT_OF_STOCK");
+        }
+        const current = cart.find((item) => Number(item.id) === Number(product.id));
+        const currentQuantity = Number(current?.quantity) || 0;
+        const quantity = Math.min(currentQuantity + 1, stock);
         await api.put(`/cart/${product.id}`, { quantity });
         const { data } = await api.get("/cart");
-        setCart(data);
+        setCart(Array.isArray(data) ? data : []);
+        return quantity;
       },
       async remove(id) {
         await api.delete(`/cart/${id}`);
@@ -495,7 +510,7 @@ function Providers({ children }) {
       },
       async updateQuantity(id, quantity) {
         const item = cart.find((product) => product.id === id);
-        const maximum = Math.max(1, Number(item?.stock) || 1);
+        const maximum = Math.max(1, Number(item.stock) || 1);
         const nextQuantity = Math.min(maximum, Math.max(1, Number(quantity) || 1));
         await api.put(`/cart/${id}`, { quantity: nextQuantity });
         setCart((items) =>
@@ -509,7 +524,7 @@ function Providers({ children }) {
         setCart([]);
       },
     }),
-    [cart]
+    [cart, user]
   );
   const favoritesValue = useMemo(
     () => ({
@@ -546,7 +561,7 @@ function Navbar() {
   const { user, logout, activeRole } = useAuth();
   const { cart } = useCart();
   const navigate = useNavigate();
-  const count = cart.reduce((n, item) => n + item.quantity, 0);
+  const count = cart.reduce((n, item) => n + Number(item.quantity || 0), 0);
   const submitSearch = (event) => {
     event.preventDefault();
     navigate(`/products${search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""}`);
@@ -615,39 +630,97 @@ function Navbar() {
     </>
   );
 }
-function Footer() {
+function SocialIcon({ type }) {
+  if (type === "facebook") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M14 8.5h2.4V5h-2.9C10.6 5 9 6.7 9 9.8V12H6.7v3.6H9V22h4.1v-6.4h2.8l.5-3.6h-3.3V10c0-1 .3-1.5.9-1.5Z" />
+      </svg>
+    );
+  }
+  if (type === "instagram") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7.8 2h8.4A5.8 5.8 0 0 1 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8A5.8 5.8 0 0 1 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2Zm0 2A3.8 3.8 0 0 0 4 7.8v8.4A3.8 3.8 0 0 0 7.8 20h8.4a3.8 3.8 0 0 0 3.8-3.8V7.8A3.8 3.8 0 0 0 16.2 4H7.8Zm8.9 2.1a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4ZM12 7.2a4.8 4.8 0 1 1 0 9.6 4.8 4.8 0 0 1 0-9.6Zm0 2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Z" />
+      </svg>
+    );
+  }
+  if (type === "tiktok") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M16.5 3c.4 2.4 1.7 3.9 4 4.2v3.6a7 7 0 0 1-4-1.3v5.8c0 4-2.5 6.7-6.2 6.7A6.2 6.2 0 0 1 4 15.8c0-3.8 3.3-6.7 7.2-6v3.7c-1.7-.5-3.3.5-3.3 2.2 0 1.5 1.1 2.5 2.5 2.5 1.5 0 2.4-.9 2.4-2.8V3h3.7Z" />
+      </svg>
+    );
+  }
   return (
-    <footer className="footer">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2a9.7 9.7 0 0 0-8.4 14.6L2 22l5.6-1.5A9.8 9.8 0 1 0 12 2Zm0 17.8a8 8 0 0 1-4.1-1.1l-.3-.2-3.3.9.9-3.2-.2-.3A7.8 7.8 0 1 1 12 19.8Zm4.3-5.9c-.2-.1-1.4-.7-1.6-.8-.2-.1-.4-.1-.5.1-.2.2-.6.8-.8.9-.1.2-.3.2-.5.1-2-1-3.4-1.8-4.7-4.1-.4-.6.4-.6 1-1.9.1-.2.1-.4 0-.6l-.7-1.8c-.2-.5-.4-.4-.5-.4h-.5c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 2s.9 2.3 1 2.5c.1.2 1.7 2.6 4.1 3.6 1.5.7 2.1.7 2.9.6.5-.1 1.4-.6 1.6-1.1.2-.6.2-1 .1-1.1-.1-.1-.2-.2-.5-.3Z" />
+    </svg>
+  );
+}
+
+function Footer() {
+  const socials = [
+    ["facebook", "Facebook", "https://www.facebook.com"],
+    ["instagram", "Instagram", "https://www.instagram.com"],
+    ["tiktok", "TikTok", "https://www.tiktok.com"],
+    ["whatsapp", "WhatsApp", "/contact"],
+  ];
+
+  return (
+    <footer className="footer footer-premium">
       <div className="footer-main">
         <Link className="brand light" to="/">
           <img src="/vinnht-logo.png" alt="Logo VinnHT" />
           <b>VinnHT</b>
         </Link>
         <p>
-          Le marché numérique d’Haïti. Une expérience premium pour acheter, vendre et livrer avec
-          confiance.
+          Le marché numérique d'Haïti pour découvrir des rayons, acheter auprès de boutiques
+          vérifiées et suivre chaque commande avec confiance.
         </p>
-        <div className="social-row">
-          <span /> <span /> <span />
+        <div className="social-row" aria-label="Réseaux sociaux VinnHT">
+          {socials.map(([type, label, href]) => (
+            <a
+              href={href}
+              key={type}
+              target={href.startsWith("http") ? "_blank" : undefined}
+              rel={href.startsWith("http") ? "noreferrer" : undefined}
+              aria-label={label}
+              title={label}
+            >
+              <SocialIcon type={type} />
+            </a>
+          ))}
         </div>
       </div>
+
       <div>
-        <h4>Marketplace</h4>
+        <h4>Explorer</h4>
+        <Link to="/">Accueil</Link>
         <Link to="/categories">Rayons</Link>
-        <Link to="/cart">Panier</Link>
+        <Link to="/products">Catalogue</Link>
         <Link to="/contact">Support</Link>
       </div>
+
       <div>
-        <h4>Vendeurs</h4>
-        <Link to="/become-seller">Devenir vendeur</Link>
-        <span>Boutiques vérifiées</span>
-        <span>Payouts suivis</span>
+        <h4>Espaces</h4>
+        <Link to="/client">Espace client</Link>
+        <Link to="/seller">Espace vendeur</Link>
+        <Link to="/delivery">Espace livreur</Link>
+        <Link to="/login">Connexion</Link>
       </div>
+
       <div>
         <h4>Confiance</h4>
-        <span>Paiement simulé prêt MonCash</span>
-        <span>Livraison suivie</span>
-        <span>Support local</span>
+        <span>Paiement direct vendeur</span>
+        <span>Preuve MonCash suivie</span>
+        <span>Livraison assignée</span>
+        <span>Support local VinnHT</span>
+      </div>
+
+      <div className="footer-bottom">
+        <span>© 2026 VinnHT. Le marché numérique d'Haïti.</span>
+        <span>Plateforme marketplace premium.</span>
       </div>
     </footer>
   );
@@ -760,7 +833,7 @@ function Home() {
       api.get("/marketplace/stats"),
     ]).then(([productsResponse, shopsResponse, statsResponse]) => {
       setProducts(productsResponse.data);
-      setShops(shopsResponse.data);
+      setShops(shopsResponse.data.slice(0, 12));
       setStats(statsResponse.data);
     });
   }, []);
@@ -780,16 +853,14 @@ function Home() {
             <h1>
               Achetez, vendez et trouvez tout en Haïti avec <em>VinnHT</em>
             </h1>
-            <p>
-              Une marketplace moderne pour connecter clients, vendeurs et livreurs dans une
-              expérience simple, rapide et professionnelle.
-            </p>
+            <div className="hero-trust-row">
+              <span><ShieldCheck /> Paiement sécurisé</span>
+              <span><Store /> Vendeurs vérifiés</span>
+              <span><Headphones /> Support local</span>
+            </div>
             <div className="hero-actions">
               <Button to="/categories">
                 Explorer les rayons <ArrowRight size={18} />
-              </Button>
-              <Button to="/become-seller" variant="glass">
-                Devenir vendeur
               </Button>
             </div>
           </motion.div>
@@ -811,13 +882,24 @@ function Home() {
             <b>Livraison suivie</b>
             <span>Commandes en temps réel</span>
           </div>
+          <div className="hero-live-card">
+            <span>En direct sur VinnHT</span>
+            <b>{Number(stats.products || 0)} produit(s) disponibles</b>
+            <small>{Number(stats.sellers || 0)} boutique(s) validée(s)</small>
+          </div>
         </motion.div>
       </section>
-      <AnimatedSection className="stats-strip">
-        <StatCard icon={Users} label="Comptes actifs" count={Number(stats.active_users || 0)} />
-        <StatCard icon={Store} label="Boutiques" count={Number(stats.sellers || 0)} />
-        <StatCard icon={ShoppingBag} label="Produits disponibles" count={Number(stats.products || 0)} />
-        <StatCard icon={Package} label="Commandes suivies" count={Number(stats.orders || 0)} />
+      <AnimatedSection className="home-sous-hero">
+        <motion.div
+          className="home-sous-hero-card image-only"
+          whileHover={{ y: -4 }}
+          transition={{ type: "spring", stiffness: 180, damping: 18 }}
+        >
+          <img
+            src={sousHeroImage}
+            alt="Jeune étudiante VinnHT invitant à découvrir les rayons"
+          />
+        </motion.div>
       </AnimatedSection>
       <AnimatedSection className="section">
         <SectionHead
@@ -857,7 +939,7 @@ function Home() {
       </AnimatedSection>
       <AnimatedSection className="section why-grid">
         <div className="why-copy">
-          <Badge tone="blue">Pourquoi VinnHT ?</Badge>
+          <Badge tone="blue">Pourquoi VinnHT </Badge>
           <h2>Une expérience haut de gamme, pensée pour le marché local.</h2>
           <p>
             VinnHT associe la simplicité d’un grand marketplace moderne à la réalité du commerce en
@@ -913,10 +995,15 @@ function Home() {
           {shops.map((shop) => (
             <SwiperSlide key={shop.seller_id}>
               <div className="shop-card">
-                <span>{shop.shop_name[0]}</span>
+                <span className="shop-card-logo">
+                  {shop.shop_logo_url ? (
+                    <img src={assetUrl(shop.shop_logo_url)} alt={`Logo ${shop.shop_name}`} />
+                  ) : (
+                    shop.shop_name?.[0] || <Store />
+                  )}
+                </span>
                 <h3>{shop.shop_name}</h3>
                 <p>{shop.category || "Boutique VinnHT"}</p>
-                <Badge tone="success">Professionnel</Badge>
               </div>
             </SwiperSlide>
           ))}
@@ -953,8 +1040,8 @@ function Home() {
             <Bell />
           </div>
           <div className="phone-mock-screen">
-            <span>Bonjour 👋</span>
-            <h3>Que recherchez-vous aujourd’hui ?</h3>
+            <span>Bonjour</span>
+            <h3>Que recherchez-vous aujourd’hui </h3>
             <div className="phone-mock-search"><Search /> Rechercher sur VinnHT</div>
             <div className="phone-mock-actions">
               <span><ShoppingBag /><small>Acheter</small></span>
@@ -1007,27 +1094,27 @@ function Contact() {
   const [faqCategory, setFaqCategory] = useState("all");
   const faq = [
     [
-      "Comment devenir vendeur ?",
+      "Comment devenir vendeur ",
       "Connectez-vous à votre espace client, ouvrez Devenir vendeur puis envoyez votre dossier. Un superviseur VinnHT vérifiera ensuite votre demande.",
       "seller",
     ],
     [
-      "Comment suivre une commande ?",
+      "Comment suivre une commande ",
       "Ouvrez Mes commandes depuis votre espace client pour consulter le paiement, la préparation et la livraison.",
       "order",
     ],
     [
-      "Quand MonCash sera intégré ?",
-      "Le paiement est actuellement simulé pour valider le parcours. MonCash remplacera cette simulation avant la mise en production commerciale.",
+      "Comment fonctionne le paiement ",
+      "Au lancement, le client paie directement le vendeur sur son MonCash personnel puis envoie une preuve dans VinnHT.",
       "payment",
     ],
     [
-      "Comment contacter directement le support ?",
+      "Comment contacter directement le support ",
       "Utilisez ce formulaire ou ouvrez une conversation support depuis votre espace client.",
       "general",
     ],
     [
-      "Comment signaler un problème de livraison ?",
+      "Comment signaler un problème de livraison ",
       "Choisissez Livraison comme sujet et associez la commande concernée pour accélérer le traitement.",
       "delivery",
     ],
@@ -1100,10 +1187,27 @@ function Contact() {
             Questions, vendeurs, livraison ou partenariat : contactez-nous depuis le canal qui vous
             convient.
           </p>
+          <div className="support-promise">
+            <span><Clock3 /> Réponse suivie</span>
+            <span><ShieldCheck /> Numéro de dossier</span>
+            <span><MessageCircle /> Support humain</span>
+          </div>
         </div>
-        <div className="contact-lottie">
-          <Lottie animationData={lottiePulse} loop />
-        </div>
+        <div className="contact-lottie contact-hero-image-card"><img src={contactSupportImage} alt="Equipe support VinnHT unie pour accompagner les clients" /></div>
+      </section>
+      <section className="support-steps">
+        {[
+          [Send, "Envoyez votre demande", "Choisissez le sujet et décrivez votre besoin."],
+          [Bell, "Recevez une référence", "Chaque message obtient un numéro de dossier."],
+          [CheckCircle2, "Suivez la réponse", "Consultez l’état depuis votre espace client."],
+        ].map(([Icon, title, text], index) => (
+          <article key={title}>
+            <span>{index + 1}</span>
+            <Icon />
+            <h3>{title}</h3>
+            <p>{text}</p>
+          </article>
+        ))}
       </section>
       <section className="section contact-grid">
         {channels.map(([Icon, title, value, note, href]) => (
@@ -1133,7 +1237,7 @@ function Contact() {
           </label>
           <label>
             Message
-            <textarea required minLength="10" rows="5" value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} placeholder="Comment pouvons-nous aider ?" />
+            <textarea required minLength="10" rows="5" value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} placeholder="Comment pouvons-nous aider " />
           </label>
           {feedback && <strong>{feedback}</strong>}
           <button className="button primary" disabled={sending}>
@@ -1210,36 +1314,72 @@ function Categories() {
   const visible = categoryData.filter((category) =>
     `${category.name} ${category.slug}`.toLowerCase().includes(query.toLowerCase()),
   );
-  const popular = categoryData.filter((category) => Number(category.available_product_count) > 0).slice(0, 4);
+  const popular = categoryData
+    .filter((category) => Number(category.available_product_count) > 0)
+    .slice(0, 6);
+  const totalProducts = categoryData.reduce(
+    (sum, category) => sum + Number(category.available_product_count || 0),
+    0,
+  );
+  const activeRayons = categoryData.filter((category) => Number(category.available_product_count) > 0).length;
 
   return (
     <MarketplaceLayout>
-      <section className="departments-hero">
-        <div>
+      <section className="departments-hero departments-hero-premium">
+        <div className="departments-hero-copy">
           <Badge tone="gold">Grand marché VinnHT</Badge>
-          <h1>Explorez chaque rayon selon vos besoins.</h1>
-          <p>Découvrez les catégories, sous-catégories et produits réellement disponibles sur VinnHT.</p>
+          <h1>Choisissez votre rayon et trouvez plus vite.</h1>
         </div>
-        <label>
-          <Search />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher un rayon" />
-        </label>
+        <div className="departments-hero-search-card">
+          <span><Search /></span>
+          <h2>Que cherchez-vous ?</h2>
+          <label>
+            <Search />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Ex: Mode, Electronique, Beauté..."
+            />
+          </label>
+        </div>
       </section>
+
       {!!popular.length && (
-        <section className="section category-popular">
-          <SectionHead eyebrow="Les plus actifs" title="Rayons populaires" />
-          <div>{popular.map((category) => <Link to={`/categories/${category.slug}`} key={category.id}><Flame /><span><b>{category.name}</b><small>{category.available_product_count} produit(s)</small></span><ArrowRight /></Link>)}</div>
+        <section className="section category-popular category-popular-premium">
+          <SectionHead eyebrow="Les plus actifs" title="Rayons qui bougent maintenant" />
+          <div>
+            {popular.map((category, index) => {
+              const [Icon] = categoryVisuals[category.slug] || [ShoppingBag];
+              return (
+                <Link to={`/categories/${category.slug}`} key={category.id}>
+                  <span className="popular-rank">#{index + 1}</span>
+                  <span className="popular-icon"><Icon /></span>
+                  <span>
+                    <b>{category.name}</b>
+                  </span>
+                  <ArrowRight />
+                </Link>
+              );
+            })}
+          </div>
         </section>
       )}
+
       <section className="section departments-section">
         <SectionHead eyebrow="Tous les univers" title={`${visible.length} rayon(s) à explorer`} />
-        <div className="departments-premium-grid">
+        <div className="departments-premium-grid departments-premium-grid-v2">
           {visible.map((category) => {
             const [Icon, children] = categoryVisuals[category.slug] || [ShoppingBag, ["Produits", "Nouveautés", "Offres", "Collections"]];
             const preview = products.filter((product) => Number(product.category_id) === Number(category.id)).slice(0, 3);
             return (
               <motion.article whileHover={{ y: -6 }} key={category.id}>
-                <header><span><Icon /></span><div><small>{category.available_product_count || 0} disponible(s)</small><h2>{category.name}</h2></div></header>
+                <header>
+                  <span><Icon /></span>
+                  <div>
+                    <small>{category.available_product_count || 0} disponible(s)</small>
+                    <h2>{category.name}</h2>
+                  </div>
+                </header>
                 <div className="department-tags">{children.map((child) => <span key={child}>{child}</span>)}</div>
                 <div className="department-preview">
                   {preview.map((product) => <img src={assetUrl(product.image_url)} alt={product.name} key={product.id} />)}
@@ -1263,10 +1403,13 @@ function ProductsCatalog() {
   const [products, setProducts] = useState([]);
   const [query, setQuery] = useState(initialSearch);
   const [category, setCategory] = useState("");
+  const [department, setDepartment] = useState("");
+  const [city, setCity] = useState("");
   const [sort, setSort] = useState("recent");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [showAllUniverses, setShowAllUniverses] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -1275,6 +1418,8 @@ function ProductsCatalog() {
         params: {
           category: category || undefined,
           search: query || undefined,
+          department: department || undefined,
+          city: city || undefined,
           offers: offersOnly || undefined,
           page,
           limit: 48,
@@ -1286,7 +1431,7 @@ function ProductsCatalog() {
       })
       .catch(() => setProducts([]))
       .finally(() => setLoading(false));
-  }, [category, query, offersOnly, page]);
+  }, [category, query, department, city, offersOnly, page]);
 
   useEffect(() => {
     setQuery(new URLSearchParams(location.search).get("search") || "");
@@ -1295,13 +1440,20 @@ function ProductsCatalog() {
 
   useEffect(() => {
     setPage(1);
-  }, [category, query]);
+  }, [category, query, department, city]);
+
+  const availableCities = [...new Set(products.map((product) => product.city).filter(Boolean))];
 
   const sortedProducts = [...products].sort((a, b) => {
     if (sort === "price-low") return Number(a.price) - Number(b.price);
     if (sort === "price-high") return Number(b.price) - Number(a.price);
     return Number(b.id) - Number(a.id);
   });
+  const featuredUniverses = marketplaceDepartments.slice(0, 6);
+  const selectUniverse = (slug) => {
+    setCategory(category === slug ? "" : slug);
+    setShowAllUniverses(false);
+  };
 
   return (
     <MarketplaceLayout>
@@ -1310,12 +1462,12 @@ function ProductsCatalog() {
           <Badge tone="gold">Tous les vendeurs VinnHT</Badge>
           <h1>
             {offersOnly
-              ? "Les offres spéciales sélectionnées sur VinnHT."
+               ? "Les offres spéciales sélectionnées sur VinnHT."
               : "Découvrez tout le marché, dans un seul catalogue."}
           </h1>
           <p>
             {offersOnly
-              ? "Profitez de prix promotionnels actifs proposés par les boutiques vérifiées."
+               ? "Profitez de prix promotionnels actifs proposés par les boutiques vérifiées."
               : "Explorez les rayons, comparez les offres et achetez auprès des boutiques vérifiées."}
           </p>
         </div>
@@ -1331,12 +1483,28 @@ function ProductsCatalog() {
       </section>
 
       <section className="catalog-departments">
-        <SectionHead eyebrow="Explorer par univers" title="Que recherchez-vous aujourd’hui ?" />
-        <div className="department-grid">
+        <SectionHead eyebrow="Explorer par univers" title="Que recherchez-vous aujourd'hui" />
+        <div className="department-mobile-strip" aria-label="Rayons populaires">
+          {featuredUniverses.map(([name, slug, Icon]) => (
+            <button
+              className={category === slug ? "active" : ""}
+              onClick={() => selectUniverse(slug)}
+              key={name}
+            >
+              <Icon />
+              <span>{name}</span>
+            </button>
+          ))}
+          <button className="show-all-universes" onClick={() => setShowAllUniverses(true)}>
+            <ShoppingBag />
+            <span>Voir tous</span>
+          </button>
+        </div>
+        <div className="department-grid catalog-department-grid">
           {marketplaceDepartments.map(([name, slug, Icon, children]) => (
             <button
               className={category === slug ? "active" : ""}
-              onClick={() => setCategory(category === slug ? "" : slug)}
+              onClick={() => selectUniverse(slug)}
               key={name}
             >
               <span>
@@ -1344,12 +1512,48 @@ function ProductsCatalog() {
               </span>
               <div>
                 <h3>{name}</h3>
-                <p>{children.join(" · ")}</p>
+                <p>{children.join(" - ")}</p>
               </div>
               <ChevronRight />
             </button>
           ))}
         </div>
+        {showAllUniverses && (
+          <div className="mobile-universe-layer" role="dialog" aria-modal="true" aria-label="Tous les rayons">
+            <button className="mobile-universe-backdrop" onClick={() => setShowAllUniverses(false)} />
+            <motion.div
+              className="mobile-universe-sheet"
+              initial={{ y: 80, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+            >
+              <header>
+                <div>
+                  <span>Rayons VinnHT</span>
+                  <h2>Tous les univers</h2>
+                </div>
+                <button onClick={() => setShowAllUniverses(false)} aria-label="Fermer les rayons">
+                  <X />
+                </button>
+              </header>
+              <div>
+                {marketplaceDepartments.map(([name, slug, Icon, children]) => (
+                  <button
+                    className={category === slug ? "active" : ""}
+                    onClick={() => selectUniverse(slug)}
+                    key={name}
+                  >
+                    <span><Icon /></span>
+                    <div>
+                      <strong>{name}</strong>
+                      <small>{children.slice(0, 3).join(" - ")}</small>
+                    </div>
+                    <ChevronRight />
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
       </section>
 
       <section className="catalog-products-section">
@@ -1374,7 +1578,7 @@ function ProductsCatalog() {
               <span>{total} produit(s)</span>
               <h2>
                 {offersOnly
-                  ? "Offres spéciales"
+                   ? "Offres spéciales"
                   : category
                     ? "Produits du rayon"
                     : "Tous les produits"}
@@ -1429,18 +1633,24 @@ function CategoryProducts() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("recent");
   const [maxPrice, setMaxPrice] = useState("");
+  const [department, setDepartment] = useState("");
   const [city, setCity] = useState("");
 
   useEffect(() => {
     api
-      .get("/products", { params: { category: slug } })
+      .get("/products", { params: { category: slug, department: department || undefined, city: city || undefined } })
       .then(({ data }) => setProducts(data))
       .catch(() => setProducts([]));
-  }, [slug]);
+  }, [slug, department, city]);
+
+  const currentCategory = categories.find(([, categorySlug]) => categorySlug === slug);
+  const currentName = currentCategory?.[0] || slug.replaceAll("-", " ");
+  const [HeroIcon, children = ["Produits", "Nouveautés", "Offres", "Collections"]] =
+    categoryVisuals[slug] || [ShoppingBag, ["Produits", "Nouveautés", "Offres", "Collections"]];
+  const availableCities = [...new Set(products.map((product) => product.city).filter(Boolean))];
   const visibleProducts = products
     .filter((product) => product.name.toLowerCase().includes(query.toLowerCase()))
     .filter((product) => !maxPrice || Number(product.price) <= Number(maxPrice))
-    .filter((product) => !city || product.city === city)
     .sort((a, b) => {
       if (sort === "price-low") return Number(a.price) - Number(b.price);
       if (sort === "price-high") return Number(b.price) - Number(a.price);
@@ -1449,27 +1659,43 @@ function CategoryProducts() {
 
   return (
     <MarketplaceLayout>
-      <PageHero
-        title={slug.replaceAll("-", " ")}
-        text="Produits vérifiés, vendeurs professionnels et expérience fluide."
-      />
-      <section className="section">
-        <div className="category-product-filters">
-          <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans ce rayon" /></label>
+      <section className="category-products-hero">
+        <div className="category-products-icon"><HeroIcon /></div>
+        <div>
+          <Badge tone="gold">Rayon VinnHT</Badge>
+          <h1>{currentName}</h1>
+        </div>
+      </section>
+
+      <section className="section category-products-premium-section">
+        <div className="category-product-filters category-product-filters-premium">
+          <label className="wide-filter"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans ce rayon" /></label>
           <label>Prix maximum<input type="number" min="0" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} placeholder="Tous les prix" /></label>
-          <label>Localisation<select value={city} onChange={(event) => setCity(event.target.value)}><option value="">Toutes les zones</option>{[...new Set(products.map((product) => product.city).filter(Boolean))].map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
+          <label>Département<select value={department} onChange={(event) => { setDepartment(event.target.value); setCity(""); }}><option value="">Tous les départements</option>{haitiDepartments.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
+          <label>Ville<select value={city} onChange={(event) => setCity(event.target.value)}><option value="">Toutes les villes</option>{availableCities.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
           <label>Trier<select value={sort} onChange={(event) => setSort(event.target.value)}><option value="recent">Plus récents</option><option value="price-low">Prix croissant</option><option value="price-high">Prix décroissant</option></select></label>
         </div>
-        <div className="product-grid">
-          {visibleProducts.map((p) => (
-            <ProductCard product={p} key={p.id} />
-          ))}
+
+        <div className="category-results-head">
+          <div>
+            <span>{visibleProducts.length} résultat(s)</span>
+            <h2>Produits disponibles dans {currentName}</h2>
+          </div>
+          <Link to="/categories"><ChevronRight /> Retour aux rayons</Link>
         </div>
-        {!visibleProducts.length && (
-          <div className="catalog-empty">
+
+        {visibleProducts.length ? (
+          <div className="product-grid category-product-grid-premium">
+            {visibleProducts.map((p) => (
+              <ProductCard product={p} key={p.id} />
+            ))}
+          </div>
+        ) : (
+          <div className="catalog-empty category-empty-premium">
             <ShoppingBag />
             <h3>Aucun produit dans ce rayon</h3>
             <p>Les produits apparaîtront après la validation des premiers vendeurs.</p>
+            <Link to="/products">Voir tout le catalogue <ArrowRight /></Link>
           </div>
         )}
       </section>
@@ -1483,6 +1709,7 @@ function ProductDetails() {
   const [product, setProduct] = useState(null);
   const [similar, setSimilar] = useState([]);
   const [missing, setMissing] = useState(false);
+  const [cartMessage, setCartMessage] = useState("");
   const { add } = useCart();
   const { isFavorite, toggle } = useFavorites();
 
@@ -1512,17 +1739,45 @@ function ProductDetails() {
     );
   }
 
+  const addProductToCart = async () => {
+    setCartMessage("");
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+
+    try {
+      await add(product);
+      setCartMessage("Produit ajoute au panier.");
+    } catch (error) {
+      if (error.message === "CLIENT_REQUIRED") {
+        navigate("/login");
+        return;
+      }
+      setCartMessage(
+        error.response?.data?.message ||
+          (error.message === "OUT_OF_STOCK"
+            ? "Ce produit n'est plus disponible."
+            : "Impossible d'ajouter ce produit au panier."),
+      );
+    }
+  };
+
   const contactSeller = async () => {
     if (!user) {
       navigate("/login");
       return;
     }
 
-    const { data } = await api.post("/messages/conversations", {
-      sellerId: product.seller_id,
-    });
-    const draft = `Bonjour, je souhaite avoir plus d’informations sur le produit « ${product.name} ».`;
-    navigate(`/messages?conversation=${data.id}&draft=${encodeURIComponent(draft)}`);
+    try {
+      const { data } = await api.post("/messages/conversations", {
+        sellerId: product.seller_id,
+      });
+      const draft = `Bonjour, je souhaite avoir plus d'informations sur le produit "${product.name}".`;
+      navigate(`/messages?conversation=${data.id}&draft=${encodeURIComponent(draft)}`);
+    } catch (error) {
+      window.alert(error.response?.data?.message || "Impossible d'ouvrir la discussion avec ce vendeur.");
+    }
   };
 
   const sellerWhatsApp = whatsappNumber(product.seller_whatsapp);
@@ -1537,22 +1792,22 @@ function ProductDetails() {
           <img src={assetUrl(product.image_url)} alt={product.name} />
           <div>
             {similar.slice(0, 3).map((p) => (
-              <img key={p.id} src={p.image_url} alt="Aperçu" />
+              <img key={p.id} src={p.image_url} alt="Apercu" />
             ))}
           </div>
         </div>
         <div className="product-info">
-          {product.is_featured && (
+          {Boolean(product.is_featured) && (
             <img
               className="best-price-detail-ribbon"
               src="/best-price-ribbon.png"
               alt="Meilleur prix"
             />
           )}
-          <Badge tone="gold">Vendeur vérifié</Badge>
+          <Badge tone="gold">Vendeur verifie</Badge>
           <h1>{product.name}</h1>
           <p className="lead">
-            Une sélection premium proposée par {product.seller_name}, disponible à {product.city}.
+            Une selection premium proposee par {product.shop_name || product.seller_name}{product.city ? `, disponible a ${product.city}` : ""}{product.department ? ` dans le departement ${product.department}` : ""}.
           </p>
           <h2>{productPrice(product).toLocaleString("fr-HT")} HTG</h2>
           <div className="product-detail-meta">
@@ -1563,18 +1818,19 @@ function ProductDetails() {
               <Package /> {product.stock ?? 0} disponible(s)
             </span>
             <span>
-              <MapPin /> {product.city || "Haïti"}
+              <MapPin /> {product.department ? `${product.department} - ` : ""}{product.city || "Haiti"}
             </span>
           </div>
           <div className="product-description">
             <span>Description</span>
             <p>
               {product.description ||
-                "Contactez le vendeur pour obtenir plus d’informations sur ce produit."}
+                "Contactez le vendeur pour obtenir plus d'informations sur ce produit."}
             </p>
           </div>
+          {cartMessage && <div className="product-cart-feedback">{cartMessage}</div>}
           <div className="detail-actions">
-            <Button onClick={() => add(product)}>
+            <Button onClick={addProductToCart}>
               <ShoppingCart size={18} /> Ajouter au panier
             </Button>
             <Button variant="glass" onClick={() => toggle(product)}>
@@ -1584,7 +1840,9 @@ function ProductDetails() {
           </div>
           <article className="product-seller-card">
             <div className="product-seller-avatar">
-              {product.seller_profile_image_url ? (
+              {product.shop_logo_url ? (
+                <img src={assetUrl(product.shop_logo_url)} alt={product.shop_name || product.seller_name} />
+              ) : product.seller_profile_image_url ? (
                 <img src={assetUrl(product.seller_profile_image_url)} alt={product.seller_name} />
               ) : (
                 <CircleUserRound />
@@ -1594,7 +1852,7 @@ function ProductDetails() {
               <span>Vendu par</span>
               <h3>{product.shop_name || product.seller_name}</h3>
               <p>
-                <ShieldCheck /> Vendeur vérifié · {product.seller_name}
+                <ShieldCheck /> Vendeur verifie - {product.seller_name}
               </p>
             </div>
             <div className="product-seller-actions">
@@ -1670,7 +1928,7 @@ function ShopDetails() {
     <MarketplaceLayout>
       <section className="shop-public-hero">
         <div className="shop-public-logo">
-          {shop?.shop_logo_url ? (
+          {shop.shop_logo_url ? (
             <img
               src={assetUrl(shop.shop_logo_url)}
               alt={shop.shop_name}
@@ -1681,16 +1939,16 @@ function ShopDetails() {
         </div>
         <div>
           <Badge tone="gold">Boutique vérifiée</Badge>
-          <h1>{shop?.shop_name || "Boutique VinnHT"}</h1>
+          <h1>{shop.shop_name || "Boutique VinnHT"}</h1>
           <p>
-            {shop?.description || "Découvrez tous les produits disponibles dans cette boutique."}
+            {shop.description || "Découvrez tous les produits disponibles dans cette boutique."}
           </p>
           <div className="shop-public-metrics">
             <span>{products.length} produit(s) en ligne</span>
             <span>
               <Star />
-              {Number(shop?.review_count) > 0
-                ? `${Number(shop.rating).toFixed(1)} sur 5 · ${shop.review_count} avis vérifié(s)`
+              {Number(shop.review_count) > 0
+                 ? `${Number(shop.rating).toFixed(1)} sur 5 · ${shop.review_count} avis vérifié(s)`
                 : "Nouvelle boutique · Aucun avis"}
             </span>
           </div>
@@ -1699,7 +1957,7 @@ function ShopDetails() {
       <section className="section">
         <SectionHead
           eyebrow="Catalogue boutique"
-          title={`Les produits de ${shop?.shop_name || "cette boutique"}`}
+          title={`Les produits de ${shop.shop_name || "cette boutique"}`}
         />
         {products.length ? (
           <div className="product-grid">
@@ -1809,8 +2067,8 @@ function AuthPage({ register = false }) {
       navigate(roleHome[data.user.role] || "/client");
     } catch (err) {
       setError(
-        err.response?.data?.errors?.[0]?.msg ||
-          err.response?.data?.message ||
+        err.response.data.errors?.[0].msg ||
+          err.response.data.message ||
           "Le serveur est indisponible. Vérifiez que l’API est démarrée."
       );
     } finally {
@@ -1854,7 +2112,7 @@ function AuthPage({ register = false }) {
             </div>
             <h1>{register ? "REGISTER" : "LOGIN"}</h1>
             <p className="auth-subtitle">
-              {register ? "Créez votre compte VinnHT" : "Bienvenue, connectez-vous à votre espace"}
+              {register ? "Cr?ez votre compte VinnHT" : "Bienvenue, connectez-vous ? votre espace"}
             </p>
             {register && (
               <>
@@ -1936,7 +2194,7 @@ function AuthPage({ register = false }) {
             )}
             {!register && (
               <Link className="forgot-link" to="/login">
-                Mot de passe oublié ?
+                Mot de passe oublié 
               </Link>
             )}
             {error && <div className="alert">{error}</div>}
@@ -1946,7 +2204,7 @@ function AuthPage({ register = false }) {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              {busy ? "Veuillez patienter..." : register ? "Créer mon compte" : "Se connecter"}
+              {busy ? "Veuillez patienter..." : register ? "Creer mon compte" : "Se connecter"}
             </motion.button>
             <div className="social-divider">
               <span />
@@ -1962,9 +2220,9 @@ function AuthPage({ register = false }) {
               </button>
             </div>
             <p className="auth-switch">
-              {register ? "Déjà membre ?" : "Pas encore membre ?"}{" "}
+              {register ? "Deja membre " : "Pas encore membre "}{" "}
               <Link to={register ? "/login" : "/register"}>
-                {register ? "Se connecter" : "Créer un compte"}
+                {register ? "Se connecter" : "Creer un compte"}
               </Link>
             </p>
           </form>
@@ -2096,9 +2354,17 @@ const isMenuPathActive = (currentPath, itemPath) => {
 };
 
 function Protected({ roles, children }) {
-  const { user, activeRole } = useAuth();
-  const userRoles = user?.roles || [user?.role].filter(Boolean);
+  const { user, activeRole, authLoading } = useAuth();
+  if (authLoading) {
+    return (
+      <div className="auth-loading-screen">
+        <img src="/vinnht-logo.png" alt="VinnHT" />
+        <span>Chargement de votre espace...</span>
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/login" />;
+  const userRoles = user.roles || [user.role].filter(Boolean);
   if (roles && !roles.some((role) => userRoles.includes(role)) && !userRoles.includes("admin"))
     return <Navigate to={roleHome[activeRole] || roleHome[user.role]} />;
   return children;
@@ -2187,10 +2453,7 @@ function MobileDashboardNav() {
   const loc = useLocation();
   const activeItemRef = useRef(null);
   const skipNextScrollAnimation = useRef(false);
-  const items =
-    activeRole === "seller"
-      ? [...menuItemsFor(activeRole, user), ["Profil", "/seller/profile", CircleUserRound]]
-      : menuItemsFor(activeRole, user);
+  const items = menuItemsFor(activeRole, user);
 
   useEffect(() => {
     skipNextScrollAnimation.current = true;
@@ -2335,7 +2598,7 @@ function DashboardNotifications({ role }) {
 function DashboardLayout({ children }) {
   const { user, activeRole, switchRole } = useAuth();
   const { cart } = useCart();
-  const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
+  const cartCount = cart.reduce((total, item) => total + Number(item.quantity || 0), 0);
   const alternativeRoles = (user.roles || []).filter(
     (role) => switchableAccountRoles.includes(role) && role !== activeRole
   );
@@ -2520,7 +2783,7 @@ function Dashboard({ role }) {
               label.includes("achats") ||
               label.includes("recevoir") ||
               label.includes("Volume")
-                ? " HTG"
+                 ? " HTG"
                 : ""
             }
             key={label}
@@ -2683,7 +2946,7 @@ function ClientDashboardPage() {
   const [offers, setOffers] = useState([]);
   const [shops, setShops] = useState([]);
   const [dashboard, setDashboard] = useState(null);
-  const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
+  const cartCount = cart.reduce((total, item) => total + Number(item.quantity || 0), 0);
 
   useEffect(() => {
     api
@@ -2732,6 +2995,9 @@ function ClientOrdersPage() {
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [proofProcessing, setProofProcessing] = useState(false);
+  const [proofError, setProofError] = useState("");
+  const [proofSuccess, setProofSuccess] = useState("");
 
   useEffect(() => {
     api
@@ -2743,6 +3009,28 @@ function ClientOrdersPage() {
   const selectOrder = async (id) => {
     const { data } = await api.get(`/orders/${id}`);
     setSelectedOrder(data);
+    setProofError("");
+    setProofSuccess("");
+  };
+
+  const submitOrderPaymentProof = async (orderId, { file, note }) => {
+    setProofProcessing(true);
+    setProofError("");
+    setProofSuccess("");
+    try {
+      const formData = new FormData();
+      formData.append("paymentProof", file);
+      if (note) formData.append("note", note);
+      const { data } = await api.patch(`/payments/${orderId}/direct-proof`, formData);
+      await selectOrder(orderId);
+      const { data: refreshedOrders } = await api.get("/orders/mine");
+      setOrders(refreshedOrders);
+      setProofSuccess(data.message || "Preuve envoyee aux vendeurs.");
+    } catch (requestError) {
+      setProofError(requestError.response?.data?.message || "Impossible d'envoyer la preuve de paiement.");
+    } finally {
+      setProofProcessing(false);
+    }
   };
 
   return (
@@ -2752,6 +3040,10 @@ function ClientOrdersPage() {
         loading={loading}
         selectedOrder={selectedOrder}
         onSelect={selectOrder}
+        onSubmitPaymentProof={submitOrderPaymentProof}
+        proofProcessing={proofProcessing}
+        proofError={proofError}
+        proofSuccess={proofSuccess}
       />
     </DashboardLayout>
   );
@@ -2809,21 +3101,23 @@ function ClientCheckoutPage() {
     }
   };
 
-  const simulatePayment = async (orderId, status) => {
+  const submitPaymentProof = async (orderId, { file, note }) => {
     setProcessing(true);
     setError("");
     try {
-      const { data } = await api.patch(`/payments/${orderId}/simulate`, {
-        status,
-      });
+      const formData = new FormData();
+      formData.append("paymentProof", file);
+      if (note) formData.append("note", note);
+      const { data } = await api.patch(`/payments/${orderId}/direct-proof`, formData);
       setResult((current) => ({
         ...current,
         paymentStatus: data.paymentStatus,
         reference: data.reference,
+        proofUrl: data.proofUrl,
       }));
-      if (status === "paid") clear();
+      clear();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Impossible de simuler le paiement.");
+      setError(requestError.response?.data?.message || "Impossible d'envoyer la preuve de paiement.");
     } finally {
       setProcessing(false);
     }
@@ -2838,7 +3132,7 @@ function ClientCheckoutPage() {
         result={result}
         error={error}
         onSubmit={createOrder}
-        onSimulatePayment={simulatePayment}
+        onSubmitPaymentProof={submitPaymentProof}
       />
     </DashboardLayout>
   );
@@ -3524,3 +3818,6 @@ export default function App() {
     </Providers>
   );
 }
+
+
+

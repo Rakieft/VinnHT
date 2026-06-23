@@ -12,8 +12,8 @@ export default function Sidebar({ menu = [], user, onLogout }) {
       </Link>
       <div className="profile">
         <div>
-          <b>{user?.name}</b>
-          <span>{user?.role}</span>
+          <b>{user.name}</b>
+          <span>{user.role}</span>
         </div>
       </div>
       <nav>

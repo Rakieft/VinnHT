@@ -22,7 +22,7 @@ try {
   for (const table of backup.tables) {
     if (!table.rows.length) continue;
     const columns = Object.keys(table.rows[0]);
-    const placeholders = columns.map(() => "?").join(",");
+    const placeholders = columns.map(() => "").join(",");
     for (const row of table.rows) {
       await connection.query(
         `INSERT INTO \`${table.name}\` (${columns.map((column) => `\`${column}\``).join(",")})

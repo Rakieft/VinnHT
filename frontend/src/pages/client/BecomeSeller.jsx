@@ -81,10 +81,10 @@ const requiredLabels = {
 export default function BecomeSellerPage({ api, user, updateUser }) {
   const [form, setForm] = useState(() => ({
     ...initialForm,
-    fullName: user?.name || "",
-    email: user?.email || "",
-    primaryPhone: user?.phone || "",
-    profilePhoto: user?.profile_image_url || null,
+    fullName: user.name || "",
+    email: user.email || "",
+    primaryPhone: user.phone || "",
+    profilePhoto: user.profile_image_url || null,
   }));
   const [request, setRequest] = useState(null);
   const [errors, setErrors] = useState({});
@@ -93,7 +93,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [accepted, setAccepted] = useState([]);
   const [previews, setPreviews] = useState({
-    profilePhoto: user?.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : "",
+    profilePhoto: user.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : "",
   });
 
   useEffect(() => {
@@ -170,8 +170,8 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
         requestFormData.append("shopLogo", form.shopLogo);
       }
       await api.post("/seller/requests", requestFormData);
-      const { data: refreshedUser } = await api.get("/auth/me");
-      updateUser(refreshedUser);
+      const { data: refreshedSession } = await api.get("/auth/me");
+      if (refreshedSession.user) updateUser(refreshedSession.user);
       const { data } = await api.get("/seller/requests/mine");
       setRequest(data);
       setMessage("Votre demande vendeur a été envoyée avec succès.");
@@ -258,7 +258,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
               L’équipe VinnHT examinera vos informations. Vous recevrez une réponse après validation
               par un administrateur ou un superviseur.
             </p>
-            <strong>Statut de la demande : {request?.status || "En attente d’approbation"}</strong>
+            <strong>Statut de la demande : {request.status || "En attente d’approbation"}</strong>
           </div>
         </section>
       )}
@@ -369,15 +369,15 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
           </div>
           <TextField
             label={
-              form.activityStatus === "Étudiant"
-                ? "Dans quelle université étudiez-vous ?"
-                : form.activityStatus === "Écolier"
-                  ? "Dans quelle école étudiez-vous ?"
-                  : form.activityStatus === "Employé"
-                    ? "Dans quel établissement travaillez-vous ?"
+              form.activityStatus === "Etudiant"
+                ? "Dans quelle universite etudiez-vous"
+                : form.activityStatus === "Ecolier"
+                  ? "Dans quelle ecole etudiez-vous"
+                  : form.activityStatus === "Employe"
+                    ? "Dans quel etablissement travaillez-vous"
                     : form.activityStatus === "Entrepreneur"
-                      ? "Quel est le nom de votre entreprise ou activité ?"
-                      : "École, université, entreprise ou établissement"
+                      ? "Quel est le nom de votre entreprise ou activite"
+                      : "Ecole, universite, entreprise ou etablissement"
             }
             field="institutionName"
             form={form}
@@ -480,7 +480,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
                       onChange={() =>
                         setAccepted((current) =>
                           current.includes(index)
-                            ? current.filter((item) => item !== index)
+                             ? current.filter((item) => item !== index)
                             : [...current, index]
                         )
                       }

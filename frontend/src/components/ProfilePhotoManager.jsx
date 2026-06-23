@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Camera, Check, Trash2, X } from "lucide-react";
 import { apiOrigin } from "../config/runtime.js";
 
@@ -10,10 +10,18 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
   const [busy, setBusy] = useState(false);
   const imageRef = useRef(null);
   const currentPhoto = user?.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : "";
+  const currentPhotoWithCache = currentPhoto
+    ? `${currentPhoto}${currentPhoto.includes("?") ? "&" : "?"}v=${user?.profile_image_url || ""}`
+    : "";
+
+  useEffect(() => () => {
+    if (source) URL.revokeObjectURL(source);
+  }, [source]);
 
   const choose = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (source) URL.revokeObjectURL(source);
     setSource(URL.createObjectURL(file));
     setZoom(1);
     setPositionX(50);
@@ -41,11 +49,11 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
       const data = new FormData();
       data.append("profilePhoto", blob, "profil-vinnht.jpg");
       const { data: response } = await api.patch("/auth/profile", data);
-      updateUser(response.user);
-      onMessage?.("Photo recadrée et enregistrée.");
+      updateUser?.(response.user);
+      onMessage?.("Photo recadree et enregistree.");
       setSource("");
     } catch (error) {
-      onMessage?.(error.response?.data?.message || "Impossible d’enregistrer cette photo.");
+      onMessage?.(error.response?.data?.message || "Impossible d'enregistrer cette photo.");
     } finally {
       setBusy(false);
     }
@@ -55,7 +63,7 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
     setBusy(true);
     try {
       const { data } = await api.delete("/auth/profile/photo");
-      updateUser(data.user);
+      updateUser?.(data.user);
       onMessage?.(data.message);
     } catch (error) {
       onMessage?.(error.response?.data?.message || "Impossible de supprimer cette photo.");
@@ -69,7 +77,7 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
       <div className="profile-photo-manager">
         <span>
           {currentPhoto ? (
-            <img src={`${currentPhoto}?v=${Date.now()}`} alt="Photo de profil" />
+            <img src={currentPhotoWithCache} alt="Photo de profil" />
           ) : (
             <Camera />
           )}

@@ -25,6 +25,7 @@ import {
   Trash2,
   Wallet,
   UploadCloud,
+  Truck,
   UserRoundCheck,
   X,
 } from "lucide-react";
@@ -34,29 +35,76 @@ import { apiOrigin } from "../config/runtime.js";
 
 const imageSource = (url) => (url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url);
 
+const sellerPaymentLabels = {
+  pending: "Paiement attendu",
+  proof_submitted: "Preuve recue",
+  paid: "Paiement valide",
+  failed: "Preuve refusee",
+};
+
+const sellerNextActionLabel = (order) => {
+  if (!order?.payment_proof_url) return "Attendre la preuve";
+  if (order.seller_payment_status === "failed") return "Attendre une nouvelle preuve";
+  if (order.seller_payment_status !== "paid") return "Valider le paiement";
+  if (order.seller_status === "confirmed") return "Commencer la preparation";
+  if (order.seller_status === "preparing") return "Marquer prete";
+  if (order.seller_status === "ready") {
+    return order.seller_delivery_user_id ? "Livraison assignee" : "Assigner un livreur";
+  }
+  if (order.seller_status === "completed") return "Commande finalisee";
+  if (order.seller_status === "cancelled") return "Vente annulee";
+  return "Ouvrir la commande";
+};
+
+const sellerWorkflowClass = (done, active) => (done ? "done" : active ? "active" : "locked");
+
+const haitiDepartments = [
+  "Artibonite",
+  "Centre",
+  "Grand'Anse",
+  "Nippes",
+  "Nord",
+  "Nord-Est",
+  "Nord-Ouest",
+  "Ouest",
+  "Sud",
+  "Sud-Est",
+];
+
 export function SellerProductsContent({ api }) {
   const [products, setProducts] = useState([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const [editing, setEditing] = useState(null);
   const [adding, setAdding] = useState(false);
 
-  const load = () => api.get("/seller/products").then(({ data }) => setProducts(data));
+  const load = () =>
+    api
+      .get("/seller/products")
+      .then(({ data }) => setProducts(Array.isArray(data) ? data : []))
+      .catch(() => setError("Impossible de charger vos produits pour le moment."));
 
   useEffect(() => {
     load();
   }, []);
 
   const toggle = async (product) => {
-    await api.patch(`/seller/products/${product.id}`, {
-      status: product.status === "active" ? "inactive" : "active",
-    });
-    setMessage("Statut du produit mis à jour.");
-    load();
+    setError("");
+    try {
+      await api.patch(`/seller/products/${product.id}`, {
+        status: product.status === "active" ? "inactive" : "active",
+      });
+      setMessage("Statut du produit mis a jour.");
+      load();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible de modifier le statut du produit.");
+    }
   };
 
   const visibleProducts = products.filter((product) => {
-    const matchesQuery = product.name.toLowerCase().includes(query.toLowerCase());
+    const matchesQuery = (product.name || "").toLowerCase().includes(query.toLowerCase());
     const matchesFilter =
       filter === "all" ||
       product.status === filter ||
@@ -66,29 +114,35 @@ export function SellerProductsContent({ api }) {
 
   const saveEdit = async (event) => {
     event.preventDefault();
-    await api.patch(`/seller/products/${editing.id}`, {
-      name: editing.name,
-      price: Number(editing.price),
-      promotionalPrice: editing.promotional_price
-        ? Number(editing.promotional_price)
-        : "",
-      isFeatured: Boolean(editing.is_featured),
-      offerEndsAt: editing.offer_ends_at || "",
-      stock: Number(editing.stock),
-      description: editing.description || "",
-    });
-    setEditing(null);
-    setMessage("Produit modifié avec succès.");
-    load();
+    setError("");
+    try {
+      await api.patch(`/seller/products/${editing.id}`, {
+        name: editing.name,
+        price: Number(editing.price),
+        promotionalPrice: editing.promotional_price ? Number(editing.promotional_price) : "",
+        isFeatured: Boolean(editing.is_featured),
+        offerEndsAt: editing.offer_ends_at || "",
+        stock: Number(editing.stock),
+        description: editing.description || "",
+        department: editing.department || "",
+        city: editing.city || "",
+      });
+      setEditing(null);
+      setMessage("Produit modifie avec succes.");
+      load();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible de modifier le produit.");
+    }
   };
 
   return (
     <SellerPageHeader
       eyebrow="Catalogue vendeur"
       title="Mes produits"
-      text="Gérez vos produits, stocks et disponibilités."
+      text="Gerez vos produits, stocks et disponibilites."
     >
       {message && <div className="flow-success">{message}</div>}
+      {error && <div className="flow-error">{error}</div>}
       <div className="seller-catalog-toolbar">
         <label>
           <Search />
@@ -128,7 +182,7 @@ export function SellerProductsContent({ api }) {
           embedded
           onCreated={() => {
             setAdding(false);
-            setMessage("Produit ajouté avec succès.");
+            setMessage("Produit ajoute avec succes.");
             load();
           }}
         />
@@ -145,11 +199,14 @@ export function SellerProductsContent({ api }) {
                 </span>
               )}
               {Boolean(product.is_featured) && product.promotional_price && (
-                <span className="flow-status confirmed">Offre spéciale</span>
+                <span className="flow-status confirmed">Offre speciale</span>
               )}
               <h3>{product.name}</h3>
               <p>
-                {product.category_name || "Produit"} · Stock : {product.stock}
+                {product.category_name || "Produit"} - Stock : {product.stock}
+              </p>
+              <p className="seller-product-location">
+                {product.department || "Departement"} - {product.city || "Ville non renseignee"}
               </p>
               <strong>
                 {Number(product.promotional_price || product.price).toLocaleString("fr-HT")} HTG
@@ -161,7 +218,7 @@ export function SellerProductsContent({ api }) {
               </button>
               <button onClick={() => toggle(product)}>
                 <Power />
-                {product.status === "active" ? "Désactiver" : "Activer"}
+                {product.status === "active" ? "Desactiver" : "Activer"}
               </button>
             </footer>
           </motion.article>
@@ -202,6 +259,26 @@ export function SellerProductsContent({ api }) {
             />
           </label>
           <label>
+            Departement
+            <select
+              value={editing.department || ""}
+              onChange={(event) => setEditing({ ...editing, department: event.target.value })}
+            >
+              <option value="">Choisir un departement</option>
+              {haitiDepartments.map((department) => (
+                <option value={department} key={department}>{department}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Ville ou commune
+            <input
+              value={editing.city || ""}
+              onChange={(event) => setEditing({ ...editing, city: event.target.value })}
+              placeholder="Ex. Port-au-Prince, Jacmel, Cap-Haitien"
+            />
+          </label>
+          <label>
             Prix promotionnel HTG
             <input
               min="0"
@@ -215,7 +292,7 @@ export function SellerProductsContent({ api }) {
             />
           </label>
           <label>
-            Fin de l’offre
+            Fin de l'offre
             <input
               type="datetime-local"
               value={editing.offer_ends_at?.slice(0, 16) || ""}
@@ -228,7 +305,7 @@ export function SellerProductsContent({ api }) {
               checked={Boolean(editing.is_featured)}
               onChange={(event) => setEditing({ ...editing, is_featured: event.target.checked })}
             />
-            Afficher dans les offres spéciales VinnHT
+            Afficher dans les offres speciales VinnHT
           </label>
           <label className="full">
             Description
@@ -255,6 +332,8 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
     description: "",
     price: "",
     stock: "",
+    department: "Ouest",
+    city: "",
   });
   const [images, setImages] = useState([]);
   const [previews, setPreviews] = useState([]);
@@ -271,13 +350,13 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
       Object.entries(form).forEach(([key, value]) => data.append(key, value));
       images.forEach((image) => data.append("images", image));
       await api.post("/products", data);
-      setMessage("Produit ajouté avec succès.");
-      setForm({ name: "", categoryId: "", description: "", price: "", stock: "" });
+      setMessage("Produit ajoute avec succes.");
+      setForm({ name: "", categoryId: "", description: "", price: "", stock: "", department: "Ouest", city: "" });
       setImages([]);
       setPreviews([]);
       onCreated?.();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Impossible d’ajouter le produit.");
+      setError(requestError.response?.data?.message || "Impossible d'ajouter le produit.");
     }
   };
 
@@ -291,8 +370,8 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
             <span>
               <Sparkles /> Nouvelle fiche produit
             </span>
-            <h2>Présentez votre produit comme une grande marque.</h2>
-            <p>Des informations précises et de belles images inspirent confiance aux clients.</p>
+            <h2>Presentez votre produit comme une grande marque.</h2>
+            <p>Des informations precises et de belles images inspirent confiance aux clients.</p>
           </header>
 
           <ProductStudioSection
@@ -310,13 +389,13 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
               />
             </label>
             <label>
-              Catégorie
+              Categorie
               <select
                 required
                 value={form.categoryId}
                 onChange={(event) => setForm({ ...form, categoryId: event.target.value })}
               >
-                <option value="">Choisir une catégorie</option>
+                <option value="">Choisir une categorie</option>
                 {categories.map((category) => (
                   <option value={category.id} key={category.id}>
                     {category.name}
@@ -328,8 +407,37 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
 
           <ProductStudioSection
             number="02"
-            title="Prix et disponibilité"
-            text="Indiquez un prix clair et le stock réellement disponible."
+            title="Localisation de l'offre"
+            text="Indiquez le departement et la ville depuis lesquels ce produit est disponible."
+          >
+            <label>
+              Departement
+              <select
+                required
+                value={form.department}
+                onChange={(event) => setForm({ ...form, department: event.target.value })}
+              >
+                <option value="">Choisir un departement</option>
+                {haitiDepartments.map((department) => (
+                  <option value={department} key={department}>{department}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Ville ou commune
+              <input
+                required
+                value={form.city}
+                onChange={(event) => setForm({ ...form, city: event.target.value })}
+                placeholder="Ex. Port-au-Prince, Gonaives, Jacmel"
+              />
+            </label>
+          </ProductStudioSection>
+
+          <ProductStudioSection
+            number="03"
+            title="Prix et disponibilite"
+            text="Indiquez un prix clair et le stock reellement disponible."
           >
             <label>
               Prix de vente
@@ -346,7 +454,7 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
               </span>
             </label>
             <label>
-              Quantité en stock
+              Quantite en stock
               <input
                 required
                 min="0"
@@ -360,7 +468,7 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
 
           <section className="seller-product-form-section">
             <header>
-              <b>03</b>
+              <b>04</b>
               <div>
                 <h3>Photos et description</h3>
                 <p>Utilisez des photos nettes prises sous plusieurs angles.</p>
@@ -380,12 +488,12 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
               <span>
                 <UploadCloud />
                 <b>Choisir les images</b>
-                <small>JPG, PNG ou WebP · maximum 5 images</small>
+                <small>JPG, PNG ou WebP - maximum 5 images</small>
               </span>
               {previews.length > 0 && (
                 <div>
                   {previews.map((preview, index) => (
-                    <img src={preview} alt={`Aperçu ${index + 1}`} key={preview} />
+                    <img src={preview} alt={`Apercu ${index + 1}`} key={preview} />
                   ))}
                 </div>
               )}
@@ -396,14 +504,14 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
                 rows="6"
                 value={form.description}
                 onChange={(event) => setForm({ ...form, description: event.target.value })}
-                placeholder="Décrivez les caractéristiques, l’état et les avantages du produit..."
+                placeholder="Decrivez les caracteristiques, l'etat et les avantages du produit..."
               />
             </label>
           </section>
 
           <footer className="seller-product-studio-footer">
             <p>
-              <ShieldCheck /> Vous pourrez modifier ou désactiver ce produit à tout moment.
+              <ShieldCheck /> Vous pourrez modifier ou desactiver ce produit a tout moment.
             </p>
             <button>
               <Plus /> Publier le produit
@@ -412,19 +520,20 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
         </div>
 
         <aside className="seller-product-live-preview">
-          <span>Aperçu client</span>
+          <span>Apercu client</span>
           <div className="seller-preview-image">
-            {previews[0] ? <img src={previews[0]} alt="Aperçu principal" /> : <ImagePlus />}
+            {previews[0] ? <img src={previews[0]} alt="Apercu principal" /> : <ImagePlus />}
           </div>
           <small>
             {categories.find((category) => String(category.id) === String(form.categoryId))?.name ||
-              "Catégorie"}
+              "Categorie"}
           </small>
           <h3>{form.name || "Nom de votre produit"}</h3>
           <strong>{Number(form.price || 0).toLocaleString("fr-HT")} HTG</strong>
-          <p>{form.description || "La description de votre produit apparaîtra ici."}</p>
+          <p>{form.description || "La description de votre produit apparaitra ici."}</p>
+          <p className="seller-preview-location">{form.department || "Departement"} - {form.city || "Ville"}</p>
           <div>
-            <CheckCircle2 /> Fiche prête à être publiée
+            <CheckCircle2 /> Fiche prete a etre publiee
           </div>
         </aside>
       </form>
@@ -441,7 +550,7 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
     <SellerPageHeader
       eyebrow="Nouveau produit"
       title="Ajouter un produit"
-      text="Créez une fiche premium pour présenter votre produit aux clients."
+      text="Creez une fiche premium pour presenter votre produit aux clients."
     >
       {studio}
     </SellerPageHeader>
@@ -473,6 +582,8 @@ function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
     description: "",
     price: "",
     stock: "",
+    department: "Ouest",
+    city: "",
   });
   const [images, setImages] = useState([]);
   const [previews, setPreviews] = useState([]);
@@ -489,7 +600,7 @@ function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
       Object.entries(form).forEach(([key, value]) => data.append(key, value));
       images.forEach((image) => data.append("images", image));
       await api.post("/products", data);
-      setMessage("Produit ajouté avec succès.");
+      setMessage("Produit ajoute avec succes.");
       setForm({
         name: "",
         categoryId: "",
@@ -501,7 +612,7 @@ function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
       setPreviews([]);
       onCreated?.();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Impossible d’ajouter le produit.");
+      setError(requestError.response?.data?.message || "Impossible d'ajouter le produit.");
     }
   };
 
@@ -519,13 +630,13 @@ function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
           />
         </label>
         <label>
-          Catégorie
+          Categorie
           <select
             required
             value={form.categoryId}
             onChange={(event) => setForm({ ...form, categoryId: event.target.value })}
           >
-            <option value="">Choisir une catégorie</option>
+            <option value="">Choisir une categorie</option>
             {categories.map((category) => (
               <option value={category.id} key={category.id}>
                 {category.name}
@@ -566,12 +677,12 @@ function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
             }}
           />
           <span>
-            <ImagePlus /> Choisir jusqu’à 5 images
+            <ImagePlus /> Choisir jusqu'a 5 images
           </span>
           {previews.length > 0 && (
             <div>
               {previews.map((preview) => (
-                <img src={preview} alt="Aperçu produit" key={preview} />
+                <img src={preview} alt="Apercu produit" key={preview} />
               ))}
             </div>
           )}
@@ -600,7 +711,7 @@ function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
     <SellerPageHeader
       eyebrow="Nouveau produit"
       title="Ajouter un produit"
-      text="Créez une fiche claire pour présenter votre produit aux clients."
+      text="Creez une fiche claire pour presenter votre produit aux clients."
     >
       {content}
     </SellerPageHeader>
@@ -619,24 +730,25 @@ export function SellerDashboardContent({ api, user }) {
   }, []);
 
   const stats = data?.stats || {};
+  const recentSales = data?.recentSales || [];
   const cards = [
     [Package, "Produits actifs", stats.active_products || 0, "Votre catalogue en ligne"],
-    [AlertTriangle, "Stocks faibles", stats.low_stock_products || 0, "Produits à réapprovisionner"],
-    [Clock3, "À préparer", stats.awaiting_preparation || 0, "Commandes payées à traiter"],
-    [CheckCircle2, "Prêtes", stats.ready_orders || 0, "En attente de livraison"],
+    [AlertTriangle, "Stocks faibles", stats.low_stock_products || 0, "Produits a reapprovisionner"],
+    [Clock3, "A preparer", stats.awaiting_preparation || 0, "Commandes payees a traiter"],
+    [CheckCircle2, "Pretes", stats.ready_orders || 0, "En attente de livraison"],
   ];
 
   return (
     <SellerPageHeader
       eyebrow="Centre de pilotage"
       title={`Bonjour, ${user.name}`}
-      text="Pilotez votre boutique, préparez vos commandes et suivez vos performances."
+      text="Pilotez votre boutique, preparez vos commandes et suivez vos performances."
     >
       <section className="seller-dashboard-hero">
         <div>
           <span>Performance de votre boutique</span>
           <h2>{money(stats.net_sales)}</h2>
-          <p>Revenu net estimé après commission, sans fonction de retrait configurée.</p>
+          <p>Revenu net estime apres commission, sans fonction de retrait configuree.</p>
         </div>
         <Wallet />
       </section>
@@ -655,13 +767,13 @@ export function SellerDashboardContent({ api, user }) {
       <section className="seller-finance-panel">
         <header>
           <div>
-            <span>Activité récente</span>
-            <h2>Dernières ventes</h2>
+            <span>Activite recente</span>
+            <h2>Dernieres ventes</h2>
           </div>
           <TrendingUp />
         </header>
         <div className="seller-finance-list">
-          {(data?.recentSales || []).map((sale) => (
+          {recentSales.map((sale) => (
             <article key={sale.id}>
               <div>
                 <strong>{sale.order_number}</strong>
@@ -671,7 +783,7 @@ export function SellerDashboardContent({ api, user }) {
               <span className={`flow-status ${sale.status}`}>{sale.status}</span>
             </article>
           ))}
-          {data && !data.recentSales.length && <p>Aucune vente pour le moment.</p>}
+          {data ? (!recentSales.length && <p>Aucune vente pour le moment.</p>) : <p>Chargement des ventes...</p>}
         </div>
       </section>
     </SellerPageHeader>
@@ -680,14 +792,41 @@ export function SellerDashboardContent({ api, user }) {
 
 export function SellerOrdersContent({ api }) {
   const [orders, setOrders] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [filter, setFilter] = useState("all");
   const [message, setMessage] = useState("");
+  const [showDriverForm, setShowDriverForm] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [assigningDriverId, setAssigningDriverId] = useState("");
+  const [showPaymentProof, setShowPaymentProof] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [driverForm, setDriverForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    password: "",
+    zones: "",
+    vehicleType: "",
+  });
 
-  const load = () => api.get("/seller/orders").then(({ data }) => setOrders(data));
+  const load = async () => {
+    const [{ data: orderRows }, { data: driverRows }] = await Promise.all([
+      api.get("/seller/orders"),
+      api.get("/seller/delivery-drivers"),
+    ]);
+    setOrders(orderRows);
+    setDrivers(driverRows);
+  };
 
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    setAssigningDriverId(selected?.seller_delivery_user_id || "");
+    setShowPaymentProof(false);
+    setRejectReason("");
+  }, [selected]);
 
   const updateStatus = async (saleId, status) => {
     const { data } = await api.patch(`/seller/sales/${saleId}/status`, { status });
@@ -696,25 +835,105 @@ export function SellerOrdersContent({ api }) {
     load();
   };
 
+  const createDriver = async (event) => {
+    event.preventDefault();
+    const { data } = await api.post("/seller/delivery-drivers", driverForm);
+    setMessage(data.message);
+    setDriverForm({
+      name: "",
+      email: "",
+      phone: "",
+      password: "",
+      zones: "",
+      vehicleType: "",
+    });
+    setShowDriverForm(false);
+    load();
+  };
+
+  const validatePayment = async (saleId) => {
+    const { data } = await api.patch(`/seller/sales/${saleId}/payment/validate`);
+    setMessage(data.message);
+    setSelected((current) =>
+      current?.sale_id === saleId
+        ? {
+            ...current,
+            seller_payment_status: data.sellerPaymentStatus,
+            payment_status: data.paymentStatus,
+            seller_status: current.seller_status === "pending" ? "confirmed" : current.seller_status,
+            payment_validated_at: new Date().toISOString(),
+            payment_rejection_reason: null,
+            payment_rejected_at: null,
+          }
+        : current
+    );
+    load();
+  };
+
+  const rejectPayment = async (saleId) => {
+    const reason = rejectReason.trim();
+    if (reason.length < 8) {
+      setMessage("Expliquez le motif du refus en au moins 8 caracteres.");
+      return;
+    }
+    const { data } = await api.patch(`/seller/sales/${saleId}/payment/reject`, { reason });
+    setMessage(data.message);
+    setSelected((current) =>
+      current?.sale_id === saleId
+        ? {
+            ...current,
+            seller_payment_status: data.sellerPaymentStatus,
+            payment_rejection_reason: data.rejectionReason,
+            payment_rejected_at: new Date().toISOString(),
+          }
+        : current
+    );
+    setRejectReason("");
+    load();
+  };
+
+  const assignDriver = async () => {
+    if (!selected || !assigningDriverId) return;
+    const { data } = await api.patch(`/seller/sales/${selected.sale_id}/assign-driver`, {
+      deliveryUserId: Number(assigningDriverId),
+    });
+    setMessage(data.message);
+    const assignedDriver = drivers.find((driver) => Number(driver.id) === Number(assigningDriverId));
+    setSelected({
+      ...selected,
+      seller_delivery_user_id: Number(assigningDriverId),
+      seller_delivery_name: assignedDriver?.name || selected.seller_delivery_name,
+      seller_delivery_phone: assignedDriver?.phone || selected.seller_delivery_phone,
+      seller_delivery_status: "assigned",
+    });
+    load();
+  };
+
   const visible = orders.filter((order) => filter === "all" || order.seller_status === filter);
+  const selectedPaymentStatus = selected?.seller_payment_status || "pending";
+  const selectedPaymentIsValid = selectedPaymentStatus === "paid";
+  const selectedCanValidatePayment = Boolean(
+    selected?.payment_proof_url && selectedPaymentStatus === "proof_submitted"
+  );
+  const selectedCanRejectPayment = selectedCanValidatePayment;
 
   return (
     <SellerPageHeader
-      eyebrow="Opérations boutique"
-      title="Commandes reçues"
-      text="Préparez uniquement les produits vendus par votre boutique."
+      eyebrow="Operations boutique"
+      title="Commandes recues"
+      text="Preparez uniquement les produits vendus par votre boutique."
     >
       {message && <div className="flow-success">{message}</div>}
-      <div className="seller-catalog-toolbar">
+      <div className="seller-catalog-toolbar seller-orders-toolbar">
         <div>
           {[
             ["all", "Toutes"],
             ["pending", "Paiement en attente"],
-            ["confirmed", "À préparer"],
-            ["preparing", "En préparation"],
-            ["ready", "Prêtes"],
-            ["completed", "Livrées"],
-            ["cancelled", "Annulées"],
+            ["confirmed", "A preparer"],
+            ["preparing", "En preparation"],
+            ["ready", "Pretes"],
+            ["completed", "Livrees"],
+            ["cancelled", "Annulees"],
           ].map(([value, label]) => (
             <button
               className={filter === value ? "active" : ""}
@@ -725,7 +944,58 @@ export function SellerOrdersContent({ api }) {
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className="seller-small-action"
+          onClick={() => setShowDriverForm((current) => !current)}
+        >
+          {showDriverForm ? <X /> : <Plus />}
+          {showDriverForm ? "Fermer" : "Ajouter un livreur"}
+        </button>
       </div>
+      {showDriverForm && (
+        <form className="seller-driver-form seller-driver-form-compact" onSubmit={createDriver}>
+          <input
+            value={driverForm.name}
+            onChange={(event) => setDriverForm({ ...driverForm, name: event.target.value })}
+            placeholder="Nom complet"
+            required
+          />
+          <input
+            value={driverForm.email}
+            onChange={(event) => setDriverForm({ ...driverForm, email: event.target.value })}
+            placeholder="Email livreur"
+            type="email"
+            required
+          />
+          <input
+            value={driverForm.phone}
+            onChange={(event) => setDriverForm({ ...driverForm, phone: event.target.value })}
+            placeholder="Telephone"
+          />
+          <input
+            value={driverForm.password}
+            onChange={(event) => setDriverForm({ ...driverForm, password: event.target.value })}
+            placeholder="Mot de passe temporaire"
+            type="password"
+            minLength={8}
+            required
+          />
+          <input
+            value={driverForm.zones}
+            onChange={(event) => setDriverForm({ ...driverForm, zones: event.target.value })}
+            placeholder="Zones couvertes"
+          />
+          <input
+            value={driverForm.vehicleType}
+            onChange={(event) => setDriverForm({ ...driverForm, vehicleType: event.target.value })}
+            placeholder="Moto, voiture, camion..."
+          />
+          <button type="submit">
+            <Plus /> Enregistrer le livreur
+          </button>
+        </form>
+      )}
       <section className="seller-order-list">
         {visible.map((order) => (
           <motion.article whileHover={{ y: -3 }} key={order.sale_id}>
@@ -737,7 +1007,12 @@ export function SellerOrdersContent({ api }) {
                   <CalendarDays /> {shortDate(order.created_at)}
                 </p>
               </div>
-              <span className={`flow-status ${order.seller_status}`}>{order.seller_status}</span>
+              <div className="seller-order-status-stack">
+                <span className={`flow-status ${order.seller_status}`}>{order.seller_status}</span>
+                <span className={`flow-status ${order.seller_payment_status || "pending"}`}>
+                  {sellerPaymentLabels[order.seller_payment_status] || "Paiement attendu"}
+                </span>
+              </div>
             </header>
             <div className="seller-order-items">
               {order.items.map((item) => (
@@ -745,16 +1020,20 @@ export function SellerOrdersContent({ api }) {
                   <img src={imageSource(item.image_url)} alt={item.name} />
                   <span>
                     <strong>{item.name}</strong>
-                    <small>Quantité : {item.quantity}</small>
+                    <small>Quantite : {item.quantity}</small>
                   </span>
                   <b>{money(item.subtotal)}</b>
                 </div>
               ))}
             </div>
+            <div className="seller-order-next-step">
+              <small>Etape suivante</small>
+              <strong>{sellerNextActionLabel(order)}</strong>
+            </div>
             <footer>
               <strong>{money(order.gross_amount)}</strong>
               <button onClick={() => setSelected(order)}>
-                <Eye /> Voir détails
+                <Eye /> {sellerNextActionLabel(order)}
               </button>
             </footer>
           </motion.article>
@@ -765,45 +1044,170 @@ export function SellerOrdersContent({ api }) {
         <section className="seller-order-detail">
           <header>
             <div>
-              <span>Détail commande</span>
+              <span>Detail commande</span>
               <h2>{selected.order_number}</h2>
             </div>
             <button onClick={() => setSelected(null)}>
               <X />
             </button>
           </header>
+          <section className="seller-order-workflow">
+            {[
+              [
+                "Paiement",
+                sellerPaymentLabels[selectedPaymentStatus] || selectedPaymentStatus,
+                selectedPaymentIsValid,
+                selectedCanValidatePayment || !selected.payment_proof_url || selectedPaymentStatus === "failed",
+              ],
+              [
+                "Preparation",
+                selected.seller_status === "preparing"
+                  ? "En cours"
+                  : ["ready", "completed"].includes(selected.seller_status)
+                    ? "Terminee"
+                    : "A lancer",
+                ["preparing", "ready", "completed"].includes(selected.seller_status),
+                selectedPaymentIsValid && selected.seller_status === "confirmed",
+              ],
+              [
+                "Livreur",
+                selected.seller_delivery_name || "A assigner",
+                Boolean(selected.seller_delivery_user_id),
+                selectedPaymentIsValid && selected.seller_status === "ready" && !selected.seller_delivery_user_id,
+              ],
+              [
+                "Livraison",
+                selected.delivery_status || selected.seller_delivery_status || "En attente",
+                selected.seller_status === "completed" || selected.delivery_status === "delivered",
+                selected.seller_delivery_user_id && selected.seller_status === "ready",
+              ],
+            ].map(([title, note, done, active]) => (
+              <article className={sellerWorkflowClass(done, active)} key={title}>
+                <span>{done ? <CheckCircle2 /> : active ? <Clock3 /> : <ShieldCheck />}</span>
+                <div>
+                  <small>{title}</small>
+                  <strong>{note}</strong>
+                </div>
+              </article>
+            ))}
+          </section>
           <div className="seller-order-information">
             <article>
               <small>Client</small>
               <strong>{selected.client_name}</strong>
-              <span>{selected.client_phone || "Téléphone non renseigné"}</span>
+              <span>{selected.client_phone || "Telephone non renseigne"}</span>
             </article>
             <article>
               <small>Livraison</small>
               <strong>{selected.delivery_address}</strong>
             </article>
             <article>
-              <small>Paiement</small>
-              <strong>{selected.payment_status}</strong>
-              <span>Livraison : {selected.delivery_status || "non assignée"}</span>
+              <small>Paiement vendeur</small>
+              <strong>{sellerPaymentLabels[selectedPaymentStatus] || selectedPaymentStatus}</strong>
+              <span>Global : {selected.payment_status || "pending"}</span>
+            </article>
+            <article>
+              <small>Livreur boutique</small>
+              <strong>{selected.seller_delivery_name || "Non assigné"}</strong>
+              <span>
+                {selected.seller_delivery_phone || selected.seller_delivery_status || "Aucune mission boutique"}
+              </span>
             </article>
             {selected.delivery_status === "delivered" && (
               <article className="seller-delivery-confirmed">
-                <small>Preuve de réception</small>
-                <strong>Commande finalisée</strong>
+                <small>Preuve de reception</small>
+                <strong>Commande finalisee</strong>
                 <span>
-                  Signée par {selected.delivery_signer_name || "le client"}
+                  Signee par {selected.delivery_signer_name || "le client"}
                   {selected.delivery_confirmed_at
-                    ? ` le ${shortDate(selected.delivery_confirmed_at)}`
+                     ? ` le ${shortDate(selected.delivery_confirmed_at)}`
                     : ""}
                 </span>
               </article>
             )}
           </div>
-          {["confirmed", "preparing"].includes(selected.seller_status) &&
-            selected.payment_status === "paid" && (
-              <footer>
+          {selected.payment_proof_url && (
+            <section className="seller-payment-proof-card">
+              <div>
+                <small>Preuve MonCash recue</small>
+                <strong>{sellerPaymentLabels[selectedPaymentStatus] || selectedPaymentStatus}</strong>
+                <p>
+                  Reference : {selected.payment_reference || "Non renseignee"}
+                  {selected.payment_submitted_at ? ` - ${shortDate(selected.payment_submitted_at)}` : ""}
+                </p>
+                {selected.payment_proof_note && <p>Note client : {selected.payment_proof_note}</p>}
+              </div>
+              <button type="button" className="seller-proof-toggle" onClick={() => setShowPaymentProof((current) => !current)}>
+                <Eye /> {showPaymentProof ? "Masquer la preuve" : "Voir la preuve"}
+              </button>
+              {showPaymentProof && (
+                <div className="seller-payment-proof-preview">
+                  <img src={imageSource(selected.payment_proof_url)} alt="Preuve de paiement MonCash" />
+                </div>
+              )}
+              {selected.payment_rejection_reason && (
+                <div className="seller-payment-rejection-note">
+                  <AlertTriangle />
+                  <span>
+                    <b>Preuve refusee</b>
+                    {selected.payment_rejection_reason}
+                  </span>
+                </div>
+              )}
+              {selectedCanValidatePayment && (
+                <button type="button" onClick={() => validatePayment(selected.sale_id)}>
+                  <CheckCircle2 /> Valider le paiement
+                </button>
+              )}
+              {selectedCanRejectPayment && (
+                <div className="seller-payment-reject-box">
+                  <label>
+                    Motif si la preuve est incorrecte
+                    <textarea
+                      rows="3"
+                      value={rejectReason}
+                      onChange={(event) => setRejectReason(event.target.value)}
+                      placeholder="Ex. montant incomplet, numero MonCash incorrect, capture illisible..."
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="reject"
+                    onClick={() => rejectPayment(selected.sale_id)}
+                    disabled={rejectReason.trim().length < 8}
+                  >
+                    <X /> Refuser la preuve
+                  </button>
+                </div>
+              )}
+              {selectedPaymentIsValid && (
+                <span className="seller-payment-validated">
+                  <ShieldCheck /> Paiement valide par votre boutique
+                </span>
+              )}
+            </section>
+          )}
+          {!selected.payment_proof_url && (
+            <section className="seller-payment-proof-card muted">
+              <div>
+                <small>Preuve MonCash</small>
+                <strong>En attente du client</strong>
+                <p>Cette commande ne peut pas etre preparee avant reception et validation de la preuve.</p>
+              </div>
+            </section>
+          )}
+          {selectedPaymentIsValid && ["confirmed", "preparing", "ready"].includes(selected.seller_status) && (
+            <section className="seller-command-center">
+              <div>
+                <small>Action vendeur</small>
+                <strong>{sellerNextActionLabel(selected)}</strong>
+                <p>
+                  Suivez l'ordre : paiement valide, preparation, commande prete, puis assignation au livreur.
+                </p>
+              </div>
+              {["confirmed", "preparing"].includes(selected.seller_status) && (
                 <button
+                  type="button"
                   onClick={() =>
                     updateStatus(
                       selected.sale_id,
@@ -813,9 +1217,46 @@ export function SellerOrdersContent({ api }) {
                 >
                   <CheckCircle2 />
                   {selected.seller_status === "confirmed"
-                    ? "Commencer la préparation"
-                    : "Marquer prête pour livraison"}
+                    ? "Commencer la preparation"
+                    : "Marquer prete pour livraison"}
                 </button>
+              )}
+            </section>
+          )}
+          {selectedPaymentIsValid && selected.seller_status === "ready" && (
+            <section className="seller-driver-assignment">
+              <div>
+                <small>Assigner la livraison</small>
+                <strong>Choisir un livreur de votre boutique</strong>
+                <p>
+                  Le livreur verra cette mission dans son espace livreur et devra faire signer le client.
+                </p>
+              </div>
+              <select
+                value={assigningDriverId}
+                onChange={(event) => setAssigningDriverId(event.target.value)}
+              >
+                <option value="">Sélectionner un livreur</option>
+                {drivers.map((driver) => (
+                  <option value={driver.id} key={driver.id}>
+                    {driver.name} {driver.vehicle_type ? `- ${driver.vehicle_type}` : ""}
+                  </option>
+                ))}
+              </select>
+              {drivers.length ? (
+                <button type="button" onClick={assignDriver} disabled={!assigningDriverId}>
+                  <Truck /> Assigner au livreur
+                </button>
+              ) : (
+                <button type="button" onClick={() => setShowDriverForm(true)}>
+                  <Plus /> Ajouter un livreur
+                </button>
+              )}
+            </section>
+          )}
+          {["confirmed", "preparing"].includes(selected.seller_status) &&
+            selectedPaymentIsValid && (
+              <footer>
                 <button onClick={() => updateStatus(selected.sale_id, "cancelled")}>
                   <X /> Annuler ma vente
                 </button>
@@ -854,9 +1295,9 @@ export function SellerSalesContent({ api }) {
           <Wallet />
         </span>
         <div>
-          <small>Revenu net estimé</small>
+          <small>Revenu net estime</small>
           <h2>{money(totals.net)}</h2>
-          <p>Montant cumulé après déduction des commissions VinnHT.</p>
+          <p>Montant cumule apres deduction des commissions VinnHT.</p>
         </div>
       </section>
       <section className="seller-metric-grid">
@@ -902,16 +1343,16 @@ export function SellerPayoutsContent({ api }) {
     <SellerPageHeader
       eyebrow="Suivi financier"
       title="Mes revenus"
-      text="Consultez vos ventes et revenus estimés. Les retraits seront définis ultérieurement."
+      text="Consultez vos ventes et revenus estimes. Les retraits seront definis ulterieurement."
     >
       <section className="seller-payout-banner">
         <span>
           <Wallet />
         </span>
         <div>
-          <small>Revenu net estimé</small>
+          <small>Revenu net estime</small>
           <h2>{money(netTotal)}</h2>
-          <p>Aucune demande de retrait ni méthode de paiement n’est configurée.</p>
+          <p>Aucune demande de retrait ni methode de paiement n'est configuree.</p>
         </div>
       </section>
       <SellerFinanceTable
@@ -1003,7 +1444,7 @@ export function SellerShopContent({ api }) {
       setLogo(croppedLogo);
       setPreview(URL.createObjectURL(blob));
       setCropSource("");
-      setMessage("Logo recadré. Enregistrez la boutique pour appliquer la modification.");
+      setMessage("Logo recadre. Enregistrez la boutique pour appliquer la modification.");
     } finally {
       setBusyLogo(false);
     }
@@ -1050,9 +1491,9 @@ export function SellerShopContent({ api }) {
 
   return (
     <SellerPageHeader
-      eyebrow="Identité commerciale"
+      eyebrow="Identite commerciale"
       title="Ma boutique"
-      text="Présentez une boutique claire et professionnelle aux clients VinnHT."
+      text="Presentez une boutique claire et professionnelle aux clients VinnHT."
     >
       {message && <div className="flow-success">{message}</div>}
       <section className="seller-shop-layout">
@@ -1082,7 +1523,7 @@ export function SellerShopContent({ api }) {
           <div>
             <span>Boutique VinnHT</span>
             <h2>{shop.shopName || "Votre boutique"}</h2>
-            <p>{shop.description || "Ajoutez une description pour présenter votre activité."}</p>
+            <p>{shop.description || "Ajoutez une description pour presenter votre activite."}</p>
             <b className={`flow-status ${shop.status}`}>{shop.status}</b>
           </div>
         </aside>
@@ -1096,7 +1537,7 @@ export function SellerShopContent({ api }) {
             />
           </label>
           <label>
-            Catégorie principale
+            Categorie principale
             <input
               value={shop.category}
               onChange={(event) => setShop({ ...shop, category: event.target.value })}
@@ -1113,7 +1554,7 @@ export function SellerShopContent({ api }) {
             />
           </label>
           <label>
-            Visibilité boutique
+            Visibilite boutique
             <select
               value={shop.status}
               onChange={(event) => setShop({ ...shop, status: event.target.value })}
@@ -1131,14 +1572,14 @@ export function SellerShopContent({ api }) {
             />
           </label>
           <label className="full">
-            Adresse de récupération
+            Adresse de recuperation
             <input
               value={shop.pickupAddress}
               onChange={(event) => setShop({ ...shop, pickupAddress: event.target.value })}
             />
           </label>
           <label>
-            Horaires d’ouverture
+            Horaires d'ouverture
             <input
               placeholder="Ex. Lun-Sam, 8h00-18h00"
               value={shop.openingHours}
@@ -1148,7 +1589,7 @@ export function SellerShopContent({ api }) {
           <label>
             Zones desservies
             <input
-              placeholder="Ex. Pétion-Ville, Delmas, Tabarre"
+              placeholder="Ex. Petion-Ville, Delmas, Tabarre"
               value={shop.deliveryZones}
               onChange={(event) => setShop({ ...shop, deliveryZones: event.target.value })}
             />
@@ -1172,7 +1613,7 @@ export function SellerShopContent({ api }) {
               <img
                 ref={cropImageRef}
                 src={cropSource}
-                alt="Logo à recadrer"
+                alt="Logo a recadrer"
                 style={{
                   transform: `scale(${zoom})`,
                   objectPosition: `${positionX}% ${positionY}%`,
@@ -1218,7 +1659,7 @@ export function SellerShopContent({ api }) {
               </button>
               <button type="button" onClick={applyLogoCrop} disabled={busyLogo}>
                 <Check />
-                {busyLogo ? "Préparation..." : "Utiliser ce logo"}
+                {busyLogo ? "Preparation..." : "Utiliser ce logo"}
               </button>
             </footer>
           </section>
@@ -1249,7 +1690,7 @@ export function SellerProfileContent({ api, user, updateUser, onLogout }) {
       updateUser(response.user);
       setMessage(response.message);
     } catch (error) {
-      setMessage(error.response?.data?.message || "Impossible de mettre le profil à jour.");
+      setMessage(error.response?.data?.message || "Impossible de mettre le profil a jour.");
     } finally {
       setSaving(false);
     }
@@ -1257,9 +1698,9 @@ export function SellerProfileContent({ api, user, updateUser, onLogout }) {
 
   return (
     <SellerPageHeader
-      eyebrow="Identité du vendeur"
+      eyebrow="Identite du vendeur"
       title="Mon profil"
-      text="Ajoutez une photo claire pour rassurer les clients qui échangent avec votre boutique."
+      text="Ajoutez une photo claire pour rassurer les clients qui echangent avec votre boutique."
     >
       <section className="seller-profile-layout">
         <aside className="seller-profile-card">
@@ -1270,7 +1711,7 @@ export function SellerProfileContent({ api, user, updateUser, onLogout }) {
             onMessage={setMessage}
           />
           <div>
-            <span>Vendeur vérifié</span>
+            <span>Vendeur verifie</span>
             <h2>{user?.name || "Vendeur VinnHT"}</h2>
             <p>{user?.email}</p>
           </div>
@@ -1301,7 +1742,7 @@ export function SellerProfileContent({ api, user, updateUser, onLogout }) {
           </label>
 
           <label className="full">
-            Téléphone
+            Telephone
             <input
               value={form.phone}
               onChange={(event) => setForm({ ...form, phone: event.target.value })}
@@ -1341,14 +1782,14 @@ export function SellerSettingsContent({ api }) {
       setMessage(data.message);
     } catch (error) {
       setPreferences(preferences);
-      setMessage(error.response?.data?.message || "Impossible d’enregistrer ce paramètre.");
+      setMessage(error.response?.data?.message || "Impossible d'enregistrer ce parametre.");
     }
   };
 
   return (
     <SellerPageHeader
-      eyebrow="Préférences vendeur"
-      title="Paramètres"
+      eyebrow="Preferences vendeur"
+      title="Parametres"
       text="Choisissez les alertes utiles pour piloter votre boutique."
     >
       <section className="seller-settings-grid">
@@ -1356,25 +1797,25 @@ export function SellerSettingsContent({ api }) {
           [
             Package,
             "Nouvelles commandes",
-            "Alerte dès qu’un client paie une commande.",
+            "Alerte des qu'un client paie une commande.",
             "newOrders",
           ],
           [
             AlertTriangle,
             "Stock faible",
-            "Alerte lorsqu’un produit atteint cinq unités.",
+            "Alerte lorsqu'un produit atteint cinq unites.",
             "lowStock",
           ],
           [
             CheckCircle2,
-            "Commandes prêtes",
-            "Alerte lorsqu’une commande doit être remise au livreur.",
+            "Commandes pretes",
+            "Alerte lorsqu'une commande doit etre remise au livreur.",
             "readyOrders",
           ],
           [
             BarChart3,
             "Rapport hebdomadaire",
-            "Recevoir un résumé des performances.",
+            "Recevoir un resume des performances.",
             "weeklyReport",
           ],
         ].map(([Icon, title, text, key]) => (
@@ -1401,7 +1842,7 @@ export function SellerSettingsContent({ api }) {
         <Bell />
         <div>
           <h2>Notifications intelligentes</h2>
-          <p>Les alertes email, WhatsApp et push seront connectées avant la mise en production.</p>
+          <p>Les alertes email, WhatsApp et push seront connectees avant la mise en production.</p>
         </div>
       </section>
       {message && <div className="seller-message">{message}</div>}
@@ -1438,7 +1879,7 @@ function SellerFinanceTable({ rows, columns }) {
           ))}
         </tbody>
       </table>
-      {!rows.length && <div className="seller-empty-state">Aucune donnée disponible.</div>}
+      {!rows.length && <div className="seller-empty-state">Aucune donnee disponible.</div>}
     </div>
   );
 }
@@ -1479,7 +1920,7 @@ export function SupervisorRequestsContent({ api }) {
             </span>
             <div>
               <small>
-                {request.name} · {request.email}
+                {request.name} - {request.email}
               </small>
               <h3>{request.business_name}</h3>
               <p>{details(request).shopDescription || "Aucune description fournie."}</p>
@@ -1487,7 +1928,7 @@ export function SupervisorRequestsContent({ api }) {
             <b className={`flow-status ${request.status}`}>{request.status}</b>
             <footer>
               <Link className="request-details-button" to={`/supervisor/seller-requests/${request.id}`}>
-                <Eye /> Ouvrir le dossier de vérification
+                <Eye /> Ouvrir le dossier de verification
               </Link>
             </footer>
           </article>
@@ -1498,21 +1939,21 @@ export function SupervisorRequestsContent({ api }) {
 }
 
 const requestFieldLabels = {
-  fullName: "Nom complet déclaré",
+  fullName: "Nom complet declare",
   birthDate: "Date de naissance",
-  primaryPhone: "Téléphone principal",
-  secondaryPhone: "Téléphone secondaire",
-  email: "Adresse email déclarée",
-  fullAddress: "Adresse complète",
+  primaryPhone: "Telephone principal",
+  secondaryPhone: "Telephone secondaire",
+  email: "Adresse email declaree",
+  fullAddress: "Adresse complete",
   city: "Ville",
-  department: "Département",
+  department: "Departement",
   activityStatus: "Situation actuelle",
-  institutionName: "École, université, entreprise ou établissement",
-  activityDetails: "Fonction, niveau ou précision",
+  institutionName: "Ecole, universite, entreprise ou etablissement",
+  activityDetails: "Fonction, niveau ou precision",
   shopName: "Nom de la boutique",
-  mainCategory: "Catégorie principale",
+  mainCategory: "Categorie principale",
   shopDescription: "Description de la boutique",
-  pickupAddress: "Adresse de récupération",
+  pickupAddress: "Adresse de recuperation",
 };
 
 const parseRequestDetails = (description) => {
@@ -1574,7 +2015,7 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
 
   const FieldGroup = ({ title, icon: Icon, fields }) => (
     <section className="seller-verification-panel">
-      <header><Icon /><div><small>Informations déclarées</small><h2>{title}</h2></div></header>
+      <header><Icon /><div><small>Informations declarees</small><h2>{title}</h2></div></header>
       <div>
         {fields.map((field) => (
           <article className={!details[field] ? "missing" : ""} key={field}>
@@ -1588,7 +2029,7 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
 
   return (
     <div className="seller-request-verification">
-      <Link className="seller-verification-back" to="/supervisor/seller-requests">← Retour aux demandes</Link>
+      <Link className="seller-verification-back" to="/supervisor/seller-requests">{"<-"} Retour aux demandes</Link>
       <header className="seller-verification-hero">
         <div className="seller-verification-identity">
           <span>
@@ -1597,7 +2038,7 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
           <div>
             <small>Dossier vendeur #{request.id}</small>
             <h1>{request.name}</h1>
-            <p>{request.email} · {request.phone || "Téléphone non renseigné"}</p>
+            <p>{request.email} - {request.phone || "Telephone non renseigne"}</p>
           </div>
         </div>
         <div className="seller-verification-status">
@@ -1609,15 +2050,15 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
       {message && <div className="flow-success">{message}</div>}
 
       <section className="seller-verification-summary">
-        <article><ShieldCheck /><span><small>Complétude du dossier</small><b>{completeness}%</b></span></article>
-        <article><Store /><span><small>Boutique demandée</small><b>{request.business_name}</b></span></article>
+        <article><ShieldCheck /><span><small>Completude du dossier</small><b>{completeness}%</b></span></article>
+        <article><Store /><span><small>Boutique demandee</small><b>{request.business_name}</b></span></article>
         <article><UserRoundCheck /><span><small>Compte VinnHT</small><b>{request.account_status}</b></span></article>
-        <article><CalendarDays /><span><small>Compte créé</small><b>{new Date(request.account_created_at).toLocaleDateString("fr-HT")}</b></span></article>
+        <article><CalendarDays /><span><small>Compte cree</small><b>{new Date(request.account_created_at).toLocaleDateString("fr-HT")}</b></span></article>
       </section>
 
       <div className="seller-verification-columns">
         <main>
-          <FieldGroup title="Identité et coordonnées" icon={UserRoundCheck} fields={identityFields} />
+          <FieldGroup title="Identite et coordonnees" icon={UserRoundCheck} fields={identityFields} />
           <FieldGroup title="Situation actuelle" icon={ShieldCheck} fields={activityFields} />
           <FieldGroup title="Projet de boutique" icon={Store} fields={shopFields} />
           {details.legacyDescription && (
@@ -1630,26 +2071,26 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
         <aside>
           <section className="seller-verification-shop-card">
             <span>{request.shop_logo_url ? <img src={imageSource(request.shop_logo_url)} alt={request.business_name} /> : <Store />}</span>
-            <small>Boutique proposée</small>
+            <small>Boutique proposee</small>
             <h2>{request.business_name}</h2>
-            <p>{details.mainCategory || "Catégorie non renseignée"}</p>
+            <p>{details.mainCategory || "Categorie non renseignee"}</p>
           </section>
           <section className="seller-verification-checklist">
-            <h2>Points de contrôle</h2>
+            <h2>Points de controle</h2>
             {[
-              ["Identité cohérente", Boolean(details.fullName && request.name)],
-              ["Coordonnées disponibles", Boolean(request.email && request.phone)],
-              ["Situation actuelle précisée", Boolean(details.activityStatus && details.institutionName)],
-              ["Projet commercial décrit", Boolean(details.shopDescription && details.mainCategory)],
-              ["Adresse de récupération", Boolean(details.pickupAddress)],
-              ["Conditions acceptées", Boolean(details.acceptedTerms)],
-            ].map(([label, valid]) => <p className={valid ? "valid" : "missing"} key={label}><span>{valid ? "✓" : "!"}</span>{label}</p>)}
+              ["Identite coherente", Boolean(details.fullName && request.name)],
+              ["Coordonnees disponibles", Boolean(request.email && request.phone)],
+              ["Situation actuelle precisee", Boolean(details.activityStatus && details.institutionName)],
+              ["Projet commercial decrit", Boolean(details.shopDescription && details.mainCategory)],
+              ["Adresse de recuperation", Boolean(details.pickupAddress)],
+              ["Conditions acceptees", Boolean(details.acceptedTerms)],
+            ].map(([label, valid]) => <p className={valid ? "valid" : "missing"} key={label}><span>{valid ? "OK" : "!"}</span>{label}</p>)}
           </section>
           {request.reviewed_at && (
             <section className="seller-verification-history">
-              <small>Dernière décision</small>
+              <small>Derniere decision</small>
               <b>{request.status}</b>
-              <p>{request.reviewer_name || "Superviseur VinnHT"} · {new Date(request.reviewed_at).toLocaleDateString("fr-HT")}</p>
+              <p>{request.reviewer_name || "Superviseur VinnHT"} - {new Date(request.reviewed_at).toLocaleDateString("fr-HT")}</p>
               {request.rejection_reason && <strong>{request.rejection_reason}</strong>}
             </section>
           )}
@@ -1664,8 +2105,8 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
 
       {rejecting && (
         <section className="seller-rejection-panel">
-          <header><div><span>Décision motivée</span><h2>Refuser {request.business_name}</h2></div><button onClick={() => setRejecting(false)}><X /></button></header>
-          <label>Motif obligatoire<textarea rows="5" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Expliquez précisément les informations à corriger." /></label>
+          <header><div><span>Decision motivee</span><h2>Refuser {request.business_name}</h2></div><button onClick={() => setRejecting(false)}><X /></button></header>
+          <label>Motif obligatoire<textarea rows="5" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Expliquez precisement les informations a corriger." /></label>
           <button disabled={busy || reason.trim().length < 8} onClick={() => review("rejected")}>Confirmer le refus</button>
         </section>
       )}
@@ -1696,27 +2137,27 @@ export function ClientSellerRequestContent({ api }) {
     try {
       await api.post("/seller/requests", {
         businessName: form.businessName,
-        description: `Catégorie: ${form.category}\nTéléphone: ${form.phone}\n${form.description}`,
+        description: `Categorie: ${form.category}\nTelephone: ${form.phone}\n${form.description}`,
       });
-      setMessage("Votre demande vendeur a été envoyée.");
+      setMessage("Votre demande vendeur a ete envoyee.");
       load();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Impossible d’envoyer la demande.");
+      setError(requestError.response?.data?.message || "Impossible d'envoyer la demande.");
     }
   };
 
   return (
     <SellerPageHeader
-      eyebrow="Évolution vendeur"
+      eyebrow="Evolution vendeur"
       title="Devenir vendeur"
-      text="Présentez votre activité et commencez à vendre partout en Haïti."
+      text="Presentez votre activite et commencez a vendre partout en Haiti."
     >
       <div className="seller-request-onboarding">
         <article>
           <span>
             <Store />
           </span>
-          <h2>Transformez votre activité avec VinnHT</h2>
+          <h2>Transformez votre activite avec VinnHT</h2>
           <p>Publiez vos produits, recevez des commandes et suivez vos ventes.</p>
           <div>
             <small>Statut de la demande</small>
@@ -1735,7 +2176,7 @@ export function ClientSellerRequestContent({ api }) {
             />
           </label>
           <label>
-            Catégorie
+            Categorie
             <input
               required
               value={form.category}
@@ -1743,7 +2184,7 @@ export function ClientSellerRequestContent({ api }) {
             />
           </label>
           <label>
-            Téléphone WhatsApp
+            Telephone WhatsApp
             <input
               required
               value={form.phone}
@@ -1780,3 +2221,6 @@ function SellerPageHeader({ eyebrow, title, text, children }) {
     </div>
   );
 }
+
+
+

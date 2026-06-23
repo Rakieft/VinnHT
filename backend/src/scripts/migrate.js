@@ -28,7 +28,7 @@ try {
     try {
       await connection.query(sql);
     } catch (error) {
-      if (error.code !== "ER_DUP_FIELDNAME") throw error;
+      if (!["ER_DUP_FIELDNAME", "ER_DUP_KEYNAME"].includes(error.code)) throw error;
     }
   }
   console.log(`Base de données "${dbName}" prête.`);

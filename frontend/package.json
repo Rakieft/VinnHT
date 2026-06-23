@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --port 3000",
     "build": "vite build",
-    "preview": "vite preview --port 3000"
+    "preview": "vite preview --port 3000",
+    "check:jsx": "node scripts/check-jsx-imports.mjs",
+    "check": "npm run check:jsx && npm run build"
   },
   "dependencies": {
     "axios": "^1.10.0",
