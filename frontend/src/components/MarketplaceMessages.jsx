@@ -32,7 +32,7 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
   const loadConversations = async () => {
     const { data } = await api.get("/messages/conversations");
     setConversations(data);
-    setActive((current) => requestedConversation || current || data[0].id || null);
+    setActive((current) => requestedConversation || current || data[0]?.id || null);
   };
 
   const loadMessages = async (id) => {

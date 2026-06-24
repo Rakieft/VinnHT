@@ -11,6 +11,7 @@
     "db:restore": "npm --prefix backend run db:restore --",
     "db:create-demo-seller": "npm --prefix backend run db:create-demo-seller",
     "db:reset-test-data": "npm --prefix backend run db:reset-test-data",
+    "smoke:marketplace": "npm --prefix backend run smoke:marketplace",
     "build": "npm --prefix frontend run build",
     "check": "npm --prefix backend run check && npm --prefix backend test && npm --prefix frontend run check"
   }

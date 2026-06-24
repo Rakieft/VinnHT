@@ -1,4 +1,4 @@
-import axios from "axios";
+﻿import axios from "axios";
 import React from "react";
 import Lottie from "lottie-react";
 import {
@@ -12,6 +12,7 @@ import {
   CircleUserRound,
   Clock3,
   CheckCircle2,
+  Download,
   Flame,
   Headphones,
   Heart,
@@ -26,6 +27,7 @@ import {
   Phone,
   Search,
   Send,
+  Share2,
   Settings,
   ShieldCheck,
   ShoppingBag,
@@ -96,7 +98,6 @@ import {
   AdminCategoriesContent,
   AdminContactRequestsContent,
   AdminDashboardContent,
-  AdminPaymentsContent,
   AdminProfileContent,
   AdminProductsContent,
   AdminResourceContent,
@@ -111,6 +112,7 @@ import {
 import BecomeSellerPage from "./pages/client/BecomeSeller.jsx";
 import MarketplaceMessages from "./components/MarketplaceMessages.jsx";
 import { apiOrigin, assetUrl } from "./config/runtime.js";
+import { shopPublicPath, shopSellerIdFromParam } from "./utils/shopUrl.js";
 import sousHeroImage from "./assets/images/sous-hero-vinnht-student.png";
 import contactSupportImage from "./assets/images/contact-support-hands-vinnht.png";
 import "./styles/responsive-overrides.css";
@@ -163,7 +165,6 @@ const roleHome = {
   client: "/client",
   seller: "/seller",
   delivery: "/delivery",
-  supervisor: "/supervisor",
   manager: "/manager",
   admin: "/admin",
 };
@@ -428,15 +429,25 @@ function Providers({ children }) {
     api
       .get("/auth/me")
       .then(({ data }) => {
-        if (!data.user) {
+        const authenticatedUser = data?.user || data;
+
+        if (!authenticatedUser?.id) {
           setUser(null);
           setActiveRole("client");
           return;
         }
 
-        setUser(data.user);
-        if (!data.user.roles.includes(activeRole)) {
-          const nextRole = data.user.role || data.user.roles?.[0] || "client";
+        const normalizedRoles = Array.isArray(authenticatedUser.roles)
+          ? authenticatedUser.roles
+          : [authenticatedUser.role].filter(Boolean);
+        const normalizedUser = {
+          ...authenticatedUser,
+          roles: normalizedRoles,
+        };
+
+        setUser(normalizedUser);
+        if (!normalizedRoles.includes(activeRole)) {
+          const nextRole = normalizedUser.role || normalizedRoles[0] || "client";
           setActiveRole(nextRole);
         }
       })
@@ -462,10 +473,19 @@ function Providers({ children }) {
       user,
       authLoading,
       login(data) {
-        setUser(data.user);
-        const nextRole = data.user.roles.includes(data.user.role)
-          ? data.user.role
-          : data.user.roles?.[0] || "client";
+        const authenticatedUser = data?.user || data;
+        const normalizedRoles = Array.isArray(authenticatedUser?.roles)
+          ? authenticatedUser.roles
+          : [authenticatedUser?.role].filter(Boolean);
+        const normalizedUser = {
+          ...authenticatedUser,
+          roles: normalizedRoles,
+        };
+
+        setUser(normalizedUser);
+        const nextRole = normalizedRoles.includes(normalizedUser.role)
+          ? normalizedUser.role
+          : normalizedRoles[0] || "client";
         setActiveRole(nextRole);
       },
       updateUser(nextUser) {
@@ -736,9 +756,9 @@ function PublicLayout({ children }) {
 }
 
 function MarketplaceLayout({ children }) {
-  const { user, activeRole } = useAuth();
+  const { user } = useAuth();
 
-  if (user && activeRole === "client") {
+  if (user) {
     return <DashboardLayout>{children}</DashboardLayout>;
   }
 
@@ -1090,6 +1110,10 @@ function Contact() {
   const [config, setConfig] = useState({});
   const [orders, setOrders] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [activeSupportRequest, setActiveSupportRequest] = useState(null);
+  const [supportMessages, setSupportMessages] = useState([]);
+  const [supportDraft, setSupportDraft] = useState("");
+  const [supportSending, setSupportSending] = useState(false);
   const [faqQuery, setFaqQuery] = useState("");
   const [faqCategory, setFaqCategory] = useState("all");
   const faq = [
@@ -1123,6 +1147,30 @@ function Contact() {
   const loadRequests = () => {
     if (!user) return;
     api.get("/support/requests").then(({ data }) => setRequests(data));
+  };
+
+  const openSupportRequest = async (request) => {
+    const { data } = await api.get(`/support/requests/${request.id}/messages`);
+    setActiveSupportRequest(request);
+    setSupportMessages(data.messages || []);
+  };
+
+  const replyToSupport = async (event) => {
+    event.preventDefault();
+    if (!supportDraft.trim() || !activeSupportRequest) return;
+    setSupportSending(true);
+    try {
+      const { data } = await api.post(`/support/requests/${activeSupportRequest.id}/messages`, {
+        body: supportDraft.trim(),
+      });
+      setFeedback(data.message);
+      setSupportDraft("");
+      await Promise.all([openSupportRequest(activeSupportRequest), loadRequests()]);
+    } catch (error) {
+      setFeedback(error.response?.data?.message || "Impossible d’envoyer votre réponse.");
+    } finally {
+      setSupportSending(false);
+    }
   };
 
   useEffect(() => {
@@ -1251,15 +1299,50 @@ function Contact() {
           <SectionHead eyebrow="Suivi personnel" title="Mes demandes de support" />
           <div className="support-request-grid">
             {requests.map((request) => (
-              <article key={request.id}>
+              <article id={`support-${request.id}`} key={request.id}>
                 <header><span>{request.reference}</span><Badge tone={request.status === "resolved" ? "success" : "gold"}>{request.status}</Badge></header>
                 <h3>{request.subject}</h3>
                 <p>{request.message}</p>
                 <footer><small>{request.order_number || "Aucune commande associée"}</small><time>{new Date(request.created_at).toLocaleDateString("fr-HT")}</time></footer>
+                <button className="support-thread-button" onClick={() => openSupportRequest(request)}>
+                  <MessageCircle /> Voir la discussion
+                </button>
               </article>
             ))}
             {!requests.length && <div className="catalog-empty">Vous n’avez encore aucune demande de support.</div>}
           </div>
+          {activeSupportRequest && (
+            <section className="support-client-thread">
+              <header>
+                <div>
+                  <small>{activeSupportRequest.reference}</small>
+                  <h3>{activeSupportRequest.subject}</h3>
+                </div>
+                <button onClick={() => setActiveSupportRequest(null)} aria-label="Fermer"><X /></button>
+              </header>
+              <div>
+                {supportMessages.map((item) => (
+                  <article className={item.sender_role === "admin" ? "support" : "client"} key={item.id}>
+                    <small>{item.sender_role === "admin" ? "Support VinnHT" : "Vous"}</small>
+                    <p>{item.body}</p>
+                    <time>{new Date(item.created_at).toLocaleString("fr-HT")}</time>
+                  </article>
+                ))}
+              </div>
+              <form onSubmit={replyToSupport}>
+                <textarea
+                  required
+                  rows="3"
+                  value={supportDraft}
+                  onChange={(event) => setSupportDraft(event.target.value)}
+                  placeholder="Ajouter une réponse..."
+                />
+                <button disabled={supportSending}>
+                  <Send /> {supportSending ? "Envoi..." : "Envoyer"}
+                </button>
+              </form>
+            </section>
+          )}
         </section>
       )}
       <section className="section faq-section">
@@ -1907,22 +1990,107 @@ function ProductDetails() {
 }
 
 function ShopDetails() {
-  const { sellerId } = useParams();
+  const { sellerId: shopParam } = useParams();
+  const navigate = useNavigate();
+  const sellerId = shopSellerIdFromParam(shopParam);
   const [shop, setShop] = useState(null);
   const [products, setProducts] = useState([]);
   const [reviews, setReviews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [shareFeedback, setShareFeedback] = useState("");
 
   useEffect(() => {
+    if (!sellerId) {
+      setError("Cette adresse de boutique est invalide.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
     Promise.all([
       api.get(`/shops/${sellerId}`),
       api.get("/products", { params: { seller: sellerId } }),
       api.get(`/shops/${sellerId}/reviews`),
     ]).then(([shopResponse, productsResponse, reviewsResponse]) => {
-      setShop(shopResponse.data);
+      const loadedShop = shopResponse.data;
+
+      setShop(loadedShop);
       setProducts(productsResponse.data);
       setReviews(reviewsResponse.data);
+      const canonicalPath = shopPublicPath(loadedShop);
+
+      if (window.location.pathname !== canonicalPath) {
+        navigate(canonicalPath, { replace: true });
+      }
+    }).catch((requestError) => {
+      setError(
+        requestError.response?.data?.message ||
+          "Impossible de charger cette boutique pour le moment.",
+      );
+      setShop(null);
+      setProducts([]);
+      setReviews([]);
+    }).finally(() => {
+      setLoading(false);
     });
-  }, [sellerId]);
+  }, [navigate, sellerId]);
+
+  const shareShop = async () => {
+    if (!shop) return;
+
+    const url = `${window.location.origin}${shopPublicPath(shop)}`;
+    const shareData = {
+      title: shop.shop_name || "Boutique VinnHT",
+      text: `Découvrez ${shop.shop_name || "cette boutique"} sur VinnHT.`,
+      url,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        setShareFeedback("Boutique partagée");
+      } else {
+        await navigator.clipboard.writeText(url);
+        setShareFeedback("Lien copié");
+      }
+    } catch (shareError) {
+      if (shareError.name !== "AbortError") {
+        setShareFeedback("Partage indisponible");
+      }
+    }
+
+    window.setTimeout(() => setShareFeedback(""), 2200);
+  };
+
+  if (loading) {
+    return (
+      <MarketplaceLayout>
+        <section className="shop-public-state" aria-live="polite">
+          <span className="shop-public-loader" />
+          <h1>Chargement de la boutique</h1>
+          <p>Nous préparons son catalogue VinnHT.</p>
+        </section>
+      </MarketplaceLayout>
+    );
+  }
+
+  if (error || !shop) {
+    return (
+      <MarketplaceLayout>
+        <section className="shop-public-state shop-public-state-error">
+          <Store />
+          <h1>Boutique indisponible</h1>
+          <p>{error || "Cette boutique n’existe pas ou n’est plus active."}</p>
+          <Link className="primary-button" to="/products">
+            Explorer le catalogue
+          </Link>
+        </section>
+      </MarketplaceLayout>
+    );
+  }
 
   return (
     <MarketplaceLayout>
@@ -1937,9 +2105,15 @@ function ShopDetails() {
             <Store />
           )}
         </div>
-        <div>
+        <div className="shop-public-content">
           <Badge tone="gold">Boutique vérifiée</Badge>
-          <h1>{shop.shop_name || "Boutique VinnHT"}</h1>
+          <div className="shop-public-heading">
+            <h1>{shop.shop_name || "Boutique VinnHT"}</h1>
+            <button type="button" onClick={shareShop}>
+              <Share2 />
+              <span>{shareFeedback || "Partager la boutique"}</span>
+            </button>
+          </div>
           <p>
             {shop.description || "Découvrez tous les produits disponibles dans cette boutique."}
           </p>
@@ -2308,15 +2482,9 @@ const menus = {
     ["Historique", "/delivery/history", Package],
     ["Profil", "/delivery/profile", CircleUserRound],
   ],
-  supervisor: [
-    ["Vue d’ensemble", "/supervisor", LayoutDashboard],
-    ["Demandes vendeurs", "/supervisor/seller-requests", Store],
-    ["Rapports", "/supervisor/reports", BarChart3],
-    ["Profil", "/supervisor/profile", CircleUserRound],
-    ["Paramètres", "/supervisor/settings", Settings],
-  ],
   manager: [
     ["Vue d’ensemble", "/manager", LayoutDashboard],
+    ["Demandes vendeurs", "/manager/seller-requests", Store],
     ["Rapports opérationnels", "/manager/sales-reports", BarChart3],
     ["Gestion vendeurs", "/manager/sellers", Store],
     ["Gestion livraison", "/manager/deliveries", Truck],
@@ -2329,16 +2497,24 @@ const menus = {
     ["Catégories", "/admin/categories", ShoppingBasket],
     ["Produits", "/admin/products", ShoppingBag],
     ["Profil", "/admin/profile", CircleUserRound],
-    ["Paiements", "/admin/payments", ShieldCheck],
     ["Support", "/admin/contact-requests", MessageCircle],
     ["Paramètres", "/admin/settings", Settings],
   ],
 };
 
 const menuItemsFor = (role) => menus[role] || [];
+const mobileMenuItemsFor = (role) => {
+  const items = menuItemsFor(role).filter(([, path]) => !path.endsWith("/settings") && path !== "/settings");
+
+  if (role === "seller" && !items.some(([, path]) => path === "/seller/profile")) {
+    items.push(["Profil", "/seller/profile", CircleUserRound]);
+  }
+
+  return items;
+};
 
 const isMenuPathActive = (currentPath, itemPath) => {
-  if (itemPath === "/supervisor/seller-requests") {
+  if (itemPath === "/manager/seller-requests") {
     return currentPath.startsWith(itemPath);
   }
 
@@ -2453,7 +2629,7 @@ function MobileDashboardNav() {
   const loc = useLocation();
   const activeItemRef = useRef(null);
   const skipNextScrollAnimation = useRef(false);
-  const items = menuItemsFor(activeRole, user);
+  const items = mobileMenuItemsFor(activeRole, user);
 
   useEffect(() => {
     skipNextScrollAnimation.current = true;
@@ -2678,14 +2854,6 @@ function Dashboard({ role }) {
       action: "Voir l’itinéraire",
       path: "/delivery/assigned",
     },
-    supervisor: {
-      icon: ShieldCheck,
-      eyebrow: "Validation prioritaire",
-      title: "9 demandes vendeurs attendent votre décision.",
-      text: "Les documents de quatre boutiques ont déjà été vérifiés.",
-      action: "Examiner les demandes",
-      path: "/supervisor/seller-requests",
-    },
     manager: {
       icon: BarChart3,
       eyebrow: "Performance mensuelle",
@@ -2725,13 +2893,7 @@ function Dashboard({ role }) {
       [ShieldCheck, "Livrées", 48],
       [BarChart3, "Cette semaine", 12],
     ],
-    supervisor: [
-      [Store, "Demandes", 9],
-      [Users, "Vendeurs actifs", 124],
-      [ShieldCheck, "Signalements", 3],
-      [BarChart3, "Approbations", 42],
-    ],
-    manager: [
+  manager: [
       [BarChart3, "Volume ventes", 2400000],
       [Package, "Commandes", 856],
       [Store, "Vendeurs", 124],
@@ -3040,6 +3202,7 @@ function ClientOrdersPage() {
         loading={loading}
         selectedOrder={selectedOrder}
         onSelect={selectOrder}
+        onCloseDetails={() => setSelectedOrder(null)}
         onSubmitPaymentProof={submitOrderPaymentProof}
         proofProcessing={proofProcessing}
         proofError={proofError}
@@ -3303,6 +3466,14 @@ function DeliveryProfilePage() {
   );
 }
 
+function DeliverySettingsPage() {
+  return (
+    <DashboardLayout>
+      <StaffSettingsContent api={api} role="delivery" />
+    </DashboardLayout>
+  );
+}
+
 function DeliveryManagementPage() {
   return (
     <DashboardLayout>
@@ -3312,9 +3483,10 @@ function DeliveryManagementPage() {
 }
 
 function AdminDashboardPage() {
+  const { user } = useAuth();
   return (
     <DashboardLayout>
-      <AdminDashboardContent api={api} />
+      <AdminDashboardContent api={api} user={user} />
     </DashboardLayout>
   );
 }
@@ -3340,14 +3512,6 @@ function AdminProductsPage() {
   return (
     <DashboardLayout>
       <AdminProductsContent api={api} />
-    </DashboardLayout>
-  );
-}
-
-function AdminPaymentsPage() {
-  return (
-    <DashboardLayout>
-      <AdminPaymentsContent api={api} />
     </DashboardLayout>
   );
 }
@@ -3624,10 +3788,34 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/delivery/settings"
+        element={
+          <Protected roles={["delivery"]}>
+            <DeliverySettingsPage />
+          </Protected>
+        }
+      />
+      <Route
         path="/manager"
         element={
           <Protected roles={["manager"]}>
             <OperationsDashboardPage role="manager" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/manager/seller-requests"
+        element={
+          <Protected roles={["manager", "admin"]}>
+            <SupervisorRequestsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/manager/seller-requests/:id"
+        element={
+          <Protected roles={["manager", "admin"]}>
+            <SupervisorRequestDetailPage />
           </Protected>
         }
       />
@@ -3707,7 +3895,7 @@ function AppRoutes() {
         path="/admin/payments"
         element={
           <Protected roles={["admin"]}>
-            <AdminPaymentsPage />
+            <Navigate to="/admin#weekly-report" replace />
           </Protected>
         }
       />
@@ -3735,56 +3923,14 @@ function AppRoutes() {
           </Protected>
         }
       />
-      <Route
-        path="/supervisor"
-        element={
-          <Protected roles={["supervisor"]}>
-            <OperationsDashboardPage role="supervisor" />
-          </Protected>
-        }
-      />
-      <Route
-        path="/supervisor/seller-requests"
-        element={
-          <Protected roles={["supervisor"]}>
-            <SupervisorRequestsPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/supervisor/seller-requests/:id"
-        element={
-          <Protected roles={["supervisor"]}>
-            <SupervisorRequestDetailPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/supervisor/reports"
-        element={
-          <Protected roles={["supervisor"]}>
-            <ReportsPage role="superviseur" />
-          </Protected>
-        }
-      />
-      <Route
-        path="/supervisor/profile"
-        element={
-          <Protected roles={["supervisor"]}>
-            <StaffProfilePage role="Superviseur" />
-          </Protected>
-        }
-      />
-      <Route
-        path="/supervisor/settings"
-        element={
-          <Protected roles={["supervisor"]}>
-            <StaffSettingsPage role="superviseur" />
-          </Protected>
-        }
-      />
+      <Route path="/supervisor" element={<Navigate to="/manager" replace />} />
+      <Route path="/supervisor/seller-requests" element={<Navigate to="/manager/seller-requests" replace />} />
+      <Route path="/supervisor/seller-requests/:id" element={<Navigate to="/manager/seller-requests" replace />} />
+      <Route path="/supervisor/reports" element={<Navigate to="/manager/sales-reports" replace />} />
+      <Route path="/supervisor/profile" element={<Navigate to="/manager/profile" replace />} />
+      <Route path="/supervisor/settings" element={<Navigate to="/manager/settings" replace />} />
       {Object.keys(menus)
-        .filter((role) => !["client", "seller", "delivery", "admin", "manager", "supervisor"].includes(role))
+        .filter((role) => !["client", "seller", "delivery", "admin", "manager"].includes(role))
         .map((role) => (
           <Route
             key={role}
@@ -3811,13 +3957,122 @@ function AppRoutes() {
     </Routes>
   );
 }
+
+function PwaInstallPrompt() {
+  const [installEvent, setInstallEvent] = useState(null);
+  const [visible, setVisible] = useState(false);
+  const [isIos, setIsIos] = useState(false);
+  const [showIosHelp, setShowIosHelp] = useState(false);
+
+  useEffect(() => {
+    if (!import.meta.env.PROD) return undefined;
+
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true;
+    const iosDevice = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+    const dismissedAt = Number(window.localStorage.getItem("vinnht-pwa-dismissed-at") || 0);
+    const dismissalExpired = Date.now() - dismissedAt > 7 * 24 * 60 * 60 * 1000;
+
+    setIsIos(iosDevice);
+    if (standalone || !dismissalExpired) return undefined;
+
+    const handleInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallEvent(event);
+      window.setTimeout(() => setVisible(true), 1100);
+    };
+    const handleInstalled = () => {
+      setVisible(false);
+      setInstallEvent(null);
+      window.localStorage.removeItem("vinnht-pwa-dismissed-at");
+    };
+
+    window.addEventListener("beforeinstallprompt", handleInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+
+    let iosTimer;
+    if (iosDevice) {
+      iosTimer = window.setTimeout(() => setVisible(true), 1600);
+    }
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+      window.clearTimeout(iosTimer);
+    };
+  }, []);
+
+  const close = () => {
+    window.localStorage.setItem("vinnht-pwa-dismissed-at", String(Date.now()));
+    setVisible(false);
+  };
+
+  const install = async () => {
+    if (isIos) {
+      setShowIosHelp(true);
+      return;
+    }
+    if (!installEvent) return;
+
+    await installEvent.prompt();
+    const choice = await installEvent.userChoice;
+    if (choice.outcome === "accepted") {
+      setVisible(false);
+    }
+    setInstallEvent(null);
+  };
+
+  if (!visible || (!isIos && !installEvent)) return null;
+
+  return (
+    <motion.aside
+      className="pwa-install-card"
+      initial={{ opacity: 0, y: 28, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 20 }}
+      role="dialog"
+      aria-label="Installer l’application VinnHT"
+    >
+      <button className="pwa-install-close" type="button" onClick={close} aria-label="Fermer">
+        <X />
+      </button>
+      <img src="/icon-192.png" alt="" />
+      <div className="pwa-install-content">
+        <span>Application VinnHT</span>
+        <h2>Ajoutez VinnHT à votre écran d’accueil</h2>
+        <p>
+          Accédez plus rapidement au marché numérique d’Haïti, comme avec une véritable
+          application mobile.
+        </p>
+        {showIosHelp && (
+          <div className="pwa-ios-help">
+            <Share2 />
+            <span>
+              Dans Safari, touchez <b>Partager</b>, puis <b>Sur l’écran d’accueil</b>.
+            </span>
+          </div>
+        )}
+        <div className="pwa-install-actions">
+          <button type="button" onClick={install}>
+            {isIos ? <Share2 /> : <Download />}
+            {isIos ? "Voir comment l’ajouter" : "Ajouter à l’écran d’accueil"}
+          </button>
+          <button type="button" className="secondary" onClick={close}>
+            Plus tard
+          </button>
+        </div>
+      </div>
+    </motion.aside>
+  );
+}
+
 export default function App() {
   return (
     <Providers>
       <AppRoutes />
+      <PwaInstallPrompt />
     </Providers>
   );
 }
-
-
 

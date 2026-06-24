@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
-import ProfileLogoutCard from "./ProfileLogoutCard.jsx";
+import MobileProfileActions from "./MobileProfileActions.jsx";
 import { apiOrigin } from "../config/runtime.js";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
   CheckCircle2,
   Clock3,
+  Eye,
   MapPin,
   Navigation,
   Package,
@@ -27,6 +28,15 @@ import {
 const money = (value) => `${Number(value || 0).toLocaleString("fr-HT")} HTG`;
 const imageSource = (url) =>
   url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url;
+const deliveryImageSource = (url) => imageSource(url) || "/vinnht-logo.png";
+const useDeliveryImageFallback = (event) => {
+  event.currentTarget.onerror = null;
+  event.currentTarget.src = "/vinnht-logo.png";
+};
+const cacheBustedImageSource = (url) => {
+  const source = imageSource(url);
+  return source ? `${source}${source.includes("?") ? "&" : "?"}v=${Date.now()}` : "";
+};
 const date = (value) =>
   value ? new Intl.DateTimeFormat("fr-HT", { dateStyle: "medium" }).format(new Date(value)) : "—";
 
@@ -253,9 +263,18 @@ function MissionCard({ mission, onSelect }) {
 
 export function DeliveryDashboardContent({ api, user }) {
   const [data, setData] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api.get("/deliveries/dashboard").then(({ data: response }) => setData(response));
+    api
+      .get("/deliveries/dashboard")
+      .then(({ data: response }) => setData(response))
+      .catch((requestError) =>
+        setError(
+          requestError.response?.data?.message ||
+            "Impossible de charger le tableau de bord livreur.",
+        ),
+      );
   }, []);
 
   const stats = data?.stats || {};
@@ -272,6 +291,8 @@ export function DeliveryDashboardContent({ api, user }) {
       title={`Bonjour, ${user.name}`}
       text="Voici exactement ce que vous devez faire pour terminer vos livraisons."
     >
+      {!data && !error && <div className="delivery-empty">Chargement de vos missions...</div>}
+      {error && <div className="delivery-success error">{error}</div>}
       {!user.profile_image_url && (
         <section className="delivery-profile-required">
           <Camera />
@@ -387,9 +408,25 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
   const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [messageType, setMessageType] = useState("success");
   const detailRef = useRef(null);
 
-  const load = () => api.get("/deliveries/mine").then(({ data }) => setMissions(data));
+  const load = async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get("/deliveries/mine");
+      setMissions(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setMissions([]);
+      setMessageType("error");
+      setMessage(
+        error.response?.data?.message || "Impossible de charger vos missions.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
     load();
   }, []);
@@ -444,6 +481,7 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
 
   const update = async (status, proof = {}) => {
     if (!user.profile_image_url) {
+      setMessageType("error");
       setMessage("Ajoutez votre photo de profil avant de modifier une livraison.");
       return;
     }
@@ -459,10 +497,12 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
         status,
         ...proof,
       });
+      setMessageType("success");
       setMessage(data.message);
       setSelected(null);
-      load();
+      await load();
     } catch (error) {
+      setMessageType("error");
       setMessage(error.response?.data?.message || "Impossible de mettre la livraison à jour.");
     } finally {
       setBusy(false);
@@ -479,7 +519,7 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
           : "Suivez chaque mission depuis la récupération jusqu’au client."
       }
     >
-      {message && <div className="delivery-success">{message}</div>}
+      {message && <div className={`delivery-success ${messageType}`}>{message}</div>}
       {!history && !user.profile_image_url && (
         <section className="delivery-profile-required">
           <Camera />
@@ -506,7 +546,8 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
           <MissionCard mission={mission} onSelect={setSelected} key={mission.id} />
         ))}
       </div>
-      {!visible.length && (
+      {loading && <div className="delivery-empty">Chargement des livraisons...</div>}
+      {!loading && !visible.length && (
         <div className="delivery-empty">Aucune livraison dans cette section.</div>
       )}
       {selected && (
@@ -579,7 +620,11 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
             </header>
             {items.map((item) => (
               <article key={item.product_id}>
-                <img src={imageSource(item.image_url)} alt={item.product_name} />
+                <img
+                  src={deliveryImageSource(item.image_url)}
+                  alt={item.product_name}
+                  onError={useDeliveryImageFallback}
+                />
                 <div>
                   <small>{item.shop_name}</small>
                   <b>{item.product_name}</b>
@@ -654,14 +699,27 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
 }
 
 export function DeliveryManagementContent({ api }) {
-  const [data, setData] = useState({ deliveries: [], drivers: [] });
+  const [data, setData] = useState({ deliveries: [], drivers: [], departments: [], stats: {} });
   const [selections, setSelections] = useState({});
   const [message, setMessage] = useState("");
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [department, setDepartment] = useState("all");
+  const [driverId, setDriverId] = useState("all");
+  const [selectedProof, setSelectedProof] = useState(null);
   const load = () =>
-    api.get("/management/deliveries").then(({ data: response }) => setData(response));
+    api.get("/management/deliveries", {
+      params: {
+        q: query.trim() || undefined,
+        status: status === "all" ? undefined : status,
+        department: department === "all" ? undefined : department,
+        driverId: driverId === "all" ? undefined : driverId,
+      },
+    }).then(({ data: response }) => setData(response));
   useEffect(() => {
-    load();
-  }, []);
+    const timer = window.setTimeout(load, 250);
+    return () => window.clearTimeout(timer);
+  }, [query, status, department, driverId]);
 
   const assign = async (deliveryId) => {
     const deliveryUserId = selections[deliveryId];
@@ -673,6 +731,11 @@ export function DeliveryManagementContent({ api }) {
     load();
   };
 
+  const openProof = async (deliveryId) => {
+    const { data: proof } = await api.get(`/management/deliveries/${deliveryId}/proof`);
+    setSelectedProof(proof);
+  };
+
   return (
     <DeliveryFrame
       eyebrow="Coordination"
@@ -680,9 +743,39 @@ export function DeliveryManagementContent({ api }) {
       text="Assignez les commandes prêtes aux livreurs disponibles."
     >
       {message && <div className="delivery-success">{message}</div>}
+      <section className="manager-delivery-summary">
+        {[
+          [Truck, "Non assignées", data.stats?.unassigned],
+          [Package, "Assignées", data.stats?.assigned],
+          [Navigation, "En livraison", data.stats?.in_transit],
+          [XCircle, "Échecs", data.stats?.failed],
+        ].map(([Icon, label, value]) => (
+          <article key={label}><Icon /><span><small>{label}</small><b>{Number(value || 0)}</b></span></article>
+        ))}
+      </section>
+      <section className="manager-delivery-filters">
+        <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Commande, client, adresse ou livreur" /></label>
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="all">Tous les statuts</option>
+          <option value="unassigned">Non assignées</option>
+          <option value="assigned">Assignées</option>
+          <option value="picked_up">Récupérées</option>
+          <option value="in_transit">En livraison</option>
+          <option value="delivered">Livrées</option>
+          <option value="failed">Échecs</option>
+        </select>
+        <select value={department} onChange={(event) => setDepartment(event.target.value)}>
+          <option value="all">Tous départements</option>
+          {(data.departments || []).map((item) => <option value={item} key={item}>{item}</option>)}
+        </select>
+        <select value={driverId} onChange={(event) => setDriverId(event.target.value)}>
+          <option value="all">Tous les livreurs</option>
+          {data.drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}
+        </select>
+      </section>
       <section className="delivery-management-list">
         {data.deliveries.map((delivery) => (
-          <article key={delivery.id}>
+          <article className={Number(delivery.elapsed_hours) >= 24 && delivery.status !== "delivered" ? "late" : ""} key={delivery.id}>
             <span>
               <Truck />
             </span>
@@ -690,8 +783,14 @@ export function DeliveryManagementContent({ api }) {
               <small>{delivery.order_number}</small>
               <h3>{delivery.delivery_address}</h3>
               <p>
-                {statusLabels[delivery.status]}
+                {statusLabels[delivery.status]} · {delivery.client_name} · {delivery.department}
               </p>
+              <small>{Number(delivery.elapsed_hours || 0)} h depuis la création ou l’assignation</small>
+              {delivery.has_proof ? (
+                <button className="delivery-proof-available" onClick={() => openProof(delivery.id)}>
+                  <Eye /> Voir la preuve
+                </button>
+              ) : null}
             </div>
             <select
               value={selections[delivery.id] || delivery.delivery_user_id || ""}
@@ -706,9 +805,15 @@ export function DeliveryManagementContent({ api }) {
                 </option>
               ))}
             </select>
-            <button onClick={() => assign(delivery.id)}>
-              <RefreshCw /> Assigner
-            </button>
+            {["unassigned", "assigned"].includes(delivery.status) ? (
+              <button onClick={() => assign(delivery.id)}>
+                <RefreshCw /> {delivery.delivery_user_id ? "Réassigner" : "Assigner"}
+              </button>
+            ) : (
+              <span className={`delivery-management-status ${delivery.status}`}>
+                {statusLabels[delivery.status]}
+              </span>
+            )}
           </article>
         ))}
         {!data.deliveries.length && (
@@ -717,6 +822,22 @@ export function DeliveryManagementContent({ api }) {
           </div>
         )}
       </section>
+      {selectedProof && (
+        <section className="manager-proof-modal">
+          <header>
+            <div><FileSignature /><span><small>{selectedProof.order_number}</small><h2>Preuve de livraison</h2></span></div>
+            <button onClick={() => setSelectedProof(null)}><XCircle /></button>
+          </header>
+          <img src={selectedProof.signature_data} alt={`Signature de ${selectedProof.signer_name}`} />
+          <div>
+            <p><b>Signataire</b><span>{selectedProof.signer_name}</span></p>
+            <p><b>Client</b><span>{selectedProof.client_name}</span></p>
+            <p><b>Livreur</b><span>{selectedProof.delivery_name || "Non renseigné"}</span></p>
+            <p><b>Confirmée le</b><span>{date(selectedProof.confirmed_at)}</span></p>
+          </div>
+          {selectedProof.delivery_notes && <p>{selectedProof.delivery_notes}</p>}
+        </section>
+      )}
     </DeliveryFrame>
   );
 }
@@ -725,7 +846,7 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
   const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "" });
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState(
-    user.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : ""
+    user.profile_image_url ? deliveryImageSource(user.profile_image_url) : ""
   );
   const [message, setMessage] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -740,7 +861,7 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
       data.append("profilePhoto", file);
       const { data: response } = await api.patch("/auth/profile", data);
       updateUser(response.user);
-      setPreview(`${apiOrigin}${response.user.profile_image_url}v=${Date.now()}`);
+      setPreview(cacheBustedImageSource(response.user.profile_image_url));
       setPhoto(null);
       setMessage("Photo de profil enregistrée.");
     } catch (error) {
@@ -760,9 +881,16 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
     data.append("name", form.name);
     data.append("phone", form.phone);
     if (photo) data.append("profilePhoto", photo);
-    const { data: response } = await api.patch("/auth/profile", data);
-    updateUser(response.user);
-    setMessage("Profil livreur enregistré et visible pour rassurer les clients.");
+    try {
+      const { data: response } = await api.patch("/auth/profile", data);
+      updateUser(response.user);
+      setPreview(cacheBustedImageSource(response.user.profile_image_url));
+      setMessage("Profil livreur enregistré et visible pour rassurer les clients.");
+    } catch (error) {
+      setMessage(
+        error.response?.data?.message || "Impossible d’enregistrer le profil livreur.",
+      );
+    }
   };
 
   return (
@@ -848,7 +976,7 @@ export function DeliveryProfileContent({ api, user, updateUser, onLogout }) {
           </button>
         </form>
       </div>
-      <ProfileLogoutCard onLogout={onLogout} />
+      <MobileProfileActions onLogout={onLogout} settingsPath="/delivery/settings" />
     </DeliveryFrame>
   );
 }

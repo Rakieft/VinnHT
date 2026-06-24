@@ -1,38 +1,57 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
   BarChart3,
   Bell,
+  BriefcaseBusiness,
+  Building2,
   Boxes,
+  Car,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Clock3,
   CreditCard,
   Download,
   Edit3,
+  ExternalLink,
+  Eye,
   FileText,
+  ImageIcon,
+  Laptop,
   Mail,
+  MapPin,
   MessageCircle,
   Package,
+  PawPrint,
   Phone,
   Plus,
   RefreshCw,
   Search,
+  Send,
   Settings,
   ShieldCheck,
+  Shirt,
+  ShoppingBasket,
+  Smartphone,
+  Sofa,
+  Sparkles,
   Store,
   TrendingUp,
   Trash2,
   Truck,
-  UserRoundCheck,
   UserPlus,
   Users,
   Wallet,
+  Wheat,
+  X,
 } from "lucide-react";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
-import ProfileLogoutCard from "./ProfileLogoutCard.jsx";
+import MobileProfileActions from "./MobileProfileActions.jsx";
+import { assetUrl } from "../config/runtime.js";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-HT")} HTG`;
 const shortDate = (value) =>
@@ -42,15 +61,93 @@ const saturdayFor = (value = new Date()) => {
   date.setDate(date.getDate() + ((6 - date.getDay() + 7) % 7));
   return date.toISOString().slice(0, 10);
 };
+const percentageChange = (current, previous) => {
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+
+  if (!previousValue) return currentValue ? 100 : 0;
+  return Math.round(((currentValue - previousValue) / previousValue) * 100);
+};
+
+const categoryIconOptions = [
+  { value: "shopping-basket", label: "Supermarché", icon: ShoppingBasket },
+  { value: "smartphone", label: "Électronique", icon: Smartphone },
+  { value: "shirt", label: "Mode", icon: Shirt },
+  { value: "sofa", label: "Maison & meubles", icon: Sofa },
+  { value: "car", label: "Véhicules", icon: Car },
+  { value: "building", label: "Immobilier", icon: Building2 },
+  { value: "briefcase", label: "Services et emplois", icon: BriefcaseBusiness },
+  { value: "wheat", label: "Agriculture", icon: Wheat },
+  { value: "paw-print", label: "Animaux", icon: PawPrint },
+  { value: "sparkles", label: "Beauté & soins", icon: Sparkles },
+  { value: "laptop", label: "Informatique", icon: Laptop },
+  { value: "boxes", label: "Autres", icon: Boxes },
+];
+
+const categoryIconAliases = {
+  "layout-grid": Boxes,
+  basket: ShoppingBasket,
+  cart: ShoppingBasket,
+  phone: Smartphone,
+  fashion: Shirt,
+  home: Sofa,
+  vehicle: Car,
+  realty: Building2,
+  service: BriefcaseBusiness,
+  badge: BriefcaseBusiness,
+  agriculture: Wheat,
+  sprout: Wheat,
+  animals: PawPrint,
+  beauty: Sparkles,
+  computer: Laptop,
+};
+
+const inferCategoryIcon = (value = "") => {
+  const normalized = value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (/supermarche|alimentation|boisson/.test(normalized)) return "shopping-basket";
+  if (/electronique|telephone|mobile/.test(normalized)) return "smartphone";
+  if (/mode|vetement|chaussure/.test(normalized)) return "shirt";
+  if (/maison|meuble|decoration/.test(normalized)) return "sofa";
+  if (/vehicule|voiture|moto/.test(normalized)) return "car";
+  if (/immobilier|terrain|maison-a-vendre/.test(normalized)) return "building";
+  if (/service|emploi|travail/.test(normalized)) return "briefcase";
+  if (/agriculture|ferme|recolte/.test(normalized)) return "wheat";
+  if (/animaux|animal/.test(normalized)) return "paw-print";
+  if (/beaute|soin|cosmetique/.test(normalized)) return "sparkles";
+  if (/informatique|ordinateur/.test(normalized)) return "laptop";
+  return "boxes";
+};
+
+const CategoryIcon = ({ category, size }) => {
+  const selected = categoryIconOptions.find((option) => option.value === category.icon);
+  const Icon =
+    selected?.icon ||
+    categoryIconAliases[category.icon] ||
+    categoryIconOptions.find(
+      (option) => option.value === inferCategoryIcon(`${category.name} ${category.slug}`),
+    )?.icon ||
+    Boxes;
+
+  return <Icon size={size} />;
+};
 
 const statusLabel = {
+  new: "Nouveau",
+  in_progress: "En traitement",
+  resolved: "Résolu",
   active: "Actif",
   suspended: "Suspendu",
   pending: "En attente",
+  confirmed: "Confirmée",
   paid: "Payé",
   failed: "Échoué",
   refunded: "Remboursé",
   processing: "Traitement",
+  shipped: "Expédiée",
   assigned: "Assignée",
   picked_up: "Récupérée",
   in_transit: "En livraison",
@@ -81,10 +178,11 @@ function Status({ value }) {
   return <span className={`admin-status ${value}`}>{statusLabel[value] || value || "—"}</span>;
 }
 
-export function AdminDashboardContent({ api }) {
+export function AdminDashboardContent({ api, user }) {
   const [data, setData] = useState(null);
   const [weeklyReport, setWeeklyReport] = useState(null);
   const [reportEnding, setReportEnding] = useState(saturdayFor);
+  const [chartRange, setChartRange] = useState("7d");
   const [loading, setLoading] = useState(true);
   const [downloadingReport, setDownloadingReport] = useState(false);
   const [error, setError] = useState("");
@@ -94,7 +192,7 @@ export function AdminDashboardContent({ api }) {
     setError("");
     try {
       const [{ data: response }, { data: report }] = await Promise.all([
-        api.get("/admin/dashboard"),
+        api.get("/admin/dashboard", { params: { range: chartRange } }),
         api.get("/admin/weekly-report", { params: { ending: reportEnding } }),
       ]);
       setData(response);
@@ -111,7 +209,7 @@ export function AdminDashboardContent({ api }) {
 
   useEffect(() => {
     load();
-  }, [reportEnding]);
+  }, [reportEnding, chartRange]);
 
   const downloadWeeklyReport = async () => {
     setDownloadingReport(true);
@@ -138,13 +236,59 @@ export function AdminDashboardContent({ api }) {
 
   const stats = data?.stats || {};
   const recentAudit = data?.recentAudit || [];
+  const dailySales = data?.dailySales || [];
+  const paymentHealth = data?.paymentHealth || [];
+  const orderHealth = data?.orderHealth || [];
+  const topShops = data?.topShops || [];
+  const deliveryHealth = data?.deliveryHealth || [];
+  const reportPeriod = weeklyReport?.period || {
+    start: reportEnding,
+    end: reportEnding,
+  };
+  const reportTotals = weeklyReport?.totals || {};
+  const ordersTrend = percentageChange(stats.orders_week, stats.orders_previous_week);
+  const salesTrend = percentageChange(stats.paid_week, stats.paid_previous_week);
   const cards = [
-    [Users, "Utilisateurs", stats.users, `${stats.users_today || 0} nouveau(x) aujourd’hui`],
-    [Store, "Vendeurs", stats.sellers, "Comptes disposant de l’espace vendeur"],
-    [Boxes, "Produits actifs", stats.active_products, "Catalogue actuellement visible"],
-    [Package, "Commandes", stats.orders, `${stats.orders_today || 0} aujourd’hui`],
-    [CircleDollarSign, "Volume payé", stats.paid_volume, `${money(stats.paid_today)} aujourd’hui`, true],
-    [Truck, "Livraisons actives", stats.active_deliveries, "À suivre par l’équipe"],
+    {
+      icon: Store,
+      label: "Vendeurs actifs",
+      value: stats.sellers,
+      detail: "Boutiques autorisées sur VinnHT",
+    },
+    {
+      icon: Boxes,
+      label: "Produits publiés",
+      value: stats.active_products,
+      detail: `${stats.out_of_stock_products || 0} actuellement épuisé(s)`,
+    },
+    {
+      icon: Package,
+      label: "Commandes cette semaine",
+      value: stats.orders_week,
+      detail: `${ordersTrend >= 0 ? "+" : ""}${ordersTrend}% vs semaine précédente`,
+      trend: ordersTrend,
+    },
+    {
+      icon: CircleDollarSign,
+      label: "Volume total des ventes",
+      value: stats.paid_volume,
+      detail: `${salesTrend >= 0 ? "+" : ""}${salesTrend}% cette semaine`,
+      trend: salesTrend,
+      currency: true,
+    },
+    {
+      icon: CreditCard,
+      label: "Paiements à vérifier",
+      value: Number(stats.pending_payments || 0) + Number(stats.failed_payments || 0),
+      detail: `${stats.failed_payments || 0} paiement(s) en échec`,
+      attention: true,
+    },
+    {
+      icon: Truck,
+      label: "Livraisons en cours",
+      value: stats.active_deliveries,
+      detail: `${stats.unassigned_deliveries || 0} sans livreur`,
+    },
   ];
   const alerts = [
     {
@@ -152,7 +296,7 @@ export function AdminDashboardContent({ api }) {
       label: "Demandes vendeurs",
       value: stats.pending_seller_requests || 0,
       text: "demandes attendent une décision",
-      link: "/supervisor/seller-requests",
+      link: "/manager/seller-requests",
       tone: "gold",
     },
     {
@@ -160,7 +304,7 @@ export function AdminDashboardContent({ api }) {
       label: "Paiements à vérifier",
       value: Number(stats.pending_payments || 0) + Number(stats.failed_payments || 0),
       text: `${stats.failed_payments || 0} paiement(s) échoué(s)`,
-      link: "/admin/payments",
+      link: "/admin#weekly-report",
       tone: "red",
     },
     {
@@ -180,56 +324,76 @@ export function AdminDashboardContent({ api }) {
       tone: "navy",
     },
     {
-      icon: Wallet,
-      label: "Payouts en attente",
-      value: stats.pending_payouts || 0,
-      text: "montants à surveiller avant paiement vendeur",
-      link: "/admin/payments",
-      tone: "gold",
+      icon: Users,
+      label: "Comptes suspendus",
+      value: stats.suspended_users || 0,
+      text: "comptes actuellement restreints",
+      link: "/admin/users",
+      tone: "red",
     },
   ];
   const quickLinks = [
     [Users, "Gérer les utilisateurs", "/admin/users"],
     [Boxes, "Contrôler les produits", "/admin/products"],
     [FileText, "Rapport hebdomadaire", "#weekly-report"],
-    [CreditCard, "Vérifier les paiements", "/admin/payments"],
-    [Wallet, "Règlements vendeurs", "/admin/payments"],
+    [FileText, "Suivre la progression", "/admin#weekly-report"],
+    [Store, "Suivre les boutiques", "/admin/users"],
     [Truck, "Coordonner les livraisons", "/manager/deliveries"],
   ];
   const maxDailySale = Math.max(
     1,
-    ...(data.dailySales || []).map((item) => Number(item.total || 0))
+    ...dailySales.map((item) => Number(item.total || 0))
   );
   const auditLabel = {
+    "staff.create": "Compte manager créé",
     "user.status.update": "Statut utilisateur modifié",
     "user.roles.update": "Rôles utilisateur modifiés",
     "category.create": "Catégorie créée",
     "category.update": "Catégorie modifiée",
     "product.status.update": "Statut produit modifié",
+    "seller.sponsorship.activate": "Campagne vendeur activée",
+    "seller.sponsorship.cancel": "Campagne vendeur annulée",
   };
+  const orderTotal = orderHealth.reduce((total, item) => total + Number(item.total || 0), 0);
+  const currentDate = new Intl.DateTimeFormat("fr-HT", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+  const chartLabel = (value) =>
+    new Intl.DateTimeFormat("fr-HT", chartRange === "12m"
+      ? { month: "short" }
+      : { day: "2-digit", month: "short" }).format(new Date(`${String(value).slice(0, 10)}T12:00:00`));
 
   return (
     <div className="admin-flow">
       <AdminHeading
-        eyebrow="Centre de contrôle en temps réel"
-        title="Administration VinnHT"
-        text="Identifiez les priorités, surveillez la marketplace et accédez rapidement aux opérations."
+        eyebrow="Centre de pilotage VinnHT"
+        title={`Bonjour, ${user?.name || "Administrateur"}`}
+        text={`Vue consolidée de la marketplace · ${currentDate}`}
       >
-        <button onClick={load} disabled={loading}>
-          <RefreshCw className={loading ? "spinning" : ""} />
-          {loading ? "Actualisation..." : "Actualiser"}
-        </button>
+        <div className="admin-heading-actions">
+          <button className="secondary" onClick={load} disabled={loading}>
+            <RefreshCw className={loading ? "spinning" : ""} />
+            {loading ? "Actualisation..." : "Actualiser"}
+          </button>
+          <button onClick={downloadWeeklyReport} disabled={!weeklyReport || downloadingReport}>
+            <Download />
+            {downloadingReport ? "Génération..." : "Télécharger le rapport"}
+          </button>
+        </div>
       </AdminHeading>
       {error && <div className="admin-error">{error}</div>}
       <section className="admin-metric-grid">
-        {cards.map(([Icon, label, value, detail, currency]) => (
-          <article key={label}>
+        {cards.map(({ icon: Icon, label, value, detail, currency, trend, attention }) => (
+          <article className={attention ? "attention" : ""} key={label}>
             <span>
               <Icon />
             </span>
             <small>{label}</small>
             <strong>{currency ? money(value) : Number(value || 0).toLocaleString("fr-HT")}</strong>
-            <p>{detail}</p>
+            <p className={trend < 0 ? "negative" : trend > 0 ? "positive" : ""}>{detail}</p>
           </article>
         ))}
       </section>
@@ -279,10 +443,24 @@ export function AdminDashboardContent({ api }) {
                 <small>Encaissements confirmés</small>
               </span>
             </div>
-            <strong>{money(stats.paid_volume)}</strong>
+            <div className="admin-chart-controls">
+              {[
+                ["7d", "7 jours"],
+                ["30d", "30 jours"],
+                ["12m", "Cette année"],
+              ].map(([value, label]) => (
+                <button
+                  className={chartRange === value ? "active" : ""}
+                  onClick={() => setChartRange(value)}
+                  key={value}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </header>
           <div className="admin-sales-chart">
-            {(data.dailySales || []).map((item) => (
+            {dailySales.map((item) => (
               <article key={item.sale_date}>
                 <span>
                   <i
@@ -291,17 +469,80 @@ export function AdminDashboardContent({ api }) {
                     }}
                   />
                 </span>
-                <small>
-                  {new Intl.DateTimeFormat("fr-HT", { weekday: "short" }).format(
-                    new Date(item.sale_date)
-                  )}
-                </small>
+                <small>{chartLabel(item.sale_date)}</small>
                 <b>{money(item.total)}</b>
               </article>
             ))}
-            {!data.dailySales.length && (
+            {!dailySales.length && (
               <div className="admin-empty">Aucun paiement confirmé durant les sept derniers jours.</div>
             )}
+          </div>
+        </section>
+
+        <section className="admin-panel admin-order-progress">
+          <header>
+            <div>
+              <Package />
+              <span>
+                <b>Suivi des commandes</b>
+                <small>{orderTotal} commande(s) enregistrée(s)</small>
+              </span>
+            </div>
+          </header>
+          <div>
+            {orderHealth.map((item) => {
+              const percentage = orderTotal
+                ? Math.round((Number(item.total) / orderTotal) * 100)
+                : 0;
+              return (
+                <article key={item.status}>
+                  <p>
+                    <Status value={item.status} />
+                    <b>{item.total}</b>
+                    <small>{percentage}%</small>
+                  </p>
+                  <span><i style={{ width: `${percentage}%` }} /></span>
+                </article>
+              );
+            })}
+            {!orderHealth.length && <div className="admin-empty">Aucune commande enregistrée.</div>}
+          </div>
+        </section>
+      </div>
+
+      <div className="admin-dashboard-columns admin-commerce-columns">
+        <section className="admin-panel admin-top-shops">
+          <header>
+            <div>
+              <Store />
+              <span>
+                <b>Boutiques de la semaine</b>
+                <small>Classement basé sur les ventes réellement enregistrées</small>
+              </span>
+            </div>
+            <Link to="/admin/users">Voir les vendeurs <ArrowRight /></Link>
+          </header>
+          <div>
+            {topShops.map((shop, index) => (
+              <article key={shop.seller_id}>
+                <strong>#{index + 1}</strong>
+                <span className="admin-shop-logo">
+                  {shop.shop_logo_url ? (
+                    <img src={assetUrl(shop.shop_logo_url)} alt="" />
+                  ) : (
+                    <Store />
+                  )}
+                </span>
+                <p>
+                  <b>{shop.shop_name}</b>
+                  <small>{shop.sponsored ? "Campagne de visibilité active" : "Visibilité standard"}</small>
+                </p>
+                <span><b>{shop.orders}</b><small>commandes</small></span>
+                <span><b>{shop.products_sold}</b><small>articles</small></span>
+                <span><b>{money(shop.sales)}</b><small>ventes</small></span>
+              </article>
+            ))}
+            {!topShops.length && <div className="admin-empty">Aucune vente boutique cette semaine.</div>}
           </div>
         </section>
 
@@ -318,7 +559,7 @@ export function AdminDashboardContent({ api }) {
           <div className="admin-health-groups">
             <div>
               <h3>Paiements</h3>
-              {(data.paymentHealth || []).map((item) => (
+              {paymentHealth.map((item) => (
                 <p key={item.status}>
                   <Status value={item.status} />
                   <b>{item.total}</b>
@@ -328,7 +569,7 @@ export function AdminDashboardContent({ api }) {
             </div>
             <div>
               <h3>Livraisons</h3>
-              {(data.deliveryHealth || []).map((item) => (
+              {deliveryHealth.map((item) => (
                 <p key={item.status}>
                   <Status value={item.status} />
                   <b>{item.total}</b>
@@ -362,7 +603,7 @@ export function AdminDashboardContent({ api }) {
             <span>
               <small>Période couverte</small>
               <b>
-                {shortDate(weeklyReport.period.start)} au {shortDate(weeklyReport.period.end)}
+                {shortDate(reportPeriod.start)} au {shortDate(reportPeriod.end)}
               </b>
             </span>
             <p>
@@ -372,11 +613,11 @@ export function AdminDashboardContent({ api }) {
           </div>
           <div className="admin-report-metrics">
             {[
-              ["Marchands", weeklyReport.totals.merchants || 0],
-              ["Commandes marchands", weeklyReport.totals.orders || 0],
-              ["Ventes globales", money(weeklyReport.totals.grossSales)],
-              ["Commission VinnHT", money(weeklyReport.totals.commission)],
-              ["Net vendeurs", money(weeklyReport.totals.netSales)],
+              ["Marchands", reportTotals.merchants || 0],
+              ["Commandes marchands", reportTotals.orders || 0],
+              ["Ventes globales", money(reportTotals.grossSales)],
+              ["Commission VinnHT", money(reportTotals.commission)],
+              ["Net vendeurs", money(reportTotals.netSales)],
             ].map(([label, value]) => (
               <article key={label}>
                 <small>{label}</small>
@@ -429,21 +670,26 @@ export function AdminDashboardContent({ api }) {
 }
 
 export function AdminUsersContent({ api, currentUser }) {
-  const roles = ["client", "seller", "delivery", "supervisor", "manager", "admin"];
-  const [users, setUsers] = useState([]);
+  const [sellers, setSellers] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [visibilityFilter, setVisibilityFilter] = useState("all");
+  const [catalogFilter, setCatalogFilter] = useState("all");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busyUser, setBusyUser] = useState(null);
-  const [campaigns, setCampaigns] = useState([]);
   const [selectedSeller, setSelectedSeller] = useState(null);
+  const [sellerDetail, setSellerDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [showStaffForm, setShowStaffForm] = useState(false);
   const [staffForm, setStaffForm] = useState({
     name: "",
     email: "",
     phone: "",
     password: "",
-    role: "supervisor",
+    role: "manager",
   });
   const [creatingStaff, setCreatingStaff] = useState(false);
   const [sponsorship, setSponsorship] = useState({
@@ -452,50 +698,58 @@ export function AdminUsersContent({ api, currentUser }) {
     endsAt: "",
   });
 
-  const load = () =>
-    Promise.all([
-      api.get("/admin/users", {
+  const load = () => {
+    setError("");
+    return api
+      .get("/admin/sellers", {
         params: {
-          q: query.trim().length >= 2 ? query.trim() : undefined,
+          q: query.trim() || undefined,
           status: statusFilter === "all" ? undefined : statusFilter,
+          visibility: visibilityFilter === "all" ? undefined : visibilityFilter,
+          catalog: catalogFilter === "all" ? undefined : catalogFilter,
+          page: pagination.page,
+          limit: 12,
         },
-      }),
-      api.get("/admin/seller-sponsorships"),
-    ])
-      .then(([userResponse, campaignResponse]) => {
-        setUsers(userResponse.data);
-        setCampaigns(campaignResponse.data);
       })
-      .catch(() => setError("Impossible de charger les utilisateurs."));
+      .then(({ data }) => {
+        setSellers(data.items || []);
+        setSummary(data.summary || {});
+        setPagination(data.pagination || { page: 1, pages: 1, total: 0 });
+      })
+      .catch((requestError) =>
+        setError(requestError.response?.data?.message || "Impossible de charger les vendeurs.")
+      );
+  };
+
   useEffect(() => {
     const timer = window.setTimeout(load, 250);
     return () => window.clearTimeout(timer);
-  }, [query, statusFilter]);
+  }, [query, statusFilter, visibilityFilter, catalogFilter, pagination.page]);
 
-  const visible = users;
-  const userStats = {
-    sellers: users.filter((user) => user.roles.includes("seller")).length,
-    activeSellers: users.filter(
-      (user) => user.roles.includes("seller") && user.status === "active"
-    ).length,
-    suspendedSellers: users.filter(
-      (user) => user.roles.includes("seller") && user.status === "suspended"
-    ).length,
+  const resetPage = (setter) => (event) => {
+    setter(event.target.value);
+    setPagination((current) => ({ ...current, page: 1 }));
   };
 
-  const updateStatus = async (user) => {
-    const nextStatus = user.status === "active" ? "suspended" : "active";
+  const updateStatus = async (seller) => {
+    const nextStatus = seller.status === "active" ? "suspended" : "active";
     const action = nextStatus === "suspended" ? "suspendre" : "réactiver";
-    if (!window.confirm(`Confirmer : ${action} le compte de ${user.name} `)) return;
-    setBusyUser(user.id);
+    if (!window.confirm(`Confirmer : ${action} la boutique ${seller.shop_name} ?`)) return;
+    setBusyUser(seller.id);
     setMessage("");
     setError("");
     try {
-      const { data } = await api.patch(`/admin/users/${user.id}/status`, {
+      const { data } = await api.patch(`/admin/users/${seller.id}/status`, {
         status: nextStatus,
       });
       setMessage(data.message);
       load();
+      if (sellerDetail?.seller?.id === seller.id) {
+        setSellerDetail((current) => ({
+          ...current,
+          seller: { ...current.seller, status: nextStatus },
+        }));
+      }
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Impossible de modifier ce compte.");
     } finally {
@@ -516,9 +770,9 @@ export function AdminUsersContent({ api, currentUser }) {
         email: "",
         phone: "",
         password: "",
-        role: "supervisor",
+        role: "manager",
       });
-      setQuery(staffForm.email);
+      setShowStaffForm(false);
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Impossible de créer ce compte.");
     } finally {
@@ -526,38 +780,26 @@ export function AdminUsersContent({ api, currentUser }) {
     }
   };
 
-  const toggleRole = async (user, role) => {
-    const nextRoles = user.roles.includes(role)
-       ? user.roles.filter((value) => value !== role)
-      : [...user.roles, role];
-    if (!nextRoles.length) return;
-    setBusyUser(user.id);
-    setMessage("");
-    setError("");
+  const openSellerDetail = async (seller) => {
+    setDetailLoading(true);
+    setSellerDetail({ seller, products: [], campaigns: [], auditHistory: [] });
     try {
-      const { data } = await api.patch(`/admin/users/${user.id}/roles`, {
-        roles: nextRoles,
-      });
-      setMessage(data.message);
-      load();
+      const { data } = await api.get(`/admin/sellers/${seller.id}`);
+      setSellerDetail(data);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Impossible de modifier les rôles.");
+      setError(requestError.response?.data?.message || "Impossible d’ouvrir cette boutique.");
+      setSellerDetail(null);
     } finally {
-      setBusyUser(null);
+      setDetailLoading(false);
     }
   };
 
-  const campaignFor = (userId) => campaigns.find((campaign) => Number(campaign.seller_id) === Number(userId));
-  const campaignIsActive = (campaign) =>
-    campaign.sponsorship_status === "active" &&
-    new Date(campaign.sponsorship_ends_at) > new Date();
-  const openCampaign = (user) => {
-    const campaign = campaignFor(user.id);
+  const openCampaign = (seller) => {
     const end = new Date();
     end.setDate(end.getDate() + 30);
-    setSelectedSeller({ ...user, campaign });
+    setSelectedSeller(seller);
     setSponsorship({
-      amount: campaign.sponsorship_amount || "",
+      amount: seller.sponsorship_amount || "",
       startsAt: new Date().toISOString().slice(0, 10),
       endsAt: end.toISOString().slice(0, 10),
     });
@@ -582,22 +824,25 @@ export function AdminUsersContent({ api, currentUser }) {
   return (
     <div className="admin-flow">
       <AdminHeading
-        eyebrow="Utilisateurs opérationnels"
-        title="Vendeurs et équipe VinnHT"
-        text="Créez les managers et superviseurs, puis suivez les vendeurs validés."
+        eyebrow="Réseau marchand"
+        title="Vendeurs VinnHT"
+        text="Contrôlez les boutiques, leur catalogue, leur réputation et leur visibilité."
       >
-        <button onClick={load}>
-          <RefreshCw /> Actualiser
-        </button>
+        <div className="admin-heading-actions">
+          <button className="secondary" onClick={() => setShowStaffForm((current) => !current)}>
+            <UserPlus /> {showStaffForm ? "Fermer" : "Créer un manager"}
+          </button>
+          <button onClick={load}><RefreshCw /> Actualiser</button>
+        </div>
       </AdminHeading>
       {message && <div className="admin-message">{message}</div>}
       {error && <div className="admin-error">{error}</div>}
-      <form className="admin-staff-create-form" onSubmit={createStaff}>
+      {showStaffForm && <form className="admin-staff-create-form" onSubmit={createStaff}>
         <header>
           <span><UserPlus /></span>
           <div>
             <small>Équipe opérationnelle</small>
-            <h2>Créer un manager ou superviseur</h2>
+            <h2>Créer un manager</h2>
             <p>Le compte sera actif immédiatement avec le rôle sélectionné.</p>
           </div>
         </header>
@@ -616,7 +861,6 @@ export function AdminUsersContent({ api, currentUser }) {
         <label>
           Rôle
           <select value={staffForm.role} onChange={(event) => setStaffForm({ ...staffForm, role: event.target.value })}>
-            <option value="supervisor">Superviseur</option>
             <option value="manager">Manager</option>
           </select>
         </label>
@@ -625,127 +869,196 @@ export function AdminUsersContent({ api, currentUser }) {
           <input required minLength="10" type="password" value={staffForm.password} onChange={(event) => setStaffForm({ ...staffForm, password: event.target.value })} />
         </label>
         <button disabled={creatingStaff}>
-          <UserPlus /> {creatingStaff ? "Creation..." : "Creer le compte"}
+          <UserPlus /> {creatingStaff ? "Création..." : "Créer le compte"}
         </button>
-      </form>
-      {query.trim().length < 2 && (
-        <section className="admin-user-summary">
-          {[
-            [Store, "Vendeurs affichés", userStats.sellers],
-            [CheckCircle2, "Vendeurs actifs", userStats.activeSellers],
-            [AlertTriangle, "Vendeurs suspendus", userStats.suspendedSellers],
-          ].map(([Icon, label, value]) => (
-            <article key={label}>
-              <Icon />
-              <span><small>{label}</small><b>{value}</b></span>
-            </article>
-          ))}
-        </section>
-      )}
-      <section className="admin-filter-bar">
+      </form>}
+      <section className="admin-user-summary">
+        {[
+          [Store, "Vendeurs", summary.sellers],
+          [CheckCircle2, "Actifs", summary.active_sellers],
+          [AlertTriangle, "Suspendus", summary.suspended_sellers],
+          [TrendingUp, "Sponsorisé(s)", summary.sponsored_sellers],
+          [Boxes, "Sans produit", summary.sellers_without_products],
+        ].map(([Icon, label, value]) => (
+          <article key={label}>
+            <Icon />
+            <span><small>{label}</small><b>{Number(value || 0).toLocaleString("fr-HT")}</b></span>
+          </article>
+        ))}
+      </section>
+      <section className="admin-seller-filters">
         <label className="admin-search">
           <Search />
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Rechercher un client, vendeur, email ou téléphone"
+            onChange={resetPage(setQuery)}
+            placeholder="Boutique, propriétaire, téléphone, email ou catégorie"
           />
         </label>
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+        <select value={statusFilter} onChange={resetPage(setStatusFilter)}>
           <option value="all">Tous les statuts</option>
           <option value="active">Actifs</option>
           <option value="suspended">Suspendus</option>
         </select>
+        <select value={visibilityFilter} onChange={resetPage(setVisibilityFilter)}>
+          <option value="all">Toute visibilité</option>
+          <option value="sponsored">Sponsorisés</option>
+          <option value="standard">Classement naturel</option>
+        </select>
+        <select value={catalogFilter} onChange={resetPage(setCatalogFilter)}>
+          <option value="all">Tous les catalogues</option>
+          <option value="with_products">Avec produits</option>
+          <option value="without_products">Sans produit</option>
+        </select>
       </section>
       <div className="admin-results-count">
-        {query.trim().length >= 2
-           ? `${visible.length} compte(s) trouvé(s) pour votre recherche`
-          : `${visible.length} vendeur(s) affiché(s)`}
+        {pagination.total} vendeur(s) correspondant aux filtres
       </div>
-      <section className="admin-user-grid">
-        {visible.map((user) => {
-          const campaign = campaignFor(user.id);
-          const sponsored = campaignIsActive(campaign);
-          return (
-          <article className={`${user.status === "suspended" ? "suspended" : ""} ${sponsored ? "sponsored" : ""}`} key={user.id}>
+      <section className="admin-seller-grid">
+        {sellers.map((seller) => (
+          <article className={`${seller.status === "suspended" ? "suspended" : ""} ${seller.sponsored ? "sponsored" : ""}`} key={seller.id}>
             <header>
-              <span><UserRoundCheck /></span>
+              <span className="admin-seller-logo">
+                {seller.shop_logo_url ? (
+                  <img src={assetUrl(seller.shop_logo_url)} alt={`Logo ${seller.shop_name}`} />
+                ) : (
+                  <Store />
+                )}
+              </span>
               <div>
-                <b>{user.name}</b>
-                <small><Mail /> {user.email}</small>
-                {user.phone && <small><Phone /> {user.phone}</small>}
+                <small>{seller.category || "Boutique VinnHT"}</small>
+                <h3>{seller.shop_name}</h3>
+                <p>{seller.owner_name}</p>
               </div>
-              <Status value={user.status} />
+              <Status value={seller.status} />
             </header>
-            <div className="admin-user-meta">
-              <span>Compte #{user.id}</span>
-              <span>Créé le {shortDate(user.created_at)}</span>
-              {user.id === currentUser.id && <b>Votre compte</b>}
+            <div className="admin-seller-contact">
+              <span><Mail /> {seller.email}</span>
+              <span><Phone /> {seller.whatsapp || seller.phone || "Non renseigné"}</span>
+              <span><MapPin /> {seller.pickup_address || "Adresse non renseignée"}</span>
             </div>
-            {user.roles.includes("seller") && (
-              <section className="admin-user-campaign">
-                <TrendingUp />
-                <span>
-                  <small>{sponsored ? "Visibilite prioritaire active" : "Classement naturel"}</small>
-                  <b>{sponsored ? money(campaign.sponsorship_amount) : "Aucune campagne active"}</b>
-                  {sponsored && <small>Jusqu'au {shortDate(campaign.sponsorship_ends_at)}</small>}
-                </span>
-                <button
-                  className={sponsored ? "danger" : ""}
-                  onClick={() => sponsored ? cancelCampaign(user) : openCampaign(user)}
-                >
-                  {sponsored ? "Arreter" : "Promouvoir"}
-                </button>
-              </section>
-            )}
-            <small className="admin-role-title">Cliquer sur un rôle pour l’ajouter ou le retirer</small>
-            <div className="admin-role-list">
-              {roles.map((role) => (
-                <button
-                  className={user.roles.includes(role) ? "active" : ""}
-                  disabled={busyUser === user.id || (user.id === currentUser.id && role === "admin")}
-                  onClick={() => toggleRole(user, role)}
-                  key={role}
-                >
-                  {role}
-                </button>
-              ))}
+            <div className="admin-seller-metrics">
+              <span><b>{seller.active_product_count || 0}</b><small>produits actifs</small></span>
+              <span><b>{seller.order_count || 0}</b><small>commandes</small></span>
+              <span><b>{money(seller.sales_volume)}</b><small>volume ventes</small></span>
+              <span><b>{Number(seller.rating || 0).toFixed(1)}</b><small>{seller.review_count || 0} avis</small></span>
             </div>
             <footer>
-              <small>{user.roles.length} rôle(s) actif(s)</small>
+              <button className="secondary" onClick={() => openSellerDetail(seller)}>
+                <Eye /> Voir la fiche
+              </button>
+              <Link to={`/shops/${seller.id}`} target="_blank"><ExternalLink /> Boutique</Link>
               <button
-                disabled={busyUser === user.id || user.id === currentUser.id}
-                onClick={() => updateStatus(user)}
+                className={seller.sponsored ? "gold" : ""}
+                onClick={() => seller.sponsored ? cancelCampaign(seller) : openCampaign(seller)}
               >
-                {user.status === "active" ? "Suspendre" : "Réactiver"}
+                <TrendingUp /> {seller.sponsored ? "Arrêter promo" : "Promouvoir"}
               </button>
             </footer>
           </article>
-          );
-        })}
+        ))}
       </section>
-      {!visible.length && (
-        <div className="admin-empty">
-          {query.trim().length === 1
-             ? "Saisissez au moins deux caractères pour rechercher un client."
-            : "Aucun compte ne correspond à votre recherche."}
-        </div>
+      {!sellers.length && <div className="admin-empty">Aucun vendeur ne correspond aux filtres.</div>}
+      {pagination.pages > 1 && (
+        <nav className="admin-pagination" aria-label="Pagination vendeurs">
+          <button
+            disabled={pagination.page <= 1}
+            onClick={() => setPagination((current) => ({ ...current, page: current.page - 1 }))}
+          >
+            <ChevronLeft /> Précédent
+          </button>
+          <span>Page {pagination.page} sur {pagination.pages}</span>
+          <button
+            disabled={pagination.page >= pagination.pages}
+            onClick={() => setPagination((current) => ({ ...current, page: current.page + 1 }))}
+          >
+            Suivant <ChevronRight />
+          </button>
+        </nav>
       )}
       {selectedSeller && (
         <form className="admin-sponsor-form" onSubmit={saveCampaign}>
-          <header><TrendingUp /><div><small>Campagne vendeur payée</small><h2>Promouvoir {selectedSeller.name}</h2><p>Tous les produits actifs et pertinents de cette boutique passeront avant les résultats naturels.</p></div><button type="button" onClick={() => setSelectedSeller(null)}>×</button></header>
+          <header><TrendingUp /><div><small>Campagne vendeur payée</small><h2>Promouvoir {selectedSeller.shop_name}</h2><p>Tous les produits actifs et pertinents de cette boutique passeront avant les résultats naturels.</p></div><button type="button" onClick={() => setSelectedSeller(null)}>×</button></header>
           <label>Montant payé (HTG)<input required type="number" min="0" value={sponsorship.amount} onChange={(event) => setSponsorship({ ...sponsorship, amount: event.target.value })} /></label>
           <label>Date de début<input required type="date" value={sponsorship.startsAt} onChange={(event) => setSponsorship({ ...sponsorship, startsAt: event.target.value })} /></label>
           <label>Date de fin<input required type="date" value={sponsorship.endsAt} onChange={(event) => setSponsorship({ ...sponsorship, endsAt: event.target.value })} /></label>
           <button>Confirmer le paiement et activer</button>
         </form>
       )}
+      {sellerDetail && (
+        <aside className="admin-detail-drawer" aria-label="Fiche vendeur">
+          <header>
+            <div>
+              <span className="admin-seller-logo">
+                {sellerDetail.seller.shop_logo_url ? (
+                  <img src={assetUrl(sellerDetail.seller.shop_logo_url)} alt="" />
+                ) : <Store />}
+              </span>
+              <div><small>Fiche vendeur</small><h2>{sellerDetail.seller.shop_name}</h2></div>
+            </div>
+            <button onClick={() => setSellerDetail(null)} aria-label="Fermer"><X /></button>
+          </header>
+          {detailLoading ? (
+            <div className="admin-empty">Chargement de la boutique...</div>
+          ) : (
+            <div className="admin-detail-content">
+              <section className="admin-detail-identity">
+                <Status value={sellerDetail.seller.status} />
+                <p>{sellerDetail.seller.description || "Aucune description fournie."}</p>
+                <span><b>Propriétaire</b>{sellerDetail.seller.owner_name}</span>
+                <span><b>Email</b>{sellerDetail.seller.email}</span>
+                <span><b>WhatsApp</b>{sellerDetail.seller.whatsapp || sellerDetail.seller.phone || "Non renseigné"}</span>
+                <span><b>Adresse</b>{sellerDetail.seller.pickup_address || "Non renseignée"}</span>
+                <span><b>Ouverture</b>{sellerDetail.seller.opening_hours || "Non renseignée"}</span>
+              </section>
+              <section className="admin-detail-metrics">
+                <span><b>{sellerDetail.seller.active_product_count}</b><small>produits actifs</small></span>
+                <span><b>{sellerDetail.seller.order_count}</b><small>commandes</small></span>
+                <span><b>{money(sellerDetail.seller.sales_volume)}</b><small>ventes</small></span>
+                <span><b>{Number(sellerDetail.seller.rating || 0).toFixed(1)}</b><small>note</small></span>
+              </section>
+              <section>
+                <h3>Produits récents</h3>
+                <div className="admin-detail-list">
+                  {sellerDetail.products.map((product) => (
+                    <article key={product.id}>
+                      <span>{product.image_url ? <img src={assetUrl(product.image_url)} alt="" /> : <Boxes />}</span>
+                      <p><b>{product.name}</b><small>{product.category_name} · {product.stock} en stock</small></p>
+                      <Status value={product.status} />
+                    </article>
+                  ))}
+                  {!sellerDetail.products.length && <div className="admin-empty">Aucun produit.</div>}
+                </div>
+              </section>
+              <section>
+                <h3>Historique administratif</h3>
+                <div className="admin-detail-history">
+                  {sellerDetail.auditHistory.map((item) => (
+                    <p key={item.id}><b>{item.action}</b><small>{item.actor_name || "Système"} · {shortDate(item.created_at)}</small></p>
+                  ))}
+                  {!sellerDetail.auditHistory.length && <small>Aucune action enregistrée.</small>}
+                </div>
+              </section>
+              <footer>
+                <a href={`mailto:${sellerDetail.seller.email}`}><Mail /> Contacter</a>
+                <button
+                  className="danger"
+                  disabled={busyUser === sellerDetail.seller.id || sellerDetail.seller.id === currentUser?.id}
+                  onClick={() => updateStatus(sellerDetail.seller)}
+                >
+                  {sellerDetail.seller.status === "active" ? "Suspendre" : "Réactiver"}
+                </button>
+              </footer>
+            </div>
+          )}
+        </aside>
+      )}
     </div>
   );
 }
 
 export function AdminCategoriesContent({ api }) {
-  const empty = { name: "", slug: "", icon: "layout-grid" };
+  const empty = { name: "", slug: "", icon: "boxes" };
   const [categories, setCategories] = useState([]);
   const [form, setForm] = useState(empty);
   const [editing, setEditing] = useState(null);
@@ -794,7 +1107,9 @@ export function AdminCategoriesContent({ api }) {
     setForm({
       name: category.name,
       slug: category.slug,
-      icon: category.icon || "layout-grid",
+      icon: categoryIconOptions.some((option) => option.value === category.icon)
+        ? category.icon
+        : inferCategoryIcon(`${category.name} ${category.slug}`),
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -864,6 +1179,7 @@ export function AdminCategoriesContent({ api }) {
                   slug: editing
                      ? form.slug
                     : name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+                  icon: editing ? form.icon : inferCategoryIcon(name),
                 });
               }}
               placeholder="Ex. Informatique"
@@ -884,13 +1200,23 @@ export function AdminCategoriesContent({ api }) {
             />
           </label>
           <label>
-            Nom de l’icône
-            <input
+            Icône du rayon
+            <select
               value={form.icon}
               onChange={(event) => setForm({ ...form, icon: event.target.value })}
-              placeholder="layout-grid"
-            />
+            >
+              {categoryIconOptions.map(({ value, label }) => (
+                <option value={value} key={value}>{label}</option>
+              ))}
+            </select>
           </label>
+          <div className="admin-category-icon-preview">
+            <span><CategoryIcon category={form} /></span>
+            <div>
+              <small>Aperçu de l’icône</small>
+              <b>{categoryIconOptions.find((option) => option.value === form.icon)?.label || "Autres"}</b>
+            </div>
+          </div>
           <div className="admin-category-form-actions">
             {editing && (
               <button
@@ -919,7 +1245,7 @@ export function AdminCategoriesContent({ api }) {
             {visible.map((category) => (
               <article className={editing === category.id ? "selected" : ""} key={category.id}>
                 <header>
-                  <span><Boxes /></span>
+                  <span><CategoryIcon category={category} /></span>
                   <div><b>{category.name}</b><small>/{category.slug}</small></div>
                 </header>
                 <div className="admin-category-metrics">
@@ -954,179 +1280,299 @@ export function AdminCategoriesContent({ api }) {
 
 export function AdminProductsContent({ api }) {
   const [products, setProducts] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [categories, setCategories] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [stockFilter, setStockFilter] = useState("all");
+  const [promotionFilter, setPromotionFilter] = useState("all");
+  const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const load = () =>
-    api.get("/admin/products")
-      .then(({ data }) => setProducts(data))
-      .catch(() => setError("Impossible de charger les produits."));
-  useEffect(() => { load(); }, []);
-  const visible = products.filter((product) => {
-    const searchMatch = `${product.name} ${product.seller_name} ${product.category_name}`
-      .toLowerCase()
-      .includes(query.toLowerCase());
-    return searchMatch && (statusFilter === "all" || product.status === statusFilter);
-  });
-  const updateStatus = async (product) => {
-    const status = product.status === "active" ? "inactive" : "active";
-    const { data } = await api.patch(`/admin/products/${product.id}/status`, { status });
-    setMessage(data.message);
-    load();
+  const load = () => {
+    setError("");
+    return api
+      .get("/admin/products", {
+        params: {
+          q: query.trim() || undefined,
+          status: statusFilter === "all" ? undefined : statusFilter,
+          stock: stockFilter === "all" ? undefined : stockFilter,
+          promotion: promotionFilter === "active" ? "active" : undefined,
+          department: departmentFilter === "all" ? undefined : departmentFilter,
+          categoryId: categoryFilter === "all" ? undefined : categoryFilter,
+          page: pagination.page,
+          limit: 16,
+        },
+      })
+      .then(({ data }) => {
+        setProducts(data.items || []);
+        setSummary(data.summary || {});
+        setCategories(data.categories || []);
+        setDepartments(data.departments || []);
+        setPagination(data.pagination || { page: 1, pages: 1, total: 0 });
+        setSelectedIds([]);
+      })
+      .catch((requestError) =>
+        setError(requestError.response?.data?.message || "Impossible de charger les produits.")
+      );
   };
+  useEffect(() => {
+    const timer = window.setTimeout(load, 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    query,
+    statusFilter,
+    stockFilter,
+    promotionFilter,
+    departmentFilter,
+    categoryFilter,
+    pagination.page,
+  ]);
+
+  const resetPage = (setter) => (event) => {
+    setter(event.target.value);
+    setPagination((current) => ({ ...current, page: 1 }));
+  };
+
+  const updateStatus = async (product) => {
+    setBusy(true);
+    setError("");
+    const status = product.status === "active" ? "inactive" : "active";
+    try {
+      const { data } = await api.patch(`/admin/products/${product.id}/status`, { status });
+      setMessage(data.message);
+      await load();
+      if (selectedProduct?.product?.id === product.id) {
+        setSelectedProduct((current) => ({
+          ...current,
+          product: { ...current.product, status },
+        }));
+      }
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible de modifier ce produit.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateSelected = async (status) => {
+    if (!selectedIds.length) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { data } = await api.patch("/admin/products/status", {
+        ids: selectedIds,
+        status,
+      });
+      setMessage(data.message);
+      await load();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible de traiter la sélection.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openProduct = async (product) => {
+    setDetailLoading(true);
+    setSelectedProduct({ product, images: [], auditHistory: [] });
+    try {
+      const { data } = await api.get(`/admin/products/${product.id}`);
+      setSelectedProduct(data);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible d’ouvrir ce produit.");
+      setSelectedProduct(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const toggleSelected = (id) => {
+    setSelectedIds((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
+    );
+  };
+
+  const promotionIsActive = (product) =>
+    product.is_featured &&
+    Number(product.promotional_price) > 0 &&
+    Number(product.promotional_price) < Number(product.price) &&
+    (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date());
+
   return (
     <div className="admin-flow">
       <AdminHeading
         eyebrow="Catalogue marketplace"
         title="Produits"
-        text="Contrôlez les produits, leurs stocks et leur disponibilité dans la marketplace."
-      />
-      {message && <div className="admin-message">{message}</div>}
-      {error && <div className="admin-error">{error}</div>}
-      <section className="admin-category-summary">
-        {[
-          [Boxes, "Produits", products.length],
-          [CheckCircle2, "Actifs", products.filter((p) => p.status === "active").length],
-          [AlertTriangle, "Stock épuisé", products.filter((p) => Number(p.stock) === 0).length],
-          [Store, "Vendeurs", new Set(products.map((product) => product.seller_id)).size],
-        ].map(([Icon, label, value]) => (
-          <article key={label}><Icon /><span><small>{label}</small><b>{value}</b></span></article>
-        ))}
-      </section>
-      <section className="admin-filter-bar">
-        <label className="admin-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Produit, vendeur ou catégorie" /></label>
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-          <option value="all">Tous les statuts</option>
-          <option value="active">Actifs</option>
-          <option value="inactive">Inactifs</option>
-          <option value="draft">Brouillons</option>
-        </select>
-      </section>
-      <section className="admin-product-grid">
-        {visible.map((product) => {
-          return (
-            <article key={product.id}>
-              <div className="admin-product-image">
-                {product.image_url ? <img src={product.image_url} alt={product.name} /> : <Boxes />}
-              </div>
-              <header><div><small>{product.category_name}</small><h3>{product.name}</h3><p>{product.seller_name}</p></div><Status value={product.status} /></header>
-              <div className="admin-product-numbers">
-                <span><small>Prix</small><b>{money(product.price)}</b></span>
-                <span><small>Stock</small><b>{product.stock}</b></span>
-              </div>
-              <footer>
-                <button onClick={() => updateStatus(product)}>{product.status === "active" ? "Desactiver" : "Activer"}</button>
-              </footer>
-            </article>
-          );
-        })}
-      </section>
-    </div>
-  );
-}
-
-export function AdminPaymentsContent({ api }) {
-  const [center, setCenter] = useState({ stats: {}, batches: [] });
-  const [selectedBatch, setSelectedBatch] = useState(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [reportEnding, setReportEnding] = useState(saturdayFor);
-  const [downloadingReport, setDownloadingReport] = useState(false);
-  const load = () =>
-    api.get("/admin/payment-center").then(({ data }) => setCenter(data || { stats: {}, batches: [] }));
-  useEffect(() => { load(); }, []);
-  const prepare = async () => {
-    const { data } = await api.post("/admin/payout-batches/prepare", {});
-    setMessage(data.message);
-    load();
-  };
-  const paymentStats = center?.stats || {};
-  const payoutBatches = center?.batches || [];
-
-  const openBatch = async (batch) => {
-    const { data } = await api.get(`/admin/payout-batches/${batch.id}`);
-    setSelectedBatch(data);
-  };
-  const markPaid = async () => {
-    if (!window.confirm("Confirmer que tous les vendeurs de ce lot ont réellement été payés ")) return;
-    const { data } = await api.patch(`/admin/payout-batches/${selectedBatch.batch.id}/paid`);
-    setMessage(data.message);
-    setSelectedBatch(null);
-    load();
-  };
-  const downloadWeeklyReport = async () => {
-    setDownloadingReport(true);
-    setError("");
-    try {
-      const { data: pdf } = await api.get("/admin/weekly-report.pdf", {
-        params: { ending: reportEnding },
-        responseType: "blob",
-      });
-      const url = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `rapport-vinnht-semaine-du-${reportEnding}.pdf`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (requestError) {
-      setError(
-        requestError.response?.data?.message || "Impossible de télécharger le rapport PDF."
-      );
-    } finally {
-      setDownloadingReport(false);
-    }
-  };
-  return (
-    <div className="admin-flow">
-      <AdminHeading eyebrow="Centre financier" title="Paiements et règlements vendeurs" text="Surveillez les encaissements clients et préparez chaque dimanche les montants dus aux vendeurs.">
-        <div className="admin-payment-actions">
-          <label>
-            Samedi du rapport
-            <input
-              type="date"
-              value={reportEnding}
-              onChange={(event) => setReportEnding(saturdayFor(event.target.value))}
-            />
-          </label>
-          <button onClick={downloadWeeklyReport} disabled={downloadingReport}>
-            <Download />
-              {downloadingReport ? "Generation du PDF..." : "Telecharger le rapport PDF"}
-          </button>
-          <button onClick={prepare}><RefreshCw /> Préparer le lot du dimanche</button>
-        </div>
+        text="Modérez le catalogue, surveillez les stocks et contrôlez la visibilité des produits."
+      >
+        <button onClick={load}><RefreshCw /> Actualiser</button>
       </AdminHeading>
       {message && <div className="admin-message">{message}</div>}
       {error && <div className="admin-error">{error}</div>}
       <section className="admin-category-summary">
         {[
-          [CircleDollarSign, "Total encaissé", money(paymentStats.collected)],
-          [Clock3, "Paiements clients en attente", paymentStats.pending_count || 0],
-          [AlertTriangle, "Paiements échoués", paymentStats.failed_count || 0],
-          [Wallet, "Montant dû vendeurs", money(paymentStats.seller_due)],
-        ].map(([Icon, label, value]) => <article key={label}><Icon /><span><small>{label}</small><b>{value}</b></span></article>)}
+          [Boxes, "Produits", summary.products],
+          [CheckCircle2, "Actifs", summary.active_products],
+          [AlertTriangle, "Stock faible", summary.low_stock],
+          [Package, "Épuisés", summary.out_of_stock],
+          [Store, "Vendeurs", summary.sellers],
+        ].map(([Icon, label, value]) => (
+          <article key={label}><Icon /><span><small>{label}</small><b>{Number(value || 0).toLocaleString("fr-HT")}</b></span></article>
+        ))}
       </section>
-      <section className="admin-panel admin-payout-batches">
-        <header><div><Wallet /><span><b>Lots hebdomadaires vendeurs</b><small>Préparés le dimanche selon les ventes finalisées</small></span></div></header>
-        <div>
-          {payoutBatches.map((batch) => (
-            <button onClick={() => openBatch(batch)} key={batch.id}>
-              <span><small>Semaine</small><b>{shortDate(batch.period_start)} au {shortDate(batch.period_end)}</b></span>
-              <span><small>Vendeurs</small><b>{batch.seller_count}</b></span>
-              <span><small>Montant</small><b>{money(batch.total_amount)}</b></span>
-              <Status value={batch.status} />
-              <ArrowRight />
-            </button>
-          ))}
-          {!payoutBatches.length && <div className="admin-empty">Aucun lot hebdomadaire prepare.</div>}
-        </div>
+      <section className="admin-product-filters">
+        <label className="admin-search">
+          <Search />
+          <input value={query} onChange={resetPage(setQuery)} placeholder="Produit, boutique, catégorie, ville ou département" />
+        </label>
+        <select value={statusFilter} onChange={resetPage(setStatusFilter)}>
+          <option value="all">Tous les statuts</option>
+          <option value="active">Actifs</option>
+          <option value="inactive">Inactifs</option>
+          <option value="draft">Brouillons</option>
+        </select>
+        <select value={stockFilter} onChange={resetPage(setStockFilter)}>
+          <option value="all">Tous les stocks</option>
+          <option value="available">Disponible</option>
+          <option value="low">Stock faible</option>
+          <option value="out">Épuisé</option>
+        </select>
+        <select value={categoryFilter} onChange={resetPage(setCategoryFilter)}>
+          <option value="all">Toutes catégories</option>
+          {categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}
+        </select>
+        <select value={departmentFilter} onChange={resetPage(setDepartmentFilter)}>
+          <option value="all">Tous départements</option>
+          {departments.map((department) => <option value={department} key={department}>{department}</option>)}
+        </select>
+        <select value={promotionFilter} onChange={resetPage(setPromotionFilter)}>
+          <option value="all">Tous les produits</option>
+          <option value="active">En promotion</option>
+        </select>
       </section>
-      {selectedBatch && (
-        <section className="admin-batch-detail">
-          <header><div><Wallet /><span><small>Paiement du dimanche</small><h2>{shortDate(selectedBatch.batch.period_start)} au {shortDate(selectedBatch.batch.period_end)}</h2></span></div><button onClick={() => setSelectedBatch(null)}>×</button></header>
-          <div>{selectedBatch.items.map((item) => <article key={item.id}><span><b>{item.seller_name}</b><small>{item.email} · {item.sale_count} vente(s)</small></span><strong>{money(item.amount)}</strong><Status value={item.status} /></article>)}</div>
-          {selectedBatch.batch.status !== "paid" && <button className="admin-download-report" onClick={markPaid}><CheckCircle2 /> Confirmer que tous les vendeurs ont été payés</button>}
-        </section>
+      <div className="admin-products-toolbar">
+        <span>{pagination.total} produit(s) correspondant aux filtres</span>
+        {selectedIds.length > 0 && (
+          <div>
+            <b>{selectedIds.length} sélectionné(s)</b>
+            <button disabled={busy} onClick={() => updateSelected("active")}>Activer</button>
+            <button className="danger" disabled={busy} onClick={() => updateSelected("inactive")}>Désactiver</button>
+          </div>
+        )}
+      </div>
+      <section className="admin-product-grid">
+        {products.map((product) => {
+          const promoted = promotionIsActive(product);
+          return (
+            <article className={selectedIds.includes(product.id) ? "selected" : ""} key={product.id}>
+              <label className="admin-product-select">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(product.id)}
+                  onChange={() => toggleSelected(product.id)}
+                />
+                <span />
+              </label>
+              <div className="admin-product-image">
+                {product.image_url ? <img src={assetUrl(product.image_url)} alt={product.name} /> : <ImageIcon />}
+                {promoted && <b><TrendingUp /> Promotion</b>}
+              </div>
+              <header><div><small>{product.category_name}</small><h3>{product.name}</h3><p>{product.seller_name}</p></div><Status value={product.status} /></header>
+              <p className="admin-product-location"><MapPin /> {product.city || "Haïti"}, {product.department || "Non précisé"}</p>
+              <div className="admin-product-numbers">
+                <span><small>Prix</small><b>{money(promoted ? product.promotional_price : product.price)}</b></span>
+                <span className={Number(product.stock) <= 5 ? "warning" : ""}><small>Stock</small><b>{product.stock}</b></span>
+              </div>
+              <footer>
+                <button className="secondary" onClick={() => openProduct(product)}><Eye /> Aperçu</button>
+                <Link to={`/products/${product.id}`} target="_blank"><ExternalLink /> Public</Link>
+                <button disabled={busy} onClick={() => updateStatus(product)}>{product.status === "active" ? "Désactiver" : "Activer"}</button>
+              </footer>
+            </article>
+          );
+        })}
+      </section>
+      {!products.length && <div className="admin-empty">Aucun produit ne correspond aux filtres.</div>}
+      {pagination.pages > 1 && (
+        <nav className="admin-pagination" aria-label="Pagination produits">
+          <button
+            disabled={pagination.page <= 1}
+            onClick={() => setPagination((current) => ({ ...current, page: current.page - 1 }))}
+          >
+            <ChevronLeft /> Précédent
+          </button>
+          <span>Page {pagination.page} sur {pagination.pages}</span>
+          <button
+            disabled={pagination.page >= pagination.pages}
+            onClick={() => setPagination((current) => ({ ...current, page: current.page + 1 }))}
+          >
+            Suivant <ChevronRight />
+          </button>
+        </nav>
+      )}
+      {selectedProduct && (
+        <aside className="admin-detail-drawer" aria-label="Aperçu produit">
+          <header>
+            <div>
+              <span className="admin-seller-logo"><Package /></span>
+              <div><small>Contrôle catalogue</small><h2>{selectedProduct.product.name}</h2></div>
+            </div>
+            <button onClick={() => setSelectedProduct(null)} aria-label="Fermer"><X /></button>
+          </header>
+          {detailLoading ? (
+            <div className="admin-empty">Chargement du produit...</div>
+          ) : (
+            <div className="admin-detail-content">
+              <div className="admin-product-preview-image">
+                {selectedProduct.product.image_url ? (
+                  <img src={assetUrl(selectedProduct.product.image_url)} alt="" />
+                ) : <ImageIcon />}
+              </div>
+              <section className="admin-detail-identity">
+                <Status value={selectedProduct.product.status} />
+                <p>{selectedProduct.product.description || "Aucune description fournie."}</p>
+                <span><b>Boutique</b>{selectedProduct.product.seller_name}</span>
+                <span><b>Catégorie</b>{selectedProduct.product.category_name}</span>
+                <span><b>Localisation</b>{selectedProduct.product.city || "Haïti"}, {selectedProduct.product.department || "Non précisé"}</span>
+                <span><b>Prix</b>{money(selectedProduct.product.price)}</span>
+                <span><b>Stock</b>{selectedProduct.product.stock}</span>
+              </section>
+              {selectedProduct.images.length > 1 && (
+                <section>
+                  <h3>Galerie</h3>
+                  <div className="admin-product-preview-gallery">
+                    {selectedProduct.images.map((image) => (
+                      <img src={assetUrl(image.image_url)} alt="" key={image.id} />
+                    ))}
+                  </div>
+                </section>
+              )}
+              <section>
+                <h3>Historique de modération</h3>
+                <div className="admin-detail-history">
+                  {selectedProduct.auditHistory.map((item) => (
+                    <p key={item.id}><b>{item.action}</b><small>{item.actor_name || "Système"} · {shortDate(item.created_at)}</small></p>
+                  ))}
+                  {!selectedProduct.auditHistory.length && <small>Aucune action enregistrée.</small>}
+                </div>
+              </section>
+              <footer>
+                <Link to={`/products/${selectedProduct.product.id}`} target="_blank"><ExternalLink /> Voir la fiche publique</Link>
+                <button className={selectedProduct.product.status === "active" ? "danger" : ""} onClick={() => updateStatus(selectedProduct.product)}>
+                  {selectedProduct.product.status === "active" ? "Désactiver" : "Activer"}
+                </button>
+              </footer>
+            </div>
+          )}
+        </aside>
       )}
     </div>
   );
@@ -1138,10 +1584,20 @@ export function AdminProfileContent({
   updateUser,
   onLogout,
   accountLabel = "Administrateur",
+  settingsPath = "/admin/settings",
 }) {
   const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "" });
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [creatingManager, setCreatingManager] = useState(false);
+  const [managerForm, setManagerForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    password: "",
+    role: "manager",
+  });
+  const canCreateManager = accountLabel.toLowerCase() === "administrateur";
 
   const save = async (event) => {
     event.preventDefault();
@@ -1161,6 +1617,27 @@ export function AdminProfileContent({
     }
   };
 
+  const createManager = async (event) => {
+    event.preventDefault();
+    setCreatingManager(true);
+    setMessage("");
+    try {
+      const { data } = await api.post("/admin/staff", managerForm);
+      setMessage(data.message);
+      setManagerForm({
+        name: "",
+        email: "",
+        phone: "",
+        password: "",
+        role: "manager",
+      });
+    } catch (error) {
+      setMessage(error.response?.data?.message || "Impossible de créer ce manager.");
+    } finally {
+      setCreatingManager(false);
+    }
+  };
+
   return (
     <div className="admin-flow">
       <AdminHeading
@@ -1174,7 +1651,7 @@ export function AdminProfileContent({
           <div><small>{accountLabel} VinnHT</small><h2>{user.name}</h2><p>{user.email}</p></div>
         </aside>
         <form className="admin-profile-form" onSubmit={save}>
-          <header><Settings /><span><small>Informations personnelles</small><h2>Profil administrateur</h2></span></header>
+          <header><Settings /><span><small>Informations personnelles</small><h2>Profil {accountLabel.toLowerCase()}</h2></span></header>
           <label>Nom complet<input required minLength="2" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
           <label>Adresse email<input value={user.email || ""} disabled /></label>
           <label className="full">Téléphone<input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
@@ -1182,7 +1659,65 @@ export function AdminProfileContent({
           <button className="admin-download-report full" disabled={saving}><CheckCircle2 /> {saving ? "Enregistrement..." : "Enregistrer le profil"}</button>
         </form>
       </section>
-      <ProfileLogoutCard onLogout={onLogout} />
+      {canCreateManager && (
+        <form className="admin-manager-profile-create" onSubmit={createManager}>
+          <header>
+            <span><UserPlus /></span>
+            <div>
+              <small>Équipe VinnHT</small>
+              <h2>Créer un profil manager</h2>
+              <p>Le manager pourra traiter les demandes vendeurs, suivre les boutiques et coordonner les livraisons.</p>
+            </div>
+          </header>
+          <label>
+            Nom complet
+            <input
+              required
+              minLength="2"
+              value={managerForm.name}
+              onChange={(event) => setManagerForm({ ...managerForm, name: event.target.value })}
+            />
+          </label>
+          <label>
+            Adresse email
+            <input
+              required
+              type="email"
+              value={managerForm.email}
+              onChange={(event) => setManagerForm({ ...managerForm, email: event.target.value })}
+            />
+          </label>
+          <label>
+            Téléphone
+            <input
+              value={managerForm.phone}
+              onChange={(event) => setManagerForm({ ...managerForm, phone: event.target.value })}
+            />
+          </label>
+          <label>
+            Mot de passe initial
+            <input
+              required
+              type="password"
+              minLength="10"
+              value={managerForm.password}
+              onChange={(event) => setManagerForm({ ...managerForm, password: event.target.value })}
+            />
+          </label>
+          <div className="admin-manager-permissions">
+            <ShieldCheck />
+            <span>
+              <b>Rôle manager sécurisé</b>
+              <small>Ce compte ne recevra pas les droits administrateur.</small>
+            </span>
+          </div>
+          <button disabled={creatingManager}>
+            <UserPlus />
+            {creatingManager ? "Création du profil..." : "Créer le profil manager"}
+          </button>
+        </form>
+      )}
+      <MobileProfileActions onLogout={onLogout} settingsPath={settingsPath} />
     </div>
   );
 }
@@ -1216,11 +1751,18 @@ export function AdminSettingsContent({ api, role = "admin" }) {
   const settings =
     role === "manager"
       ? [
-          [BarChart3, "Performance des ventes", "Recevoir les alertes sur l evolution des ventes.", "weeklyReport"],
-          [Truck, "Suivi des livraisons", "Etre alerte des retards et echecs de livraison.", "securityAlerts"],
-          [Store, "Performance vendeurs", "Suivre les boutiques necessitant une attention.", "sellerRequests"],
-          [Package, "Activite des commandes", "Recevoir les resumes operationnels utiles.", "paymentAlerts"],
+          [BarChart3, "Activité marketplace", "Recevoir les résumés sur l’évolution des commandes.", "weeklyReport"],
+          [Truck, "Suivi des livraisons", "Être alerté des retards et échecs de livraison.", "securityAlerts"],
+          [Store, "Suivi des vendeurs", "Recevoir les nouvelles demandes et alertes boutiques.", "sellerRequests"],
+          [Package, "Commandes à surveiller", "Recevoir les résumés opérationnels utiles.", "paymentAlerts"],
         ]
+      : role === "delivery"
+        ? [
+            [Truck, "Nouvelles missions", "Recevoir une alerte lorsqu’une commande vous est assignée.", "sellerRequests"],
+            [Package, "Mises à jour livraison", "Être informé des changements importants d’une mission.", "paymentAlerts"],
+            [Bell, "Rappels de livraison", "Recevoir les rappels utiles avant une récupération.", "weeklyReport"],
+            [ShieldCheck, "Alertes de sécurité", "Être informé des actions sensibles liées à votre compte.", "securityAlerts"],
+          ]
       : role === "superviseur"
         ? [
             [Store, "Demandes vendeurs", "Etre alerte a chaque nouvelle candidature.", "sellerRequests"],
@@ -1237,7 +1779,15 @@ export function AdminSettingsContent({ api, role = "admin" }) {
 
   return (
     <div className="admin-flow">
-      <AdminHeading eyebrow="Configuration" title={`Paramètres ${role}`} text="Choisissez les alertes importantes pour superviser VinnHT efficacement." />
+      <AdminHeading
+        eyebrow="Configuration"
+        title={`Paramètres ${role}`}
+        text={
+          role === "delivery"
+            ? "Choisissez les notifications utiles pour vos missions de livraison."
+            : "Choisissez les alertes importantes pour superviser VinnHT efficacement."
+        }
+      />
       <section className="admin-settings-grid">
         {settings.map(([Icon, title, text, key]) => (
           <article key={key}>
@@ -1247,7 +1797,13 @@ export function AdminSettingsContent({ api, role = "admin" }) {
           </article>
         ))}
       </section>
-      <section className="admin-settings-note"><Bell /><div><h2>Centre de notifications</h2><p>Ces préférences contrôlent les alertes visibles dans votre espace administrateur.</p></div></section>
+      <section className="admin-settings-note">
+        <Bell />
+        <div>
+          <h2>Centre de notifications</h2>
+          <p>Ces préférences contrôlent les alertes visibles dans votre espace VinnHT.</p>
+        </div>
+      </section>
       {message && <div className="admin-message">{message}</div>}
     </div>
   );
@@ -1256,50 +1812,186 @@ export function AdminSettingsContent({ api, role = "admin" }) {
 export function AdminContactRequestsContent({ api }) {
   const [requests, setRequests] = useState([]);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [thread, setThread] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
 
   const load = () =>
-    api.get("/admin/contact-requests").then(({ data }) => setRequests(data));
+    api
+      .get("/admin/contact-requests")
+      .then(({ data }) => setRequests(data))
+      .catch((requestError) =>
+        setError(requestError.response?.data?.message || "Impossible de charger le support.")
+      );
 
   useEffect(() => {
     load();
   }, []);
 
+  const openRequest = async (request) => {
+    setSelected(request);
+    setError("");
+    try {
+      const { data } = await api.get(`/support/requests/${request.id}/messages`);
+      setThread(data.messages || []);
+      setRequests((items) =>
+        items.map((item) => (item.id === request.id ? { ...item, unread_count: 0 } : item))
+      );
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible d’ouvrir cette discussion.");
+    }
+  };
+
   const updateStatus = async (id, status) => {
     const { data } = await api.patch(`/admin/contact-requests/${id}`, { status });
     setMessage(data.message);
+    setSelected((current) => current?.id === id ? { ...current, status } : current);
     load();
   };
+
+  const sendReply = async (event) => {
+    event.preventDefault();
+    if (!draft.trim() || !selected) return;
+    setSending(true);
+    setError("");
+    try {
+      const { data } = await api.post(`/support/requests/${selected.id}/messages`, {
+        body: draft.trim(),
+      });
+      setMessage(data.message);
+      setDraft("");
+      await Promise.all([openRequest({ ...selected, status: "in_progress" }), load()]);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible d’envoyer cette réponse.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const visible = requests.filter((request) => {
+    const matchesStatus = statusFilter === "all" || request.status === statusFilter;
+    const matchesQuery = `${request.reference} ${request.name} ${request.email} ${request.subject}`
+      .toLowerCase()
+      .includes(query.toLowerCase());
+    return matchesStatus && matchesQuery;
+  });
+  const counts = requests.reduce(
+    (summary, request) => ({
+      ...summary,
+      [request.status]: Number(summary[request.status] || 0) + 1,
+    }),
+    {},
+  );
 
   return (
     <div className="admin-flow">
       <AdminHeading
         eyebrow="Centre de support"
-        title="Demandes Contact"
-        text="Consultez et traitez les messages envoyés depuis la page Contact."
-      />
+        title="Support client"
+        text="Répondez aux clients, suivez les dossiers et conservez l’historique de chaque échange."
+      >
+        <button onClick={load}><RefreshCw /> Actualiser</button>
+      </AdminHeading>
       {message && <div className="admin-message">{message}</div>}
-      <section className="admin-user-grid">
-        {requests.map((request) => (
-          <article key={request.id}>
-            <header>
-              <span><MessageCircle /></span>
-              <div>
-                <b>{request.subject}</b>
-                <small>{request.name} · {request.email}</small>
-                <small>{request.reference} ? {request.category}{request.order_number ? ` ? ${request.order_number}` : ""}</small>
-              </div>
-              <Status value={request.status} />
-            </header>
-            <p>{request.message}</p>
-            <small>{shortDate(request.created_at)}</small>
-            <div className="admin-user-actions">
-              <button onClick={() => updateStatus(request.id, "in_progress")}>En traitement</button>
-              <button onClick={() => updateStatus(request.id, "resolved")}>Résolue</button>
-            </div>
-          </article>
+      {error && <div className="admin-error">{error}</div>}
+      <section className="admin-category-summary">
+        {[
+          [MessageCircle, "Nouveaux", counts.new],
+          [Clock3, "En traitement", counts.in_progress],
+          [CheckCircle2, "Résolus", counts.resolved],
+          [Bell, "Réponses non lues", requests.reduce((total, item) => total + Number(item.unread_count || 0), 0)],
+        ].map(([Icon, label, value]) => (
+          <article key={label}><Icon /><span><small>{label}</small><b>{Number(value || 0)}</b></span></article>
         ))}
-        {!requests.length && <div className="admin-message">Aucune demande Contact actuellement.</div>}
       </section>
+      <section className="admin-filter-bar">
+        <label className="admin-search">
+          <Search />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Référence, client, email ou sujet" />
+        </label>
+        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <option value="all">Tous les statuts</option>
+          <option value="new">Nouveaux</option>
+          <option value="in_progress">En traitement</option>
+          <option value="resolved">Résolus</option>
+        </select>
+      </section>
+      <div className="admin-support-layout">
+        <aside className="admin-support-list">
+          {visible.map((request) => (
+            <button
+              className={`${selected?.id === request.id ? "active" : ""} ${request.unread_count ? "unread" : ""}`}
+              onClick={() => openRequest(request)}
+              key={request.id}
+            >
+              <span><MessageCircle /></span>
+              <p>
+                <b>{request.subject}</b>
+                <small>{request.name} · {request.reference}</small>
+                <small>{request.last_reply || request.message}</small>
+              </p>
+              <div>
+                <Status value={request.status} />
+                {request.unread_count > 0 && <i>{request.unread_count}</i>}
+              </div>
+            </button>
+          ))}
+          {!visible.length && <div className="admin-empty">Aucune demande ne correspond aux filtres.</div>}
+        </aside>
+        <section className="admin-support-room">
+          {selected ? (
+            <>
+              <header>
+                <div>
+                  <span><MessageCircle /></span>
+                  <p>
+                    <small>{selected.reference} · {selected.category}</small>
+                    <b>{selected.subject}</b>
+                    <small>{selected.name} · {selected.email}</small>
+                  </p>
+                </div>
+                <Status value={selected.status} />
+              </header>
+              <div className="admin-support-history">
+                {thread.map((item) => (
+                  <article className={item.sender_role === "admin" ? "admin" : "client"} key={item.id}>
+                    <small>{item.sender_name || (item.sender_role === "admin" ? "Support VinnHT" : selected.name)}</small>
+                    <p>{item.body}</p>
+                    <time>{new Date(item.created_at).toLocaleString("fr-HT")}</time>
+                  </article>
+                ))}
+              </div>
+              <form onSubmit={sendReply}>
+                <textarea
+                  required
+                  rows="3"
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  placeholder={selected.user_id ? "Écrire une réponse au client..." : "Cette demande publique ne peut pas recevoir de réponse dans VinnHT."}
+                  disabled={!selected.user_id}
+                />
+                <div>
+                  <button type="button" onClick={() => updateStatus(selected.id, "in_progress")}>
+                    <Clock3 /> En traitement
+                  </button>
+                  <button type="button" className="success" onClick={() => updateStatus(selected.id, "resolved")}>
+                    <CheckCircle2 /> Résoudre
+                  </button>
+                  <button className="send" disabled={sending || !selected.user_id}>
+                    <Send /> {sending ? "Envoi..." : "Répondre"}
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : (
+            <div className="admin-empty">Sélectionnez une demande pour ouvrir la discussion.</div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -1311,13 +2003,6 @@ const resourceConfig = {
     text: "Supervisez le catalogue et retirez rapidement un produit problématique.",
     columns: ["Produit", "Vendeur", "Catégorie", "Stock", "Statut"],
     row: (item) => [item.name, item.seller_name, item.category_name, item.stock, <Status value={item.status} />],
-  },
-  payments: {
-    endpoint: "/admin/payments",
-    title: "Paiements",
-    text: "Contrôlez les paiements enregistrés par la plateforme.",
-    columns: ["Commande", "Client", "Montant", "Fournisseur", "Statut"],
-    row: (item) => [item.order_number, item.client_name, money(item.amount), item.provider, <Status value={item.status} />],
   },
 };
 
@@ -1368,7 +2053,20 @@ export function AdminResourceContent({ api, resource }) {
 
 export function ReportsContent({ api, role }) {
   const [data, setData] = useState(null);
-  useEffect(() => { api.get("/admin/reports").then(({ data: response }) => setData(response)); }, []);
+  const [error, setError] = useState("");
+  const [range, setRange] = useState("30d");
+  useEffect(() => {
+    api
+      .get("/admin/reports", { params: { range } })
+      .then(({ data: response }) => setData(response || {}))
+      .catch((requestError) => {
+        setData({});
+        setError(
+          requestError.response?.data?.message ||
+            "Impossible de charger les rapports pour le moment."
+        );
+      });
+  }, [api, range]);
   const stats = data?.stats || {};
   const cards = [
     [Users, "Vendeurs", stats.sellers],
@@ -1380,7 +2078,14 @@ export function ReportsContent({ api, role }) {
   ];
   return (
     <div className="admin-flow">
-      <AdminHeading eyebrow={`Rapports ${role}`} title="Performance marketplace" text="Indicateurs calculés directement depuis les données VinnHT." />
+      <AdminHeading eyebrow={`Rapports ${role}`} title="Performance marketplace" text="Indicateurs opérationnels calculés directement depuis les données VinnHT.">
+        <div className="admin-chart-controls">
+          {[["7d", "7 jours"], ["30d", "30 jours"], ["90d", "90 jours"]].map(([value, label]) => (
+            <button className={range === value ? "active" : ""} onClick={() => setRange(value)} key={value}>{label}</button>
+          ))}
+        </div>
+      </AdminHeading>
+      {error && <div className="admin-error">{error}</div>}
       <section className="admin-metric-grid">
         {cards.map(([Icon, label, value, currency]) => (
           <article key={label}>
@@ -1394,35 +2099,89 @@ export function ReportsContent({ api, role }) {
         {role === "manager" && (
           <section className="admin-panel">
             <header><div><Store /><span><b>Activité des vendeurs</b><small>Indicateurs opérationnels sans données financières</small></span></div></header>
-            <div className="admin-table-wrap"><table><thead><tr><th>Boutique</th><th>Produits actifs</th><th>Commandes</th><th>Ventes terminées</th></tr></thead><tbody>{(data.sellerActivity || []).map((seller) => <tr key={seller.seller_id}><td>{seller.seller_name}</td><td>{seller.active_products}</td><td>{seller.orders}</td><td>{seller.completed_sales}</td></tr>)}</tbody></table></div>
+            <div className="admin-table-wrap"><table><thead><tr><th>Boutique</th><th>Produits actifs</th><th>Commandes</th><th>Ventes terminées</th></tr></thead><tbody>{(data?.sellerActivity || []).map((seller) => <tr key={seller.seller_id}><td>{seller.seller_name}</td><td>{seller.active_products}</td><td>{seller.orders}</td><td>{seller.completed_sales}</td></tr>)}</tbody></table></div>
           </section>
         )}
         <section className="admin-panel admin-health-list">
           <header><div><Truck /><span><b>Santé des livraisons</b><small>Répartition actuelle</small></span></div></header>
-          <div>{(data.deliveryHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div>
+          <div>{(data?.deliveryHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div>
         </section>
       </div>
+      <section className="admin-panel manager-order-trend">
+        <header><div><BarChart3 /><span><b>Commandes sur la période</b><small>Évolution quotidienne sans données financières</small></span></div></header>
+        <div>
+          {(data?.orderTrend || []).map((item) => (
+            <article key={item.activity_date}>
+              <span style={{ height: `${Math.max(8, Number(item.orders || 0) * 12)}px` }} />
+              <small>{new Date(item.activity_date).toLocaleDateString("fr-HT", { day: "2-digit", month: "short" })}</small>
+              <b>{item.orders}</b>
+            </article>
+          ))}
+          {!data?.orderTrend?.length && <div className="admin-empty">Aucune commande sur cette période.</div>}
+        </div>
+      </section>
     </div>
   );
 }
 
 export function OperationsDashboardContent({ api, role, user }) {
   const [data, setData] = useState(null);
-  useEffect(() => { api.get("/admin/reports").then(({ data: response }) => setData(response)); }, []);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api
+      .get("/admin/reports")
+      .then(({ data: response }) => setData(response || {}))
+      .catch((requestError) => {
+        setData({});
+        setError(
+          requestError.response?.data?.message ||
+            "Impossible de charger les données du manager pour le moment."
+        );
+      });
+  }, [api]);
   const stats = data?.stats || {};
-  const supervisor = role === "supervisor";
-  const cards = supervisor
-     ? [[Store, "Demandes en attente", stats.pending_requests], [Users, "Vendeurs", stats.sellers], [Boxes, "Produits actifs", stats.products], [Truck, "Livraisons actives", stats.active_deliveries]]
-    : [[Store, "Vendeurs", stats.sellers], [Boxes, "Produits actifs", stats.products], [Package, "Commandes", stats.orders], [Truck, "Livraisons actives", stats.active_deliveries]];
+  const cards = [
+    [Store, "Demandes vendeurs", stats.pending_requests],
+    [Users, "Vendeurs", stats.sellers],
+    [Package, "Commandes", stats.orders],
+    [Truck, "Livraisons actives", stats.active_deliveries],
+  ];
   return (
     <div className="admin-flow">
-      <AdminHeading eyebrow={supervisor ? "Controle operationnel" : "Pilotage strategique"} title={`Bonjour, ${user.name || role}`} text={supervisor ? "Suivez les demandes vendeurs et la sante quotidienne du reseau." : "Suivez l?activite des vendeurs, commandes et livraisons de VinnHT."}>
-        <Link to={supervisor ? "/supervisor/seller-requests" : "/manager/sales-reports"}>{supervisor ? "Examiner les demandes" : "Ouvrir les rapports"} <ArrowRight /></Link>
+      <AdminHeading eyebrow="Pilotage strategique" title={`Bonjour, ${user?.name || role}`} text="Suivez l’activité des vendeurs, demandes, commandes et livraisons de VinnHT.">
+        <Link to="/manager/seller-requests">Examiner les demandes <ArrowRight /></Link>
       </AdminHeading>
+      {error && <div className="admin-error">{error}</div>}
       <section className="admin-metric-grid">{cards.map(([Icon, label, value, currency]) => <article key={label}><span><Icon /></span><small>{label}</small><strong>{currency ? money(value) : Number(value || 0).toLocaleString("fr-HT")}</strong><p>Donnée actuelle</p></article>)}</section>
       <div className="admin-dashboard-columns">
-        <section className="admin-panel admin-health-list"><header><div><Store /><span><b>Demandes vendeurs</b><small>État des candidatures</small></span></div></header><div>{(data.requestHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div></section>
-        <section className="admin-panel admin-health-list"><header><div><Truck /><span><b>Livraisons</b><small>Suivi opérationnel</small></span></div></header><div>{(data.deliveryHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div></section>
+        <section className="admin-panel admin-health-list"><header><div><Store /><span><b>Demandes vendeurs</b><small>État des candidatures</small></span></div></header><div>{(data?.requestHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div></section>
+        <section className="admin-panel admin-health-list"><header><div><Truck /><span><b>Livraisons</b><small>Suivi opérationnel</small></span></div></header><div>{(data?.deliveryHealth || []).map((item) => <p key={item.status}><Status value={item.status} /><b>{item.total}</b></p>)}</div></section>
+      </div>
+      <div className="admin-dashboard-columns">
+        <section className="admin-panel manager-priority-list">
+          <header><div><AlertTriangle /><span><b>Commandes bloquées</b><small>Sans évolution depuis plus de 24 heures</small></span></div></header>
+          <div>
+            {(data?.blockedOrders || []).map((order) => (
+              <article key={order.id}>
+                <span><Package /></span>
+                <p><b>{order.order_number}</b><small>{order.status} · {order.stalled_hours} h sans évolution</small></p>
+              </article>
+            ))}
+            {!data?.blockedOrders?.length && <div className="admin-empty">Aucune commande bloquée.</div>}
+          </div>
+        </section>
+        <section className="admin-panel manager-priority-list">
+          <header><div><CheckCircle2 /><span><b>Vendeurs récemment approuvés</b><small>Dernières décisions du réseau</small></span></div></header>
+          <div>
+            {(data?.recentApproved || []).map((request) => (
+              <article key={request.id}>
+                <span><Store /></span>
+                <p><b>{request.business_name}</b><small>{request.owner_name} · {shortDate(request.reviewed_at)}</small></p>
+              </article>
+            ))}
+            {!data?.recentApproved?.length && <div className="admin-empty">Aucune approbation récente.</div>}
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -1436,6 +2195,7 @@ export function StaffProfileContent({ api, user, updateUser, onLogout, role }) {
       updateUser={updateUser}
       onLogout={onLogout}
       accountLabel={role}
+      settingsPath={`/${role.toLowerCase()}/settings`}
     />
   );
 }
@@ -1447,17 +2207,39 @@ export function StaffSettingsContent({ api, role }) {
 export function SellersOverviewContent({ api }) {
   const [shops, setShops] = useState([]);
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
+  const [activity, setActivity] = useState("all");
   useEffect(() => { api.get("/shops").then(({ data }) => setShops(data)); }, []);
-  const visible = shops.filter((shop) => JSON.stringify(shop).toLowerCase().includes(query.toLowerCase()));
+  const categories = [...new Set(shops.map((shop) => shop.category).filter(Boolean))].sort();
+  const visible = shops.filter((shop) => {
+    const searchMatch = JSON.stringify(shop).toLowerCase().includes(query.toLowerCase());
+    const categoryMatch = category === "all" || shop.category === category;
+    const activityMatch =
+      activity === "all" ||
+      (activity === "with_products" && Number(shop.product_count) > 0) ||
+      (activity === "without_products" && Number(shop.product_count) === 0);
+    return searchMatch && categoryMatch && activityMatch;
+  });
   return (
     <div className="admin-flow">
       <AdminHeading eyebrow="Réseau vendeurs" title="Boutiques actives" text="Analysez les boutiques, leur catalogue et leur réputation." />
-      <label className="admin-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher une boutique" /></label>
+      <section className="manager-seller-filters">
+        <label className="admin-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Boutique, catégorie ou propriétaire" /></label>
+        <select value={category} onChange={(event) => setCategory(event.target.value)}>
+          <option value="all">Toutes catégories</option>
+          {categories.map((item) => <option value={item} key={item}>{item}</option>)}
+        </select>
+        <select value={activity} onChange={(event) => setActivity(event.target.value)}>
+          <option value="all">Tous catalogues</option>
+          <option value="with_products">Avec produits</option>
+          <option value="without_products">Sans produit</option>
+        </select>
+      </section>
       <section className="admin-user-grid">
         {visible.map((shop) => (
           <article key={shop.seller_id}>
             <header>
-              <span><Boxes /></span>
+              <span>{shop.shop_logo_url ? <img src={assetUrl(shop.shop_logo_url)} alt="" /> : <Boxes />}</span>
               <div><b>{shop.shop_name}</b><small>{shop.category || "Boutique VinnHT"}</small></div>
               <Status value="active" />
             </header>
@@ -1466,9 +2248,13 @@ export function SellersOverviewContent({ api }) {
               <span><b>{Number(shop.rating || 0).toFixed(1)}</b><small>note moyenne</small></span>
               <span><b>{shop.review_count}</b><small>avis vérifiés</small></span>
             </div>
+            <footer>
+              <Link to={`/shops/${shop.seller_id}`} target="_blank"><Eye /> Consulter la boutique</Link>
+            </footer>
           </article>
         ))}
       </section>
+      {!visible.length && <div className="admin-empty">Aucune boutique ne correspond aux filtres.</div>}
     </div>
   );
 }

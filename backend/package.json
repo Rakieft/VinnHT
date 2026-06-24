@@ -12,10 +12,12 @@
     "db:reset-test-data": "node src/scripts/resetTestData.js",
     "db:backup": "node src/scripts/backup.js",
     "db:restore": "node src/scripts/restore.js",
+    "smoke:marketplace": "node src/scripts/smokeMarketplace.js",
     "check": "node --check src/server.js",
     "test": "node --test src/tests/security.test.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
     "bcryptjs": "^3.0.2",
     "cloudinary": "^2.10.0",
     "cors": "^2.8.5",
@@ -23,7 +25,7 @@
     "express": "^5.1.0",
     "express-validator": "^7.2.1",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^2.0.1",
+    "multer": "^2.2.0",
     "mysql2": "^3.14.1",
     "pdfkit": "^0.19.1"
   },

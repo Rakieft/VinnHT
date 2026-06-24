@@ -81,6 +81,22 @@ const addLocalBindings = (source, bindings) => {
       if (/^[A-Z][A-Za-z0-9_]*$/.test(name)) bindings.add(name);
     }
   }
+
+  const arrayDestructuringRegex = /\b(?:const|let|var)\s*\[([^\]]+)\]\s*=/g;
+  let destructuringMatch;
+  while ((destructuringMatch = arrayDestructuringRegex.exec(source))) {
+    for (const part of destructuringMatch[1].split(",")) {
+      const name = part.split("=")[0].trim();
+      if (/^[A-Z][A-Za-z0-9_]*$/.test(name)) bindings.add(name);
+    }
+  }
+
+  const firstArrayBindingRegex =
+    /\b(?:const|let|var)\s*\[\s*([A-Z][A-Za-z0-9_]*)\b/g;
+  let firstArrayBinding;
+  while ((firstArrayBinding = firstArrayBindingRegex.exec(source))) {
+    bindings.add(firstArrayBinding[1]);
+  }
 };
 
 const findJsxTags = (source) => {

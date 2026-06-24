@@ -12,11 +12,13 @@ import {
   DollarSign,
   Edit3,
   Eye,
+  ExternalLink,
   ImagePlus,
   Package,
   Plus,
   Power,
   Search,
+  Share2,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -30,8 +32,9 @@ import {
   X,
 } from "lucide-react";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
-import ProfileLogoutCard from "./ProfileLogoutCard.jsx";
+import MobileProfileActions from "./MobileProfileActions.jsx";
 import { apiOrigin } from "../config/runtime.js";
+import { shopPublicPath } from "../utils/shopUrl.js";
 
 const imageSource = (url) => (url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url);
 
@@ -1379,11 +1382,13 @@ export function SellerShopContent({ api }) {
   const [positionX, setPositionX] = useState(50);
   const [positionY, setPositionY] = useState(50);
   const [busyLogo, setBusyLogo] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState("");
   const cropImageRef = useRef(null);
 
   useEffect(() => {
     api.get("/seller/shop").then(({ data }) => {
       setShop({
+        sellerId: data.seller_id,
         shopName: data.shop_name || "",
         category: data.category || "",
         description: data.description || "",
@@ -1477,6 +1482,11 @@ export function SellerShopContent({ api }) {
     if (logo) data.append("shopLogo", logo);
     const { data: response } = await api.patch("/seller/shop", data);
     setMessage(response.message);
+    setShop((currentShop) => ({
+      ...currentShop,
+      sellerId: response.shop.seller_id || currentShop.sellerId,
+      shopLogoUrl: response.shop.shop_logo_url || currentShop.shopLogoUrl,
+    }));
     if (response.shop.shop_logo_url) {
       setPreview(imageSource(response.shop.shop_logo_url));
       window.dispatchEvent(
@@ -1488,6 +1498,33 @@ export function SellerShopContent({ api }) {
   };
 
   if (!shop) return <div className="seller-empty-state">Chargement de la boutique...</div>;
+
+  const publicPath = shopPublicPath(shop);
+  const publicUrl = publicPath ? `${window.location.origin}${publicPath}` : "";
+
+  const shareShop = async () => {
+    if (!publicUrl) return;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: shop.shopName || "Boutique VinnHT",
+          text: `Découvrez ${shop.shopName || "ma boutique"} sur VinnHT.`,
+          url: publicUrl,
+        });
+        setShareFeedback("Boutique partagée");
+      } else {
+        await navigator.clipboard.writeText(publicUrl);
+        setShareFeedback("Lien copié");
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        setShareFeedback("Partage indisponible");
+      }
+    }
+
+    window.setTimeout(() => setShareFeedback(""), 2200);
+  };
 
   return (
     <SellerPageHeader
@@ -1526,6 +1563,22 @@ export function SellerShopContent({ api }) {
             <p>{shop.description || "Ajoutez une description pour presenter votre activite."}</p>
             <b className={`flow-status ${shop.status}`}>{shop.status}</b>
           </div>
+          {publicPath && (
+            <section className="seller-shop-public-link">
+              <small>Adresse publique de votre boutique</small>
+              <strong title={publicUrl}>{publicUrl}</strong>
+              <div>
+                <Link to={publicPath} target="_blank" rel="noreferrer">
+                  <ExternalLink />
+                  Voir ma boutique
+                </Link>
+                <button type="button" onClick={shareShop}>
+                  <Share2 />
+                  {shareFeedback || "Partager"}
+                </button>
+              </div>
+            </section>
+          )}
         </aside>
         <form className="seller-shop-form" onSubmit={save}>
           <label>
@@ -1755,7 +1808,7 @@ export function SellerProfileContent({ api, user, updateUser, onLogout }) {
           </button>
         </form>
       </section>
-      <ProfileLogoutCard onLogout={onLogout} />
+      <MobileProfileActions onLogout={onLogout} settingsPath="/seller/settings" />
     </SellerPageHeader>
   );
 }
@@ -1887,12 +1940,48 @@ function SellerFinanceTable({ rows, columns }) {
 export function SupervisorRequestsContent({ api }) {
   const [requests, setRequests] = useState([]);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [category, setCategory] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [categories, setCategories] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
 
-  const load = () => api.get("/admin/seller-requests").then(({ data }) => setRequests(data));
+  const load = () =>
+    api
+      .get("/admin/seller-requests", {
+        params: {
+          q: query.trim() || undefined,
+          status: status === "all" ? undefined : status,
+          category: category === "all" ? undefined : category,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+          page: pagination.page,
+          limit: 12,
+        },
+      })
+      .then(({ data }) => {
+        setRequests(data.items || []);
+        setCategories(data.categories || []);
+        setSummary(data.summary || {});
+        setPagination(data.pagination || { page: 1, pages: 1, total: 0 });
+      })
+      .catch((requestError) =>
+        setError(requestError.response?.data?.message || "Impossible de charger les demandes.")
+      );
 
   useEffect(() => {
-    load();
-  }, []);
+    const timer = window.setTimeout(load, 250);
+    return () => window.clearTimeout(timer);
+  }, [query, status, category, dateFrom, dateTo, pagination.page]);
+
+  const resetPage = (setter) => (event) => {
+    setter(event.target.value);
+    setPagination((current) => ({ ...current, page: 1 }));
+  };
 
   const details = (request) => {
     try {
@@ -1908,6 +1997,37 @@ export function SupervisorRequestsContent({ api }) {
       title="Demandes vendeurs"
       text="Examinez les candidatures et activez les nouvelles boutiques."
     >
+      {message && <div className="flow-success">{message}</div>}
+      {error && <div className="flow-error">{error}</div>}
+      <section className="manager-request-summary">
+        {[
+          [Clock3, "En attente", summary.pending],
+          [CheckCircle2, "Approuvées", summary.approved],
+          [X, "Refusées", summary.rejected],
+          [Store, "Total", Object.values(summary).reduce((total, value) => total + Number(value || 0), 0)],
+        ].map(([Icon, label, value]) => (
+          <article key={label}><Icon /><span><small>{label}</small><b>{Number(value || 0)}</b></span></article>
+        ))}
+      </section>
+      <section className="manager-request-filters">
+        <label className="seller-search-field">
+          <Search />
+          <input value={query} onChange={resetPage(setQuery)} placeholder="Nom, boutique, email, téléphone ou numéro" />
+        </label>
+        <select value={status} onChange={resetPage(setStatus)}>
+          <option value="all">Tous les statuts</option>
+          <option value="pending">En attente</option>
+          <option value="approved">Approuvées</option>
+          <option value="rejected">Refusées</option>
+        </select>
+        <select value={category} onChange={resetPage(setCategory)}>
+          <option value="all">Toutes les catégories</option>
+          {categories.map((item) => <option value={item} key={item}>{item}</option>)}
+        </select>
+        <input type="date" value={dateFrom} onChange={resetPage(setDateFrom)} aria-label="Date de début" />
+        <input type="date" value={dateTo} onChange={resetPage(setDateTo)} aria-label="Date de fin" />
+      </section>
+      <div className="manager-request-count">{pagination.total} demande(s) trouvée(s)</div>
       <div className="seller-request-list">
         {requests.map((request) => (
           <article key={request.id}>
@@ -1924,16 +2044,32 @@ export function SupervisorRequestsContent({ api }) {
               </small>
               <h3>{request.business_name}</h3>
               <p>{details(request).shopDescription || "Aucune description fournie."}</p>
+              <small>{request.main_category} · Soumise le {new Date(request.created_at).toLocaleDateString("fr-HT")}</small>
+              {request.reviewed_at && (
+                <small>Décision : {request.reviewer_name || "Manager VinnHT"} · {new Date(request.reviewed_at).toLocaleDateString("fr-HT")}</small>
+              )}
             </div>
             <b className={`flow-status ${request.status}`}>{request.status}</b>
             <footer>
-              <Link className="request-details-button" to={`/supervisor/seller-requests/${request.id}`}>
+              <Link className="request-details-button" to={`/manager/seller-requests/${request.id}`}>
                 <Eye /> Ouvrir le dossier de verification
               </Link>
             </footer>
           </article>
         ))}
       </div>
+      {!requests.length && <div className="seller-empty-state">Aucune demande ne correspond aux filtres.</div>}
+      {pagination.pages > 1 && (
+        <nav className="manager-pagination">
+          <button disabled={pagination.page <= 1} onClick={() => setPagination((current) => ({ ...current, page: current.page - 1 }))}>
+            Précédent
+          </button>
+          <span>Page {pagination.page} sur {pagination.pages}</span>
+          <button disabled={pagination.page >= pagination.pages} onClick={() => setPagination((current) => ({ ...current, page: current.page + 1 }))}>
+            Suivant
+          </button>
+        </nav>
+      )}
     </SellerPageHeader>
   );
 }
@@ -1986,6 +2122,8 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
   useEffect(() => { load(); }, [requestId]);
 
   const review = async (status) => {
+    const action = status === "approved" ? "approuver" : "refuser";
+    if (!window.confirm(`Confirmer : ${action} la demande de ${request.business_name} ?`)) return;
     setBusy(true);
     try {
       const { data } = await api.patch(`/admin/seller-requests/${requestId}`, {
@@ -2029,7 +2167,7 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
 
   return (
     <div className="seller-request-verification">
-      <Link className="seller-verification-back" to="/supervisor/seller-requests">{"<-"} Retour aux demandes</Link>
+      <Link className="seller-verification-back" to="/manager/seller-requests">{"<-"} Retour aux demandes</Link>
       <header className="seller-verification-hero">
         <div className="seller-verification-identity">
           <span>
@@ -2090,7 +2228,7 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
             <section className="seller-verification-history">
               <small>Derniere decision</small>
               <b>{request.status}</b>
-              <p>{request.reviewer_name || "Superviseur VinnHT"} - {new Date(request.reviewed_at).toLocaleDateString("fr-HT")}</p>
+              <p>{request.reviewer_name || "Manager VinnHT"} - {new Date(request.reviewed_at).toLocaleDateString("fr-HT")}</p>
               {request.rejection_reason && <strong>{request.rejection_reason}</strong>}
             </section>
           )}
@@ -2221,6 +2359,3 @@ function SellerPageHeader({ eyebrow, title, text, children }) {
     </div>
   );
 }
-
-
-

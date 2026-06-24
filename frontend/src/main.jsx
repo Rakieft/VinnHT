@@ -11,3 +11,31 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     </BrowserRouter>
   </React.StrictMode>
 );
+
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js", { scope: "/" }).catch(() => {
+      // L'application reste entièrement utilisable si le navigateur refuse la PWA.
+    });
+  });
+}
+
+if ("serviceWorker" in navigator && import.meta.env.DEV) {
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+    .catch(() => {});
+
+  if ("caches" in window) {
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key.startsWith("vinnht-pwa-"))
+            .map((key) => caches.delete(key)),
+        ),
+      )
+      .catch(() => {});
+  }
+}

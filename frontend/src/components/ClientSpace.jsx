@@ -21,6 +21,7 @@ import {
   MapPin,
   MessageCircle,
   Package,
+  Phone,
   Search,
   Send,
   Settings,
@@ -35,16 +36,22 @@ import {
   Truck,
   UserRound,
   Wallet,
+  X,
 } from "lucide-react";
 import { Autoplay, Pagination } from "swiper/modules";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Link } from "react-router-dom";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
-import ProfileLogoutCard from "./ProfileLogoutCard.jsx";
+import MobileProfileActions from "./MobileProfileActions.jsx";
 import { apiOrigin } from "../config/runtime.js";
 
 const imageSource = (url) =>
   url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url;
+const orderImageSource = (url) => imageSource(url) || "/vinnht-logo.png";
+const useOrderImageFallback = (event) => {
+  event.currentTarget.onerror = null;
+  event.currentTarget.src = "/vinnht-logo.png";
+};
 const clientProductPrice = (product) => {
   const activeOffer =
     product.is_featured &&
@@ -594,6 +601,7 @@ export function ClientOrdersContent({
   loading = false,
   selectedOrder,
   onSelect,
+  onCloseDetails,
   onSubmitPaymentProof,
   proofProcessing = false,
   proofError = "",
@@ -653,7 +661,11 @@ export function ClientOrdersContent({
         {loading && <div className="client-api-notice">Chargement de vos commandes...</div>}
         {visible.map((order) => (
           <motion.article className="client-order-card" whileHover={{ y: -4 }} key={order.id}>
-            <img src={order.image || products[0].image_url} alt="" />
+            <img
+              src={orderImageSource(order.image || products[0]?.image_url)}
+              alt={`Produit de la commande ${order.displayId}`}
+              onError={useOrderImageFallback}
+            />
             <div className="order-main">
               <span>{order.displayId}</span>
               <h3>{order.seller || "Vendeurs VinnHT"}</h3>
@@ -680,6 +692,7 @@ export function ClientOrdersContent({
       {selectedOrder && (
         <ClientOrderDetail
           order={selectedOrder}
+          onClose={onCloseDetails}
           onSubmitPaymentProof={onSubmitPaymentProof}
           proofProcessing={proofProcessing}
           proofError={proofError}
@@ -692,6 +705,7 @@ export function ClientOrdersContent({
 
 function ClientOrderDetail({
   order,
+  onClose,
   onSubmitPaymentProof,
   proofProcessing = false,
   proofError = "",
@@ -709,6 +723,19 @@ function ClientOrderDetail({
   const proofAlreadySent = Boolean(order.payment_proof_url || order.payment_reference) && !hasRejectedPayment;
   const paymentPaid = order.payment_status === "paid";
   const canSendProof = !paymentPaid && onSubmitPaymentProof;
+  const deliveryPeople = Array.isArray(order.deliveryPeople) && order.deliveryPeople.length
+    ? order.deliveryPeople
+    : order.delivery_name
+      ? [
+          {
+            assignment_id: "legacy-delivery",
+            delivery_name: order.delivery_name,
+            delivery_phone: order.delivery_phone,
+            delivery_profile_image_url: order.delivery_profile_image_url,
+            delivery_status: order.delivery_status,
+          },
+        ]
+      : [];
 
   const submitProof = (event) => {
     event.preventDefault();
@@ -718,13 +745,19 @@ function ClientOrderDetail({
 
   return (
     <section className="client-order-detail">
-      <header>
+      <header className="client-order-detail-header">
         <div>
           <span>Suivi détaillé</span>
           <h2>{order.order_number}</h2>
           <p>{order.delivery_address}</p>
         </div>
-        <strong>{Number(order.total).toLocaleString("fr-HT")} HTG</strong>
+        <div className="client-order-detail-actions">
+          <strong>{Number(order.total).toLocaleString("fr-HT")} HTG</strong>
+          <button type="button" onClick={onClose} aria-label="Fermer les détails">
+            <X />
+            <span>Fermer</span>
+          </button>
+        </div>
       </header>
       <div className="client-order-progress detail-progress">
         {["Payée", "Préparation", "En livraison", "Livrée"].map((label, index) => (
@@ -850,34 +883,76 @@ function ClientOrderDetail({
           ))}
         </section>
       )}
-      {order.delivery_name && (
-        <article className="client-delivery-person">
-          <span>
-            {order.delivery_profile_image_url ? (
-              <img
-                src={`${apiOrigin}${order.delivery_profile_image_url}`}
-                alt={`Photo de ${order.delivery_name}`}
-              />
-            ) : (
-              <UserRound />
-            )}
-          </span>
-          <div>
-            <small>Votre livreur VinnHT</small>
-            <h3>{order.delivery_name}</h3>
-            <p>
-              <ShieldCheck /> Profil livreur vérifié
-            </p>
+      {deliveryPeople.length > 0 && (
+        <section className="client-delivery-trust">
+          <header>
+            <div>
+              <span>Livraison sécurisée</span>
+              <h3>
+                {deliveryPeople.length > 1
+                  ? "Les livreurs de votre commande"
+                  : "Votre livreur VinnHT"}
+              </h3>
+              <p>Vérifiez son visage avant de remettre ou recevoir votre colis.</p>
+            </div>
+            <ShieldCheck />
+          </header>
+          <div className="client-delivery-grid">
+            {deliveryPeople.map((person) => (
+              <article
+                className="client-delivery-person"
+                key={person.assignment_id || person.delivery_user_id}
+              >
+                <span className="client-delivery-photo">
+                  {person.delivery_profile_image_url ? (
+                    <img
+                      src={orderImageSource(person.delivery_profile_image_url)}
+                      alt={`Photo de ${person.delivery_name}`}
+                      onError={useOrderImageFallback}
+                    />
+                  ) : (
+                    <UserRound />
+                  )}
+                </span>
+                <div>
+                  <small>{person.shop_name || "Livraison VinnHT"}</small>
+                  <h3>{person.delivery_name}</h3>
+                  <p>
+                    <ShieldCheck /> Profil livreur vérifié
+                  </p>
+                  {person.delivery_status && (
+                    <b className={`client-delivery-status ${person.delivery_status}`}>
+                      {person.delivery_status === "assigned"
+                        ? "Assigné"
+                        : person.delivery_status === "picked_up"
+                          ? "Colis récupéré"
+                          : person.delivery_status === "in_transit"
+                            ? "En route"
+                            : person.delivery_status === "delivered"
+                              ? "Livré"
+                              : person.delivery_status}
+                    </b>
+                  )}
+                </div>
+                {person.delivery_phone && (
+                  <a href={`tel:${person.delivery_phone}`}>
+                    <Phone />
+                    Appeler
+                  </a>
+                )}
+              </article>
+            ))}
           </div>
-          {order.delivery_phone && (
-            <a href={`tel:${order.delivery_phone}`}>{order.delivery_phone}</a>
-          )}
-        </article>
+        </section>
       )}
       <div className="order-detail-items">
         {order.items.map((item) => (
           <article key={item.id}>
-            <img src={item.image_url || products[0].image_url} alt={item.product_name} />
+            <img
+              src={orderImageSource(item.image_url || products[0]?.image_url)}
+              alt={item.product_name}
+              onError={useOrderImageFallback}
+            />
             <div>
               <small>{item.seller_name}</small>
               <h3>{item.product_name}</h3>
@@ -1464,7 +1539,7 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
           <button className="client-profile-save-button">
             <Edit3 /> Modifier profil
           </button>
-          <ProfileLogoutCard onLogout={onLogout} />
+          <MobileProfileActions onLogout={onLogout} settingsPath="/settings" />
         </form>
       </div>
     </ClientPageFrame>
@@ -1571,4 +1646,3 @@ function ClientPageFrame({ eyebrow, title, text, children }) {
     </div>
   );
 }
-

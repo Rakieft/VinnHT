@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import bcrypt from "bcryptjs";
 import cors from "cors";
 import crypto from "node:crypto";
@@ -9,7 +9,7 @@ import https from "node:https";
 import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import pool from "./config/database.js";
-import { authenticate } from "./middleware/authMiddleware.js";
+import { authenticate, optionalAuthenticate } from "./middleware/authMiddleware.js";
 import { authorize } from "./middleware/roleMiddleware.js";
 import {
   uploadPaymentProof,
@@ -690,9 +690,13 @@ app.post("/api/auth/logout", (_req, res) => {
 });
 app.get(
   "/api/auth/me",
-  authenticate,
+  optionalAuthenticate,
   noStore,
   asyncRoute(async (req, res) => {
+    if (!req.user) {
+      clearSessionCookie(res);
+      return res.json({ user: null });
+    }
     const [[user]] = await pool.query(
       "SELECT id,name,email,phone,profile_image_url,role,status,created_at FROM users WHERE id = ?",
       [req.user.id],
@@ -868,6 +872,116 @@ app.post(
       id: result.insertId,
       reference,
       message: `Votre demande ${reference} a été créée.`,
+    });
+  }),
+);
+app.get(
+  "/api/support/requests/:id/messages",
+  authenticate,
+  noStore,
+  asyncRoute(async (req, res) => {
+    const isAdmin = req.user.roles.includes("admin");
+    const [[request]] = await pool.query(
+      `SELECT cr.id,cr.user_id,cr.reference,cr.name,cr.subject,cr.message,cr.status,cr.created_at
+       FROM contact_requests cr
+       WHERE cr.id=? AND (?=1 OR cr.user_id=?)`,
+      [req.params.id, isAdmin ? 1 : 0, req.user.id],
+    );
+    if (!request) return res.status(404).json({ message: "Demande de support introuvable." });
+    await pool.query(
+      `UPDATE support_request_messages
+       SET read_at=COALESCE(read_at,NOW())
+       WHERE request_id=? AND sender_id<>?`,
+      [request.id, req.user.id],
+    );
+    const [messages] = await pool.query(
+      `SELECT srm.id,srm.sender_id,srm.sender_role,srm.body,srm.read_at,srm.created_at,
+        u.name sender_name,u.profile_image_url
+       FROM support_request_messages srm
+       JOIN users u ON u.id=srm.sender_id
+       WHERE srm.request_id=?
+       ORDER BY srm.created_at,srm.id`,
+      [request.id],
+    );
+    res.json({
+      request,
+      messages: [
+        {
+          id: `request-${request.id}`,
+          sender_id: request.user_id,
+          sender_role: "client",
+          sender_name: request.name,
+          body: request.message,
+          created_at: request.created_at,
+          original: true,
+        },
+        ...messages,
+      ],
+    });
+  }),
+);
+app.post(
+  "/api/support/requests/:id/messages",
+  authenticate,
+  writeRateLimiter,
+  [body("body").trim().isLength({ min: 1, max: 3000 })],
+  validate,
+  asyncRoute(async (req, res) => {
+    const isAdmin = req.user.roles.includes("admin");
+    const [[request]] = await pool.query(
+      `SELECT id,user_id,reference,status
+       FROM contact_requests
+       WHERE id=? AND (?=1 OR user_id=?)`,
+      [req.params.id, isAdmin ? 1 : 0, req.user.id],
+    );
+    if (!request) return res.status(404).json({ message: "Demande de support introuvable." });
+    if (!request.user_id) {
+      return res.status(409).json({
+        message: "Cette demande publique ne possède pas de compte client pour recevoir une réponse.",
+      });
+    }
+    const senderRole = isAdmin ? "admin" : "client";
+    const [result] = await pool.query(
+      `INSERT INTO support_request_messages (request_id,sender_id,sender_role,body)
+       VALUES (?,?,?,?)`,
+      [request.id, req.user.id, senderRole, req.body.body],
+    );
+    await pool.query(
+      `UPDATE contact_requests
+       SET status='in_progress',resolved_at=NULL
+       WHERE id=?`,
+      [request.id],
+    );
+    if (isAdmin) {
+      await notifyUser(
+        pool,
+        request.user_id,
+        "client",
+        "support.reply",
+        `Réponse du support ${request.reference}`,
+        "L’équipe VinnHT a répondu à votre demande.",
+        `/contact#support-${request.id}`,
+        "support_request",
+        request.id,
+      );
+    } else {
+      await notifyRole(
+        pool,
+        "admin",
+        "support.client_reply",
+        `Nouvelle réponse ${request.reference}`,
+        "Le client a ajouté un message à sa demande de support.",
+        "/admin/contact-requests",
+        "support_request",
+        request.id,
+      );
+    }
+    await audit(req, "support.message.create", "support_request", request.id, {
+      senderRole,
+    });
+    res.status(201).json({
+      id: result.insertId,
+      message: "Réponse envoyée.",
     });
   }),
 );
@@ -1074,6 +1188,7 @@ app.get(
        JOIN products p ON p.id=ci.product_id
        JOIN categories c ON c.id=p.category_id
        JOIN users u ON u.id=p.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
        WHERE ci.user_id=? AND p.status='active' AND p.stock>0
        ORDER BY ci.updated_at DESC`,
       [req.user.id],
@@ -1364,11 +1479,11 @@ app.post(
     );
     await notifyRole(
       pool,
-      "supervisor",
+      "manager",
       "seller_request.created",
       "Nouvelle demande vendeur",
       `${req.body.businessName} attend une vérification.`,
-      "/supervisor/seller-requests",
+      "/manager/seller-requests",
       "seller_request",
       request.insertId,
     );
@@ -1421,7 +1536,7 @@ app.get(
   authorize("seller"),
   asyncRoute(async (req, res) => {
     const [[shop]] = await pool.query(
-      `SELECT sp.*,u.name owner_name,u.email,u.phone,u.profile_image_url
+      `SELECT sp.*,u.id seller_id,u.name owner_name,u.email,u.phone,u.profile_image_url
        FROM users u
        LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
        WHERE u.id=?`,
@@ -2030,7 +2145,18 @@ app.get(
         p.proof_url payment_proof_url,
         d.status delivery_status,
         COUNT(oi.id) item_count,
-        MIN(pr.image_url) image_url,
+        MIN(
+          COALESCE(
+            pr.image_url,
+            (
+              SELECT pi.image_url
+              FROM product_images pi
+              WHERE pi.product_id=pr.id
+              ORDER BY pi.position,pi.id
+              LIMIT 1
+            )
+          )
+        ) image_url,
         GROUP_CONCAT(DISTINCT COALESCE(sp.shop_name,seller.name) ORDER BY seller.name SEPARATOR ', ') seller_names
       FROM orders o
       LEFT JOIN payments p ON p.order_id=o.id
@@ -2117,6 +2243,8 @@ app.get(
         p.proof_url payment_proof_url,
         p.proof_note payment_proof_note,
         p.proof_submitted_at payment_proof_submitted_at,
+        d.id delivery_id,
+        d.delivery_user_id,
         d.status delivery_status,
         d.notes delivery_notes,
         driver.name delivery_name,
@@ -2136,7 +2264,16 @@ app.get(
       `SELECT
         oi.*,
         pr.name product_name,
-        pr.image_url,
+        COALESCE(
+          pr.image_url,
+          (
+            SELECT pi.image_url
+            FROM product_images pi
+            WHERE pi.product_id=pr.id
+            ORDER BY pi.position,pi.id
+            LIMIT 1
+          )
+        ) image_url,
         COALESCE(sp.shop_name,seller.name) seller_name
       FROM order_items oi
       JOIN products pr ON pr.id=oi.product_id
@@ -2172,7 +2309,49 @@ app.get(
        LIMIT 30`,
       [order.id],
     );
-    res.json({ ...order, items, paymentInstructions, events });
+    const [sellerDeliveryPeople] = await pool.query(
+      `SELECT
+        CONCAT('seller-',sda.id) assignment_id,
+        sda.status delivery_status,
+        u.id delivery_user_id,
+        u.name delivery_name,
+        u.phone delivery_phone,
+        u.profile_image_url delivery_profile_image_url,
+        COALESCE(sp.shop_name,seller.name) shop_name
+       FROM seller_delivery_assignments sda
+       JOIN users u ON u.id=sda.delivery_user_id
+       JOIN users seller ON seller.id=sda.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=sda.seller_id
+       WHERE sda.order_id=?
+       ORDER BY shop_name,u.name`,
+      [order.id],
+    );
+    const deliveryPeople = [...sellerDeliveryPeople];
+
+    if (
+      order.delivery_name &&
+      !deliveryPeople.some(
+        (person) => Number(person.delivery_user_id) === Number(order.delivery_user_id),
+      )
+    ) {
+      deliveryPeople.push({
+        assignment_id: order.delivery_id ? `main-${order.delivery_id}` : "main",
+        delivery_status: order.delivery_status,
+        delivery_user_id: order.delivery_user_id,
+        delivery_name: order.delivery_name,
+        delivery_phone: order.delivery_phone,
+        delivery_profile_image_url: order.delivery_profile_image_url,
+        shop_name: null,
+      });
+    }
+
+    res.json({
+      ...order,
+      items,
+      paymentInstructions,
+      events,
+      deliveryPeople,
+    });
   }),
 );
 
@@ -2206,7 +2385,7 @@ app.patch(
         return res.status(422).json({ message: "Ajoutez une capture ou photo de la preuve MonCash." });
       }
 
-      const proofUrl = `/uploads/payments/${req.file.filename}`;
+      const proofUrl = await storeImage(req.file, "payments");
       const reference = `DIRECT-${Date.now()}`;
       await connection.query(
         `UPDATE payments
@@ -2706,7 +2885,12 @@ app.get(
        ORDER BY COALESCE(sda.delivered_at,sda.assigned_at) DESC`,
       [req.user.id],
     );
-    res.json([...sellerRows, ...rows]);
+    const missions = [...sellerRows, ...rows].sort(
+      (a, b) =>
+        new Date(b.delivered_at || b.assigned_at || b.order_created_at || 0) -
+        new Date(a.delivered_at || a.assigned_at || a.order_created_at || 0),
+    );
+    res.json(missions);
   }),
 );
 app.get(
@@ -2743,7 +2927,17 @@ app.get(
       const assignmentId = String(req.params.id).replace("seller-", "");
       const [items] = await pool.query(
         `SELECT oi.product_id,oi.quantity,oi.unit_price,oi.subtotal,
-          p.name product_name,p.image_url,
+          p.name product_name,
+          COALESCE(
+            p.image_url,
+            (
+              SELECT pi.image_url
+              FROM product_images pi
+              WHERE pi.product_id=p.id
+              ORDER BY pi.position,pi.id
+              LIMIT 1
+            )
+          ) image_url,
           COALESCE(sp.shop_name,seller.name) shop_name,
           sp.whatsapp shop_whatsapp
          FROM seller_delivery_assignments sda
@@ -2759,7 +2953,17 @@ app.get(
     }
     const [items] = await pool.query(
       `SELECT oi.product_id,oi.quantity,oi.unit_price,oi.subtotal,
-        p.name product_name,p.image_url,
+        p.name product_name,
+        COALESCE(
+          p.image_url,
+          (
+            SELECT pi.image_url
+            FROM product_images pi
+            WHERE pi.product_id=p.id
+            ORDER BY pi.position,pi.id
+            LIMIT 1
+          )
+        ) image_url,
         COALESCE(sp.shop_name,seller.name) shop_name,
         sp.whatsapp shop_whatsapp
        FROM deliveries d
@@ -2778,17 +2982,53 @@ app.get(
   "/api/management/deliveries",
   authenticate,
   authorize("manager"),
-  asyncRoute(async (_req, res) => {
+  asyncRoute(async (req, res) => {
+    const query = String(req.query.q || "").trim();
+    const status = ["unassigned", "assigned", "picked_up", "in_transit", "delivered", "failed"].includes(req.query.status)
+      ? req.query.status
+      : null;
+    const department = String(req.query.department || "").trim() || null;
+    const driverId = Number.parseInt(req.query.driverId, 10) || null;
+    const searchValue = `%${query}%`;
     const [deliveries] = await pool.query(
-      `SELECT d.*,o.order_number,o.delivery_address,u.name delivery_name
+      `SELECT d.*,o.order_number,o.delivery_address,o.created_at order_created_at,
+        client.name client_name,client.phone client_phone,u.name delivery_name,
+        COALESCE(
+          (SELECT p.department FROM order_items oi
+           JOIN products p ON p.id=oi.product_id
+           WHERE oi.order_id=o.id AND p.department IS NOT NULL
+           ORDER BY oi.id LIMIT 1),
+          'Ouest'
+        ) department,
+        TIMESTAMPDIFF(HOUR,COALESCE(d.assigned_at,o.created_at),NOW()) elapsed_hours,
+        EXISTS(SELECT 1 FROM delivery_proofs dp WHERE dp.delivery_id=d.id) has_proof
        FROM deliveries d
        JOIN orders o ON o.id=d.order_id
+       JOIN users client ON client.id=o.client_id
        LEFT JOIN users u ON u.id=d.delivery_user_id
        WHERE NOT EXISTS (
          SELECT 1 FROM seller_sales ss
          WHERE ss.order_id=o.id AND ss.status NOT IN ('ready','completed','cancelled')
        )
-       ORDER BY d.assigned_at IS NULL DESC,o.created_at DESC`,
+       AND (?='' OR o.order_number LIKE ? OR o.delivery_address LIKE ?
+         OR client.name LIKE ? OR COALESCE(u.name,'') LIKE ?)
+       AND (? IS NULL OR d.status=?)
+       AND (? IS NULL OR d.delivery_user_id=?)
+       HAVING (? IS NULL OR department=?)
+       ORDER BY d.status='failed' DESC,d.assigned_at IS NULL DESC,o.created_at DESC`,
+      [
+        query,
+        searchValue,
+        searchValue,
+        searchValue,
+        searchValue,
+        status,
+        status,
+        driverId,
+        driverId,
+        department,
+        department,
+      ],
     );
     const [drivers] = await pool.query(
       `SELECT DISTINCT u.id,u.name,u.email,u.phone
@@ -2797,7 +3037,21 @@ app.get(
        WHERE u.status='active'
        ORDER BY u.name`,
     );
-    res.json({ deliveries, drivers });
+    const [departments] = await pool.query(
+      "SELECT DISTINCT department FROM products WHERE department IS NOT NULL AND department!='' ORDER BY department",
+    );
+    res.json({
+      deliveries,
+      drivers,
+      departments: departments.map((item) => item.department),
+      stats: deliveries.reduce(
+        (summary, delivery) => ({
+          ...summary,
+          [delivery.status]: Number(summary[delivery.status] || 0) + 1,
+        }),
+        {},
+      ),
+    });
   }),
 );
 app.patch(
@@ -2856,6 +3110,27 @@ app.patch(
       assigned.order_id,
     );
     res.json({ message: "Livraison assignée." });
+  }),
+);
+app.get(
+  "/api/management/deliveries/:id/proof",
+  authenticate,
+  authorize("manager", "admin"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const [[proof]] = await pool.query(
+      `SELECT dp.signer_name,dp.signature_data,dp.delivery_notes,dp.confirmed_at,
+        o.order_number,client.name client_name,u.name delivery_name
+       FROM deliveries d
+       JOIN orders o ON o.id=d.order_id
+       JOIN users client ON client.id=o.client_id
+       LEFT JOIN users u ON u.id=d.delivery_user_id
+       JOIN delivery_proofs dp ON dp.delivery_id=d.id
+       WHERE d.id=?`,
+      [req.params.id],
+    );
+    if (!proof) return res.status(404).json({ message: "Preuve de livraison introuvable." });
+    res.json(proof);
   }),
 );
 app.patch(
@@ -3091,18 +3366,94 @@ app.patch(
 app.get(
   "/api/admin/seller-requests",
   authenticate,
-  authorize("supervisor"),
-  asyncRoute(async (_req, res) => {
-    const [rows] = await pool.query(
-      "SELECT sr.*,u.name,u.email,u.phone FROM seller_requests sr JOIN users u ON u.id=sr.user_id ORDER BY sr.created_at DESC",
+  authorize("manager", "admin"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const query = String(req.query.q || "").trim();
+    const status = ["pending", "approved", "rejected"].includes(req.query.status)
+      ? req.query.status
+      : null;
+    const category = String(req.query.category || "").trim() || null;
+    const dateFrom = /^\d{4}-\d{2}-\d{2}$/.test(req.query.dateFrom || "") ? req.query.dateFrom : null;
+    const dateTo = /^\d{4}-\d{2}-\d{2}$/.test(req.query.dateTo || "") ? req.query.dateTo : null;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(6, Number.parseInt(req.query.limit, 10) || 12));
+    const offset = (page - 1) * limit;
+    const searchValue = `%${query}%`;
+    const categoryExpression = `COALESCE(
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(sr.description,'$.mainCategory')),''),
+      'Non précisée'
+    )`;
+    const where = [
+      `(?='' OR sr.business_name LIKE ? OR u.name LIKE ? OR u.email LIKE ?
+        OR COALESCE(u.phone,'') LIKE ? OR CAST(sr.id AS CHAR) LIKE ?)`,
+      "(? IS NULL OR sr.status=?)",
+      `(? IS NULL OR ${categoryExpression}=?)`,
+      "(? IS NULL OR DATE(sr.created_at)>=?)",
+      "(? IS NULL OR DATE(sr.created_at)<=?)",
+    ].join(" AND ");
+    const params = [
+      query,
+      searchValue,
+      searchValue,
+      searchValue,
+      searchValue,
+      searchValue,
+      status,
+      status,
+      category,
+      category,
+      dateFrom,
+      dateFrom,
+      dateTo,
+      dateTo,
+    ];
+    const [[countRow]] = await pool.query(
+      `SELECT COUNT(*) total
+       FROM seller_requests sr
+       JOIN users u ON u.id=sr.user_id
+       WHERE ${where}`,
+      params,
     );
-    res.json(rows);
+    const [rows] = await pool.query(
+      `SELECT sr.*,u.name,u.email,u.phone,reviewer.name reviewer_name,
+        ${categoryExpression} main_category
+       FROM seller_requests sr
+       JOIN users u ON u.id=sr.user_id
+       LEFT JOIN users reviewer ON reviewer.id=sr.reviewed_by
+       WHERE ${where}
+       ORDER BY FIELD(sr.status,'pending','approved','rejected'),sr.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+    const [categories] = await pool.query(
+      `SELECT DISTINCT ${categoryExpression} category
+       FROM seller_requests sr
+       ORDER BY category`,
+    );
+    const [health] = await pool.query(
+      "SELECT status,COUNT(*) total FROM seller_requests GROUP BY status",
+    );
+    res.json({
+      items: rows,
+      categories: categories.map((item) => item.category),
+      summary: health.reduce(
+        (summary, item) => ({ ...summary, [item.status]: Number(item.total) }),
+        {},
+      ),
+      pagination: {
+        page,
+        limit,
+        total: Number(countRow.total || 0),
+        pages: Math.max(1, Math.ceil(Number(countRow.total || 0) / limit)),
+      },
+    });
   }),
 );
 app.get(
   "/api/admin/seller-requests/:id",
   authenticate,
-  authorize("supervisor"),
+  authorize("manager", "admin"),
   noStore,
   asyncRoute(async (req, res) => {
     const [[request]] = await pool.query(
@@ -3124,7 +3475,7 @@ app.get(
 app.patch(
   "/api/admin/seller-requests/:id",
   authenticate,
-  authorize("supervisor"),
+  authorize("manager", "admin"),
   [
     body("status").isIn(["approved", "rejected"]),
     body("reason")
@@ -3185,8 +3536,10 @@ app.patch(
 app.get(
   "/api/admin/reports",
   authenticate,
-  authorize("manager", "supervisor"),
+  authorize("manager", "admin"),
   asyncRoute(async (req, res) => {
+    const range = ["7d", "30d", "90d"].includes(req.query.range) ? req.query.range : "30d";
+    const days = range === "7d" ? 7 : range === "90d" ? 90 : 30;
     const [[stats]] = await pool.query(
       `SELECT
         (SELECT COUNT(*) FROM users) users,
@@ -3222,10 +3575,39 @@ app.get(
     const [requestHealth] = await pool.query(
       "SELECT status,COUNT(*) total FROM seller_requests GROUP BY status ORDER BY total DESC",
     );
+    const [orderTrend] = await pool.query(
+      `SELECT DATE(created_at) activity_date,COUNT(*) orders
+       FROM orders
+       WHERE created_at>=DATE_SUB(CURRENT_DATE,INTERVAL ? DAY)
+       GROUP BY DATE(created_at)
+       ORDER BY activity_date`,
+      [days - 1],
+    );
+    const [recentApproved] = await pool.query(
+      `SELECT sr.id,sr.business_name,sr.reviewed_at,u.name owner_name
+       FROM seller_requests sr
+       JOIN users u ON u.id=sr.user_id
+       WHERE sr.status='approved'
+       ORDER BY sr.reviewed_at DESC
+       LIMIT 5`,
+    );
+    const [blockedOrders] = await pool.query(
+      `SELECT o.id,o.order_number,o.status,o.created_at,
+        TIMESTAMPDIFF(HOUR,o.updated_at,NOW()) stalled_hours
+       FROM orders o
+       WHERE o.status IN ('pending','confirmed','processing')
+         AND o.updated_at<DATE_SUB(NOW(),INTERVAL 24 HOUR)
+       ORDER BY stalled_hours DESC
+       LIMIT 8`,
+    );
     res.json({
       stats,
       deliveryHealth,
       requestHealth,
+      orderTrend,
+      recentApproved,
+      blockedOrders,
+      range,
       ...(isManager ? { sellerActivity } : {}),
     });
   }),
@@ -3319,7 +3701,7 @@ app.post(
     body("email").isEmail().normalizeEmail(),
     body("phone").optional({ checkFalsy: true }).trim().isLength({ max: 30 }),
     body("password").isLength({ min: 10, max: 128 }),
-    body("role").isIn(["manager", "supervisor"]),
+    body("role").isIn(["manager"]),
   ],
   validate,
   asyncRoute(async (req, res) => {
@@ -3346,7 +3728,7 @@ app.post(
       await audit(req, "staff.create", "user", result.insertId, { role: req.body.role });
       res.status(201).json({
         id: result.insertId,
-        message: `${req.body.role === "manager" ? "Manager" : "Superviseur"} créé avec succès.`,
+        message: "Manager créé avec succès.",
       });
     } catch (error) {
       await connection.rollback();
@@ -3361,7 +3743,10 @@ app.get(
   authenticate,
   authorize("admin"),
   noStore,
-  asyncRoute(async (_req, res) => {
+  asyncRoute(async (req, res) => {
+    const range = ["7d", "30d", "12m"].includes(req.query.range)
+      ? req.query.range
+      : "7d";
     const [[stats]] = await pool.query(
       `SELECT
         (SELECT COUNT(*) FROM users) users,
@@ -3373,6 +3758,11 @@ app.get(
         (SELECT COUNT(*) FROM products WHERE status='active' AND stock=0) out_of_stock_products,
         (SELECT COUNT(*) FROM orders) orders,
         (SELECT COUNT(*) FROM orders WHERE DATE(created_at)=CURRENT_DATE) orders_today,
+        (SELECT COUNT(*) FROM orders
+          WHERE created_at >= DATE_SUB(CURRENT_DATE,INTERVAL WEEKDAY(CURRENT_DATE) DAY)) orders_week,
+        (SELECT COUNT(*) FROM orders
+          WHERE created_at >= DATE_SUB(DATE_SUB(CURRENT_DATE,INTERVAL WEEKDAY(CURRENT_DATE) DAY),INTERVAL 7 DAY)
+            AND created_at < DATE_SUB(CURRENT_DATE,INTERVAL WEEKDAY(CURRENT_DATE) DAY)) orders_previous_week,
         (SELECT COUNT(*) FROM seller_requests WHERE status='pending') pending_seller_requests,
         (SELECT COUNT(*) FROM deliveries WHERE status IN ('unassigned','assigned','picked_up','in_transit')) active_deliveries,
         (SELECT COUNT(*) FROM deliveries WHERE status='unassigned') unassigned_deliveries,
@@ -3381,24 +3771,74 @@ app.get(
         (SELECT COUNT(*) FROM payments WHERE status='failed') failed_payments,
         (SELECT COUNT(*) FROM payouts WHERE status='pending') pending_payouts,
         (SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid') paid_volume,
-        (SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND DATE(COALESCE(paid_at,created_at))=CURRENT_DATE) paid_today`,
+        (SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid' AND DATE(COALESCE(paid_at,created_at))=CURRENT_DATE) paid_today,
+        (SELECT COALESCE(SUM(amount),0) FROM payments
+          WHERE status='paid'
+            AND COALESCE(paid_at,created_at) >= DATE_SUB(CURRENT_DATE,INTERVAL WEEKDAY(CURRENT_DATE) DAY)) paid_week,
+        (SELECT COALESCE(SUM(amount),0) FROM payments
+          WHERE status='paid'
+            AND COALESCE(paid_at,created_at) >= DATE_SUB(DATE_SUB(CURRENT_DATE,INTERVAL WEEKDAY(CURRENT_DATE) DAY),INTERVAL 7 DAY)
+            AND COALESCE(paid_at,created_at) < DATE_SUB(CURRENT_DATE,INTERVAL WEEKDAY(CURRENT_DATE) DAY)) paid_previous_week`,
     );
-    const [dailySales] = await pool.query(
-      `SELECT DATE(COALESCE(paid_at,created_at)) sale_date,COUNT(*) payments,COALESCE(SUM(amount),0) total
-       FROM payments
-       WHERE status='paid' AND COALESCE(paid_at,created_at) >= DATE_SUB(CURRENT_DATE,INTERVAL 6 DAY)
-       GROUP BY DATE(COALESCE(paid_at,created_at))
-       ORDER BY sale_date`,
-    );
+    const salesSeriesQuery =
+      range === "12m"
+        ? `SELECT DATE_FORMAT(COALESCE(paid_at,created_at),'%Y-%m-01') sale_date,
+             COUNT(*) payments,COALESCE(SUM(amount),0) total
+           FROM payments
+           WHERE status='paid'
+             AND COALESCE(paid_at,created_at) >= DATE_SUB(DATE_FORMAT(CURRENT_DATE,'%Y-%m-01'),INTERVAL 11 MONTH)
+           GROUP BY DATE_FORMAT(COALESCE(paid_at,created_at),'%Y-%m-01')
+           ORDER BY sale_date`
+        : `SELECT DATE(COALESCE(paid_at,created_at)) sale_date,
+             COUNT(*) payments,COALESCE(SUM(amount),0) total
+           FROM payments
+           WHERE status='paid'
+             AND COALESCE(paid_at,created_at) >= DATE_SUB(CURRENT_DATE,INTERVAL ${range === "30d" ? 29 : 6} DAY)
+           GROUP BY DATE(COALESCE(paid_at,created_at))
+           ORDER BY sale_date`;
+    const [dailySales] = await pool.query(salesSeriesQuery);
     const [paymentHealth] = await pool.query(
       `SELECT status,COUNT(*) total,COALESCE(SUM(amount),0) amount
        FROM payments
+       GROUP BY status`,
+    );
+    const [orderHealth] = await pool.query(
+      `SELECT status,COUNT(*) total
+       FROM orders
        GROUP BY status`,
     );
     const [deliveryHealth] = await pool.query(
       `SELECT status,COUNT(*) total
        FROM deliveries
        GROUP BY status`,
+    );
+    const [topShops] = await pool.query(
+      `SELECT
+         u.id seller_id,
+         COALESCE(sp.shop_name,u.name) shop_name,
+         sp.shop_logo_url,
+         COUNT(DISTINCT ss.order_id) orders,
+         COALESCE(SUM(ss.gross_amount),0) sales,
+         COALESCE(SUM((
+           SELECT SUM(oi.quantity)
+           FROM order_items oi
+           WHERE oi.order_id=ss.order_id AND oi.seller_id=ss.seller_id
+         )),0) products_sold,
+         EXISTS(
+           SELECT 1 FROM seller_sponsorships sponsorship
+           WHERE sponsorship.seller_id=u.id
+             AND sponsorship.status='active'
+             AND NOW() BETWEEN sponsorship.starts_at AND sponsorship.ends_at
+         ) sponsored
+       FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'
+       LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
+       LEFT JOIN seller_sales ss ON ss.seller_id=u.id
+         AND ss.status!='cancelled'
+         AND ss.created_at >= DATE_SUB(CURRENT_DATE,INTERVAL WEEKDAY(CURRENT_DATE) DAY)
+       GROUP BY u.id,sp.shop_name,sp.shop_logo_url
+       ORDER BY sales DESC,orders DESC
+       LIMIT 6`,
     );
     const [recentAudit] = await pool.query(
       `SELECT al.id,al.action,al.entity_type,al.entity_id,al.created_at,u.name actor_name
@@ -3411,8 +3851,11 @@ app.get(
       stats,
       dailySales,
       paymentHealth,
+      orderHealth,
       deliveryHealth,
+      topShops,
       recentAudit,
+      range,
     });
   }),
 );
@@ -3546,6 +3989,177 @@ app.post(
   }),
 );
 app.get(
+  "/api/admin/sellers",
+  authenticate,
+  authorize("admin"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const query = String(req.query.q || "").trim();
+    const status = ["active", "suspended"].includes(req.query.status)
+      ? req.query.status
+      : null;
+    const visibility = ["sponsored", "standard"].includes(req.query.visibility)
+      ? req.query.visibility
+      : null;
+    const catalog = ["with_products", "without_products"].includes(req.query.catalog)
+      ? req.query.catalog
+      : null;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(48, Math.max(6, Number.parseInt(req.query.limit, 10) || 12));
+    const offset = (page - 1) * limit;
+    const searchValue = `%${query}%`;
+    const sponsoredCondition = `EXISTS(
+      SELECT 1 FROM seller_sponsorships active_ss
+      WHERE active_ss.seller_id=u.id
+        AND active_ss.status='active'
+        AND NOW() BETWEEN active_ss.starts_at AND active_ss.ends_at
+    )`;
+    const where = [
+      "ur.role='seller'",
+      "(? IS NULL OR u.status=?)",
+      `(?='' OR COALESCE(sp.shop_name,u.name) LIKE ?
+        OR u.name LIKE ? OR u.email LIKE ? OR COALESCE(u.phone,'') LIKE ?
+        OR COALESCE(sp.category,'') LIKE ?)`,
+      `(? IS NULL
+        OR (?='sponsored' AND ${sponsoredCondition})
+        OR (?='standard' AND NOT ${sponsoredCondition}))`,
+      `(? IS NULL
+        OR (?='with_products' AND EXISTS(SELECT 1 FROM products catalog_product WHERE catalog_product.seller_id=u.id))
+        OR (?='without_products' AND NOT EXISTS(SELECT 1 FROM products catalog_product WHERE catalog_product.seller_id=u.id)))`,
+    ].join(" AND ");
+    const params = [
+      status,
+      status,
+      query,
+      searchValue,
+      searchValue,
+      searchValue,
+      searchValue,
+      searchValue,
+      visibility,
+      visibility,
+      visibility,
+      catalog,
+      catalog,
+      catalog,
+    ];
+    const [[countRow]] = await pool.query(
+      `SELECT COUNT(DISTINCT u.id) total
+       FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
+       WHERE ${where}`,
+      params,
+    );
+    const [rows] = await pool.query(
+      `SELECT
+         u.id,u.name owner_name,u.email,u.phone,u.status,u.created_at,
+         COALESCE(sp.shop_name,u.name) shop_name,sp.shop_logo_url,sp.category,
+         sp.description,sp.whatsapp,sp.pickup_address,sp.opening_hours,sp.delivery_zones,
+         (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id) product_count,
+         (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id AND p.status='active') active_product_count,
+         (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id AND p.status='active' AND p.stock=0) out_of_stock_count,
+         (SELECT COUNT(DISTINCT ss.order_id) FROM seller_sales ss WHERE ss.seller_id=u.id AND ss.status!='cancelled') order_count,
+         (SELECT COALESCE(SUM(ss.gross_amount),0) FROM seller_sales ss WHERE ss.seller_id=u.id AND ss.status!='cancelled') sales_volume,
+         (SELECT ROUND(AVG(sr.rating),1) FROM shop_reviews sr WHERE sr.seller_id=u.id) rating,
+         (SELECT COUNT(*) FROM shop_reviews sr WHERE sr.seller_id=u.id) review_count,
+         ${sponsoredCondition} sponsored,
+         (SELECT latest_ss.amount FROM seller_sponsorships latest_ss
+          WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_amount,
+         (SELECT latest_ss.status FROM seller_sponsorships latest_ss
+          WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_status,
+         (SELECT latest_ss.starts_at FROM seller_sponsorships latest_ss
+          WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_starts_at,
+         (SELECT latest_ss.ends_at FROM seller_sponsorships latest_ss
+          WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_ends_at
+       FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
+       WHERE ${where}
+       GROUP BY u.id,sp.id
+       ORDER BY sponsored DESC,u.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+    const [[summary]] = await pool.query(
+      `SELECT
+         COUNT(DISTINCT u.id) sellers,
+         COUNT(DISTINCT CASE WHEN u.status='active' THEN u.id END) active_sellers,
+         COUNT(DISTINCT CASE WHEN u.status='suspended' THEN u.id END) suspended_sellers,
+         COUNT(DISTINCT CASE WHEN ${sponsoredCondition} THEN u.id END) sponsored_sellers,
+         COUNT(DISTINCT CASE WHEN NOT EXISTS(
+           SELECT 1 FROM products empty_product WHERE empty_product.seller_id=u.id
+         ) THEN u.id END) sellers_without_products
+       FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'`,
+    );
+    res.json({
+      items: rows,
+      summary,
+      pagination: {
+        page,
+        limit,
+        total: Number(countRow.total || 0),
+        pages: Math.max(1, Math.ceil(Number(countRow.total || 0) / limit)),
+      },
+    });
+  }),
+);
+app.get(
+  "/api/admin/sellers/:id",
+  authenticate,
+  authorize("admin"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const [[seller]] = await pool.query(
+      `SELECT
+         u.id,u.name owner_name,u.email,u.phone,u.status,u.created_at,
+         COALESCE(sp.shop_name,u.name) shop_name,sp.shop_logo_url,sp.category,
+         sp.description,sp.whatsapp,sp.pickup_address,sp.opening_hours,sp.delivery_zones,
+         (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id) product_count,
+         (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id AND p.status='active') active_product_count,
+         (SELECT COUNT(DISTINCT ss.order_id) FROM seller_sales ss WHERE ss.seller_id=u.id AND ss.status!='cancelled') order_count,
+         (SELECT COALESCE(SUM(ss.gross_amount),0) FROM seller_sales ss WHERE ss.seller_id=u.id AND ss.status!='cancelled') sales_volume,
+         (SELECT ROUND(AVG(sr.rating),1) FROM shop_reviews sr WHERE sr.seller_id=u.id) rating,
+         (SELECT COUNT(*) FROM shop_reviews sr WHERE sr.seller_id=u.id) review_count
+       FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'
+       LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
+       WHERE u.id=?`,
+      [req.params.id],
+    );
+    if (!seller) return res.status(404).json({ message: "Vendeur introuvable." });
+    const [products] = await pool.query(
+      `SELECT p.id,p.name,p.price,p.stock,p.status,p.image_url,p.department,p.city,c.name category_name
+       FROM products p
+       JOIN categories c ON c.id=p.category_id
+       WHERE p.seller_id=?
+       ORDER BY p.created_at DESC
+       LIMIT 8`,
+      [seller.id],
+    );
+    const [campaigns] = await pool.query(
+      `SELECT id,amount,status,starts_at,ends_at,created_at
+       FROM seller_sponsorships
+       WHERE seller_id=?
+       ORDER BY created_at DESC
+       LIMIT 8`,
+      [seller.id],
+    );
+    const [auditHistory] = await pool.query(
+      `SELECT al.id,al.action,al.created_at,actor.name actor_name
+       FROM audit_logs al
+       LEFT JOIN users actor ON actor.id=al.actor_user_id
+       WHERE (al.entity_type='seller' AND al.entity_id=?)
+          OR (al.entity_type='user' AND al.entity_id=?)
+       ORDER BY al.created_at DESC
+       LIMIT 10`,
+      [String(seller.id), String(seller.id)],
+    );
+    res.json({ seller, products, campaigns, auditHistory });
+  }),
+);
+app.get(
   "/api/admin/categories",
   authenticate,
   authorize("admin"),
@@ -3617,18 +4231,164 @@ app.get(
   authenticate,
   authorize("admin"),
   noStore,
-  asyncRoute(async (_req, res) => {
-    const [rows] = await pool.query(
-      `SELECT p.id,p.seller_id,p.name,p.price,p.promotional_price,p.stock,p.status,p.is_featured,p.image_url,p.created_at,
-        c.name category_name,COALESCE(sp.shop_name,u.name) seller_name
+  asyncRoute(async (req, res) => {
+    const query = String(req.query.q || "").trim();
+    const status = ["draft", "active", "inactive"].includes(req.query.status)
+      ? req.query.status
+      : null;
+    const stock = ["available", "low", "out"].includes(req.query.stock)
+      ? req.query.stock
+      : null;
+    const promotion = req.query.promotion === "active" ? "active" : null;
+    const department = String(req.query.department || "").trim() || null;
+    const categoryId = Number.parseInt(req.query.categoryId, 10) || null;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(60, Math.max(8, Number.parseInt(req.query.limit, 10) || 16));
+    const offset = (page - 1) * limit;
+    const searchValue = `%${query}%`;
+    const where = [
+      `(?='' OR p.name LIKE ? OR COALESCE(sp.shop_name,u.name) LIKE ?
+        OR c.name LIKE ? OR COALESCE(p.department,'') LIKE ? OR COALESCE(p.city,'') LIKE ?)`,
+      "(? IS NULL OR p.status=?)",
+      `(? IS NULL
+        OR (?='available' AND p.stock>5)
+        OR (?='low' AND p.stock BETWEEN 1 AND 5)
+        OR (?='out' AND p.stock=0))`,
+      `(? IS NULL OR (p.is_featured=TRUE AND p.promotional_price IS NOT NULL
+        AND p.promotional_price<p.price
+        AND (p.offer_ends_at IS NULL OR p.offer_ends_at>NOW())))`,
+      "(? IS NULL OR p.department=?)",
+      "(? IS NULL OR p.category_id=?)",
+    ].join(" AND ");
+    const params = [
+      query,
+      searchValue,
+      searchValue,
+      searchValue,
+      searchValue,
+      searchValue,
+      status,
+      status,
+      stock,
+      stock,
+      stock,
+      stock,
+      promotion,
+      department,
+      department,
+      categoryId,
+      categoryId,
+    ];
+    const [[countRow]] = await pool.query(
+      `SELECT COUNT(*) total
        FROM products p
        JOIN categories c ON c.id=p.category_id
        JOIN users u ON u.id=p.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
-       ORDER BY p.created_at DESC
-       LIMIT 500`,
+       WHERE ${where}`,
+      params,
     );
-    res.json(rows);
+    const [rows] = await pool.query(
+      `SELECT p.id,p.seller_id,p.name,p.description,p.price,p.promotional_price,p.stock,
+        p.department,p.city,p.status,p.is_featured,p.offer_ends_at,p.image_url,p.created_at,
+        c.id category_id,c.name category_name,COALESCE(sp.shop_name,u.name) seller_name,
+        sp.shop_logo_url seller_logo_url
+       FROM products p
+       JOIN categories c ON c.id=p.category_id
+       JOIN users u ON u.id=p.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
+       WHERE ${where}
+       ORDER BY p.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+    const [[summary]] = await pool.query(
+      `SELECT
+         COUNT(*) products,
+         SUM(status='active') active_products,
+         SUM(status='inactive') inactive_products,
+         SUM(stock=0) out_of_stock,
+         SUM(stock BETWEEN 1 AND 5) low_stock,
+         COUNT(DISTINCT seller_id) sellers
+       FROM products`,
+    );
+    const [categories] = await pool.query("SELECT id,name FROM categories ORDER BY name");
+    const [departments] = await pool.query(
+      "SELECT DISTINCT department FROM products WHERE department IS NOT NULL AND department!='' ORDER BY department",
+    );
+    res.json({
+      items: rows,
+      summary,
+      categories,
+      departments: departments.map((item) => item.department),
+      pagination: {
+        page,
+        limit,
+        total: Number(countRow.total || 0),
+        pages: Math.max(1, Math.ceil(Number(countRow.total || 0) / limit)),
+      },
+    });
+  }),
+);
+app.get(
+  "/api/admin/products/:id",
+  authenticate,
+  authorize("admin"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const [[product]] = await pool.query(
+      `SELECT p.*,c.name category_name,COALESCE(sp.shop_name,u.name) seller_name,
+        sp.shop_logo_url seller_logo_url,u.email seller_email,u.phone seller_phone
+       FROM products p
+       JOIN categories c ON c.id=p.category_id
+       JOIN users u ON u.id=p.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
+       WHERE p.id=?`,
+      [req.params.id],
+    );
+    if (!product) return res.status(404).json({ message: "Produit introuvable." });
+    const [images] = await pool.query(
+      "SELECT id,image_url,position FROM product_images WHERE product_id=? ORDER BY position,id",
+      [product.id],
+    );
+    const [auditHistory] = await pool.query(
+      `SELECT al.id,al.action,al.created_at,u.name actor_name
+       FROM audit_logs al
+       LEFT JOIN users u ON u.id=al.actor_user_id
+       WHERE al.entity_type='product' AND al.entity_id=?
+       ORDER BY al.created_at DESC
+       LIMIT 10`,
+      [String(product.id)],
+    );
+    res.json({ product, images, auditHistory });
+  }),
+);
+app.patch(
+  "/api/admin/products/status",
+  authenticate,
+  authorize("admin"),
+  writeRateLimiter,
+  [
+    body("ids").isArray({ min: 1, max: 100 }),
+    body("ids.*").isInt({ min: 1 }),
+    body("status").isIn(["draft", "active", "inactive"]),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const ids = [...new Set(req.body.ids.map(Number))];
+    const placeholders = ids.map(() => "?").join(",");
+    const [result] = await pool.query(
+      `UPDATE products SET status=? WHERE id IN (${placeholders})`,
+      [req.body.status, ...ids],
+    );
+    await audit(req, "product.bulk_status.update", "product", null, {
+      ids,
+      status: req.body.status,
+    });
+    res.json({
+      message: `${result.affectedRows} produit(s) mis à jour.`,
+      affectedRows: result.affectedRows,
+    });
   }),
 );
 app.post(
@@ -3978,7 +4738,12 @@ app.get(
   asyncRoute(async (_req, res) => {
     const [rows] = await pool.query(
       `SELECT cr.id,cr.reference,cr.name,cr.email,cr.category,cr.subject,cr.message,
-        cr.status,cr.created_at,cr.resolved_at,o.order_number
+        cr.user_id,cr.status,cr.created_at,cr.resolved_at,o.order_number,
+        (SELECT COUNT(*) FROM support_request_messages srm WHERE srm.request_id=cr.id) reply_count,
+        (SELECT COUNT(*) FROM support_request_messages srm
+         WHERE srm.request_id=cr.id AND srm.sender_role='client' AND srm.read_at IS NULL) unread_count,
+        (SELECT srm.body FROM support_request_messages srm
+         WHERE srm.request_id=cr.id ORDER BY srm.created_at DESC,srm.id DESC LIMIT 1) last_reply
        FROM contact_requests cr
        LEFT JOIN orders o ON o.id=cr.order_id
        ORDER BY FIELD(cr.status,'new','in_progress','resolved'),cr.created_at DESC
@@ -3995,15 +4760,41 @@ app.patch(
   [body("status").isIn(["new", "in_progress", "resolved"])],
   validate,
   asyncRoute(async (req, res) => {
+    const [[request]] = await pool.query(
+      "SELECT id,user_id,reference,status FROM contact_requests WHERE id=?",
+      [req.params.id],
+    );
+    if (!request) {
+      return res.status(404).json({ message: "Demande de support introuvable." });
+    }
     const [result] = await pool.query(
       `UPDATE contact_requests
        SET status=?,resolved_at=IF(?='resolved',NOW(),NULL)
        WHERE id=?`,
       [req.body.status, req.body.status, req.params.id],
     );
-    if (!result.affectedRows) {
-      return res.status(404).json({ message: "Demande de support introuvable." });
+    if (request.user_id && request.status !== req.body.status) {
+      const statusText = {
+        new: "rouvert",
+        in_progress: "en traitement",
+        resolved: "résolu",
+      }[req.body.status];
+      await notifyUser(
+        pool,
+        request.user_id,
+        "client",
+        "support.status",
+        `Dossier ${request.reference} mis à jour`,
+        `Votre dossier est maintenant ${statusText}.`,
+        `/contact#support-${request.id}`,
+        "support_request",
+        request.id,
+      );
     }
+    await audit(req, "support.status.update", "support_request", request.id, {
+      from: request.status,
+      to: req.body.status,
+    });
     res.json({ message: "Statut de la demande mis à jour." });
   }),
 );
@@ -4235,28 +5026,6 @@ const publishSaturdayReportNotification = async () => {
     ],
   );
 };
-const prepareSundaySellerPayments = async () => {
-  const now = new Date();
-  if (now.getDay() !== 0) return;
-  const batch = await prepareWeeklyPayoutBatch(now);
-  const [[existing]] = await pool.query(
-    "SELECT COUNT(*) total FROM notifications WHERE type='payout_batch.ready' AND entity_type='payout_batch' AND entity_id=?",
-    [batch.id],
-  );
-  if (!Number(existing.total)) {
-    await notifyRole(
-      pool,
-      "admin",
-      "payout_batch.ready",
-      "Paiements vendeurs du dimanche",
-      `Le lot de paiements vendeurs de ${pdfMoney(batch.total_amount)} est prêt à être vérifié.`,
-      "/admin/payments",
-      "payout_batch",
-      batch.id,
-    );
-  }
-};
-
 const port = Number(process.env.PORT || 5056);
 const sslEnabled = Boolean(process.env.SSL_KEY_PATH && process.env.SSL_CERT_PATH);
 const server = sslEnabled
@@ -4273,11 +5042,9 @@ server.listen(port, () => {
   const protocol = sslEnabled ? "https" : "http";
   console.log(`VinnHT API disponible sur ${protocol}://localhost:${port}`);
   publishSaturdayReportNotification().catch(console.error);
-  prepareSundaySellerPayments().catch(console.error);
   const saturdayReportTimer = setInterval(
     () => {
       publishSaturdayReportNotification().catch(console.error);
-      prepareSundaySellerPayments().catch(console.error);
     },
     60 * 60 * 1000,
   );
