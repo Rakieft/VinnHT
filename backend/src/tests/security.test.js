@@ -3,6 +3,10 @@ import test from "node:test";
 import { authorize } from "../middleware/roleMiddleware.js";
 import { createRateLimiter, securityHeaders } from "../middleware/securityMiddleware.js";
 import { sessionCookieOptions } from "../utils/sessionCookie.js";
+import {
+  cleanupExpiredMessages,
+  normalizeRetentionDays,
+} from "../utils/messageRetention.js";
 
 const response = () => ({
   code: 200,
@@ -70,4 +74,28 @@ test("le cookie de session est inaccessible au JavaScript", () => {
   const options = sessionCookieOptions();
   assert.equal(options.httpOnly, true);
   assert.equal(options.path, "/");
+});
+
+test("la rétention des messages utilise 30 jours par défaut", () => {
+  assert.equal(normalizeRetentionDays(undefined), 30);
+  assert.equal(normalizeRetentionDays("0"), 30);
+  assert.equal(normalizeRetentionDays("45"), 45);
+});
+
+test("le nettoyage supprime les anciens messages puis les conversations vides", async () => {
+  const queries = [];
+  const executor = {
+    async query(sql) {
+      queries.push(sql);
+      return [{ affectedRows: 2 }];
+    },
+  };
+
+  const result = await cleanupExpiredMessages(executor, 30);
+
+  assert.equal(queries.length, 2);
+  assert.match(queries[0], /INTERVAL 30 DAY/);
+  assert.match(queries[1], /LEFT JOIN messages/);
+  assert.equal(result.deletedMessages, 2);
+  assert.equal(result.deletedConversations, 2);
 });

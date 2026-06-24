@@ -25,6 +25,7 @@ import {
 import { generateToken } from "./utils/generateToken.js";
 import { clearSessionCookie, setSessionCookie } from "./utils/sessionCookie.js";
 import { storeImage, storeImages } from "./utils/imageStorage.js";
+import { cleanupExpiredMessages } from "./utils/messageRetention.js";
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   throw new Error("JWT_SECRET doit contenir au moins 32 caractères.");
@@ -76,6 +77,27 @@ const validate = (req, res, next) => {
 };
 const asyncRoute = (handler) => (req, res, next) =>
   Promise.resolve(handler(req, res, next)).catch(next);
+
+const SELLER_TERMS_VERSION = "2026-06-24-v2";
+const SELLER_TERMS = [
+  "Je certifie que toutes les informations fournies sont exactes et à jour.",
+  "J’accepte que VinnHT vérifie mon profil avant l’approbation de mon espace vendeur.",
+  "J’accepte que ma photo de profil soit obligatoire et visible par les acheteurs.",
+  "J’accepte que mon nom, ma ville et le nom de ma boutique soient visibles publiquement sur VinnHT.",
+  "Je m’engage à vendre uniquement des produits légaux, authentiques et conformes aux règles de VinnHT.",
+  "Je m’engage à publier des photos réelles, des prix exacts et des descriptions honnêtes.",
+  "Je m’engage à maintenir mes stocks à jour et à préparer les commandes dans les délais annoncés.",
+  "Je comprends que les paiements sont envoyés directement sur mon compte MonCash et que je dois vérifier chaque preuve avant de préparer une commande.",
+  "Je m’engage à protéger les informations des clients et à les utiliser uniquement pour traiter leurs commandes.",
+  "Je comprends que VinnHT peut refuser, suspendre ou désactiver mon espace vendeur en cas de fraude, fausses informations, produits interdits ou mauvais comportement.",
+  "Je comprends que VinnHT peut demander des informations supplémentaires pour confirmer mon profil ou ma boutique.",
+  "Je reste responsable de la légalité, de la qualité, de l’authenticité et de la sécurité des produits que je propose.",
+  "Je m’engage à respecter les règles VinnHT applicables aux annulations, retours, remboursements et produits défectueux.",
+  "Je garantis disposer des droits nécessaires sur les marques, images, descriptions et autres contenus publiés.",
+  "Je m’engage à collaborer avec VinnHT lors d’une plainte, d’une suspicion de fraude ou d’une contestation de paiement.",
+  "Je comprends que VinnHT agit comme plateforme intermédiaire et que mes obligations fiscales, commerciales et réglementaires restent sous ma responsabilité.",
+  "J’accepte les conditions générales pour devenir vendeur sur VinnHT.",
+];
 
 const dateOnly = (value) => new Date(`${value}T12:00:00`);
 const sqlDate = (date) => date.toISOString().slice(0, 10);
@@ -507,12 +529,74 @@ const notifyUser = async (
   entityType = null,
   entityId = null,
 ) => {
+  const preferenceGroup = role === "supervisor" ? "superviseur" : role;
+  const notificationPreference = (() => {
+    if (role === "client") {
+      if (type.startsWith("support.") || type.startsWith("message.")) return "messages";
+      if (
+        type.startsWith("order.") ||
+        type.startsWith("payment.") ||
+        type.startsWith("delivery.") ||
+        type.startsWith("seller_request.")
+      ) {
+        return "orderUpdates";
+      }
+      if (type.startsWith("promotion.") || type.startsWith("offer.")) return "promotions";
+    }
+    if (role === "seller") {
+      if (
+        type === "order.paid" ||
+        type.startsWith("payment.proof") ||
+        type.startsWith("payment.validated")
+      ) {
+        return "newOrders";
+      }
+      if (
+        type === "order.ready" ||
+        type.startsWith("delivery.") ||
+        type === "order.completed"
+      ) {
+        return "readyOrders";
+      }
+      if (type.startsWith("stock.")) return "lowStock";
+      if (type.startsWith("weekly_report.")) return "weeklyReport";
+    }
+    if (role === "delivery") {
+      if (type.includes("assigned") || type.includes("invite")) return "sellerRequests";
+      if (type.startsWith("delivery.")) return "paymentAlerts";
+    }
+    if (["admin", "manager", "supervisor", "superviseur"].includes(role)) {
+      if (type.startsWith("seller_request.")) return "sellerRequests";
+      if (type.startsWith("weekly_report.")) return "weeklyReport";
+      if (type.startsWith("payment.") || type.startsWith("order.")) return "paymentAlerts";
+      if (type.startsWith("delivery.")) return "securityAlerts";
+      if (type.startsWith("security.")) return "securityAlerts";
+    }
+    if (role === "delivery" && type.startsWith("security.")) return "securityAlerts";
+    return null;
+  })();
+
+  if (notificationPreference) {
+    const [[row]] = await executor.query(
+      `SELECT preferences
+       FROM user_preferences
+       WHERE user_id=? AND preference_group=?`,
+      [userId, preferenceGroup],
+    );
+    const preferences =
+      typeof row?.preferences === "string"
+        ? JSON.parse(row.preferences)
+        : row?.preferences;
+    if (preferences?.[notificationPreference] === false) return false;
+  }
+
   await executor.query(
     `INSERT INTO notifications
       (user_id,role,type,title,message,link,entity_type,entity_id)
      VALUES (?,?,?,?,?,?,?,?)`,
     [userId, role, type, title, message, link, entityType, entityId],
   );
+  return true;
 };
 const logOrderEvent = async (
   executor,
@@ -545,15 +629,26 @@ const notifyRole = async (
   entityType = null,
   entityId = null,
 ) => {
-  await executor.query(
-    `INSERT INTO notifications
-      (user_id,role,type,title,message,link,entity_type,entity_id)
-     SELECT DISTINCT u.id,?,?,?,?,?,?,?
+  const [users] = await executor.query(
+    `SELECT DISTINCT u.id
      FROM users u
      JOIN user_roles ur ON ur.user_id=u.id AND ur.role=?
      WHERE u.status='active'`,
-    [role, type, title, message, link, entityType, entityId, role],
+    [role],
   );
+  for (const user of users) {
+    await notifyUser(
+      executor,
+      user.id,
+      role,
+      type,
+      title,
+      message,
+      link,
+      entityType,
+      entityId,
+    );
+  }
 };
 const clientProductSelect = `
   SELECT p.*,COALESCE(p.department,'Ouest') department,COALESCE(p.city,'Haiti') city,c.name category_name,u.name seller_name,
@@ -702,6 +797,53 @@ app.get(
       [req.user.id],
     );
     res.json(await safeUserWithRoles(user));
+  }),
+);
+app.patch(
+  "/api/auth/password",
+  authenticate,
+  writeRateLimiter,
+  [
+    body("currentPassword").isString().notEmpty(),
+    body("newPassword")
+      .isLength({ min: 10, max: 128 })
+      .matches(/[a-z]/)
+      .matches(/[A-Z]/)
+      .matches(/[0-9]/),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const [[user]] = await pool.query(
+      "SELECT password_hash FROM users WHERE id=? AND status='active'",
+      [req.user.id],
+    );
+    if (!user || !(await bcrypt.compare(req.body.currentPassword, user.password_hash))) {
+      return res.status(400).json({ message: "Le mot de passe actuel est incorrect." });
+    }
+    if (await bcrypt.compare(req.body.newPassword, user.password_hash)) {
+      return res.status(400).json({
+        message: "Le nouveau mot de passe doit être différent de l’ancien.",
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(req.body.newPassword, 12);
+    await pool.query("UPDATE users SET password_hash=? WHERE id=?", [
+      passwordHash,
+      req.user.id,
+    ]);
+    await audit(req, "account.password.change", "user", req.user.id);
+    await notifyUser(
+      pool,
+      req.user.id,
+      req.user.role,
+      "security.password_changed",
+      "Mot de passe modifié",
+      "Le mot de passe de votre compte VinnHT vient d’être modifié.",
+      null,
+      "user",
+      req.user.id,
+    );
+    res.json({ message: "Mot de passe modifié avec succès." });
   }),
 );
 app.patch(
@@ -1315,9 +1457,16 @@ app.get(
   "/api/shops/:sellerId/reviews",
   asyncRoute(async (req, res) => {
     const [reviews] = await pool.query(
-      `SELECT sr.id,sr.rating,sr.comment,sr.created_at,u.name client_name,u.profile_image_url
+      `SELECT sr.id,sr.rating,sr.comment,sr.created_at,u.name client_name,
+        CASE
+          WHEN JSON_UNQUOTE(JSON_EXTRACT(up.preferences,'$.profileVisibility'))='true'
+          THEN u.profile_image_url
+          ELSE NULL
+        END profile_image_url
        FROM shop_reviews sr
        JOIN users u ON u.id=sr.client_id
+       LEFT JOIN user_preferences up
+         ON up.user_id=u.id AND up.preference_group='client'
        WHERE sr.seller_id=?
        ORDER BY sr.created_at DESC`,
       [req.params.sellerId],
@@ -1452,6 +1601,8 @@ app.post(
   [
     body("businessName").trim().isLength({ min: 2 }),
     body("description").optional().trim().isLength({ max: 10000 }),
+    body("termsAccepted").equals("true"),
+    body("termsVersion").equals(SELLER_TERMS_VERSION),
   ],
   validate,
   asyncRoute(async (req, res) => {
@@ -1474,8 +1625,19 @@ app.post(
       ]);
     }
     const [request] = await pool.query(
-      "INSERT INTO seller_requests (user_id,business_name,shop_logo_url,description) VALUES (?,?,?,?)",
-      [req.user.id, req.body.businessName, shopLogoUrl, req.body.description || null],
+      `INSERT INTO seller_requests
+        (user_id,business_name,shop_logo_url,description,terms_version,
+         terms_accepted_at,terms_acceptance_ip,terms_snapshot)
+       VALUES (?,?,?,?,?,NOW(),?,?)`,
+      [
+        req.user.id,
+        req.body.businessName,
+        shopLogoUrl,
+        req.body.description || null,
+        SELLER_TERMS_VERSION,
+        req.ip || null,
+        JSON.stringify(SELLER_TERMS),
+      ],
     );
     await notifyRole(
       pool,
@@ -1484,6 +1646,16 @@ app.post(
       "Nouvelle demande vendeur",
       `${req.body.businessName} attend une vérification.`,
       "/manager/seller-requests",
+      "seller_request",
+      request.insertId,
+    );
+    await notifyRole(
+      pool,
+      "admin",
+      "seller_request.created",
+      "Nouvelle demande vendeur",
+      `${req.body.businessName} attend une vérification.`,
+      "/admin/users",
       "seller_request",
       request.insertId,
     );
@@ -2063,6 +2235,23 @@ app.post(
           item.quantity,
           product.id,
         ]);
+        const [[remainingProduct]] = await connection.query(
+          "SELECT name,stock FROM products WHERE id=?",
+          [product.id],
+        );
+        if (remainingProduct && Number(remainingProduct.stock) <= 5) {
+          await notifyUser(
+            connection,
+            product.seller_id,
+            "seller",
+            "stock.low",
+            "Stock faible",
+            `${remainingProduct.name} ne contient plus que ${remainingProduct.stock} unité(s).`,
+            "/seller/products",
+            "product",
+            product.id,
+          );
+        }
       }
       const commissionRate = Number(process.env.COMMISSION_RATE || 0.1);
       for (const [sellerId, gross] of sellerTotals) {
@@ -4965,7 +5154,9 @@ app.post(
   validate,
   asyncRoute(async (req, res) => {
     const [[conversation]] = await pool.query(
-      "SELECT id FROM conversations WHERE id=? AND (client_id=? OR seller_id=?)",
+      `SELECT id,client_id,seller_id
+       FROM conversations
+       WHERE id=? AND (client_id=? OR seller_id=?)`,
       [req.params.id, req.user.id, req.user.id],
     );
     if (!conversation) return res.status(404).json({ message: "Conversation introuvable." });
@@ -4974,6 +5165,25 @@ app.post(
       [req.params.id, req.user.id, req.body.body],
     );
     await pool.query("UPDATE conversations SET updated_at=NOW() WHERE id=?", [req.params.id]);
+    const recipientId =
+      Number(conversation.client_id) === Number(req.user.id)
+        ? conversation.seller_id
+        : conversation.client_id;
+    const recipientRole =
+      Number(conversation.client_id) === Number(recipientId)
+        ? "client"
+        : "seller";
+    await notifyUser(
+      pool,
+      recipientId,
+      recipientRole,
+      "message.received",
+      "Nouveau message",
+      `${req.user.name} vous a envoyé un message.`,
+      recipientRole === "seller" ? "/seller/messages" : "/messages",
+      "conversation",
+      conversation.id,
+    );
     res.status(201).json({ id: result.insertId, message: "Message envoyé." });
   }),
 );
@@ -5003,12 +5213,8 @@ const publishSaturdayReportNotification = async () => {
   const now = new Date();
   if (now.getDay() !== 6) return;
   const period = reportPeriod(sqlDate(now));
-  await pool.query(
-    `INSERT INTO notifications
-      (user_id,role,type,title,message,link,entity_type,entity_id)
-     SELECT
-      u.id,'admin','weekly_report.ready','Rapport hebdomadaire disponible',
-      ?,'/admin#weekly-report','weekly_report',?
+  const [admins] = await pool.query(
+    `SELECT DISTINCT u.id
      FROM users u
      JOIN user_roles ur ON ur.user_id=u.id AND ur.role='admin'
      WHERE u.status='active'
@@ -5019,12 +5225,112 @@ const publishSaturdayReportNotification = async () => {
            AND n.entity_type='weekly_report'
            AND n.entity_id=?
        )`,
-    [
+    [period.end],
+  );
+  for (const admin of admins) {
+    await notifyUser(
+      pool,
+      admin.id,
+      "admin",
+      "weekly_report.ready",
+      "Rapport hebdomadaire disponible",
       `Le rapport des marchands du ${period.start} au ${period.end} est prêt au téléchargement.`,
+      "/admin#weekly-report",
+      "weekly_report",
       period.end,
+    );
+  }
+
+  const [sellers] = await pool.query(
+    `SELECT u.id,
+      COUNT(DISTINCT ss.id) sale_count,
+      COALESCE(SUM(
+        CASE WHEN ss.status<>'cancelled' THEN ss.gross_amount ELSE 0 END
+      ),0) gross_amount
+     FROM users u
+     JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'
+     LEFT JOIN seller_sales ss
+       ON ss.seller_id=u.id
+       AND ss.created_at>=?
+       AND ss.created_at<?
+     WHERE u.status='active'
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.user_id=u.id
+           AND n.type='weekly_report.seller'
+           AND n.entity_type='weekly_report'
+           AND n.entity_id=?
+       )
+     GROUP BY u.id`,
+    [period.start, period.exclusiveEnd, period.end],
+  );
+  for (const seller of sellers) {
+    await notifyUser(
+      pool,
+      seller.id,
+      "seller",
+      "weekly_report.seller",
+      "Résumé hebdomadaire de votre boutique",
+      `${seller.sale_count} vente(s) pour ${Number(seller.gross_amount).toLocaleString("fr-HT")} HTG cette semaine.`,
+      "/seller/sales",
+      "weekly_report",
       period.end,
+    );
+  }
+
+  const [[operations]] = await pool.query(
+    `SELECT
+      (SELECT COUNT(*) FROM orders WHERE created_at>=? AND created_at<?) order_count,
+      (SELECT COUNT(*) FROM deliveries WHERE created_at>=? AND created_at<?) delivery_count,
+      (SELECT COUNT(*) FROM seller_requests WHERE created_at>=? AND created_at<?) request_count`,
+    [
+      period.start,
+      period.exclusiveEnd,
+      period.start,
+      period.exclusiveEnd,
+      period.start,
+      period.exclusiveEnd,
     ],
   );
+  const [managers] = await pool.query(
+    `SELECT DISTINCT u.id
+     FROM users u
+     JOIN user_roles ur ON ur.user_id=u.id AND ur.role='manager'
+     WHERE u.status='active'
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.user_id=u.id
+           AND n.type='weekly_report.operations'
+           AND n.entity_type='weekly_report'
+           AND n.entity_id=?
+       )`,
+    [period.end],
+  );
+  for (const manager of managers) {
+    await notifyUser(
+      pool,
+      manager.id,
+      "manager",
+      "weekly_report.operations",
+      "Résumé opérationnel hebdomadaire",
+      `${operations.order_count} commande(s), ${operations.delivery_count} livraison(s) et ${operations.request_count} demande(s) vendeur cette semaine.`,
+      "/manager/reports",
+      "weekly_report",
+      period.end,
+    );
+  }
+};
+const runMessageRetentionCleanup = async () => {
+  const result = await cleanupExpiredMessages(
+    pool,
+    process.env.MESSAGE_RETENTION_DAYS,
+  );
+  if (result.deletedMessages || result.deletedConversations) {
+    console.log(
+      `Nettoyage messages: ${result.deletedMessages} message(s), ` +
+        `${result.deletedConversations} conversation(s) supprimé(s).`,
+    );
+  }
 };
 const port = Number(process.env.PORT || 5056);
 const sslEnabled = Boolean(process.env.SSL_KEY_PATH && process.env.SSL_CERT_PATH);
@@ -5041,7 +5347,15 @@ const server = sslEnabled
 server.listen(port, () => {
   const protocol = sslEnabled ? "https" : "http";
   console.log(`VinnHT API disponible sur ${protocol}://localhost:${port}`);
+  runMessageRetentionCleanup().catch(console.error);
   publishSaturdayReportNotification().catch(console.error);
+  const messageRetentionTimer = setInterval(
+    () => {
+      runMessageRetentionCleanup().catch(console.error);
+    },
+    24 * 60 * 60 * 1000,
+  );
+  messageRetentionTimer.unref();
   const saturdayReportTimer = setInterval(
     () => {
       publishSaturdayReportNotification().catch(console.error);

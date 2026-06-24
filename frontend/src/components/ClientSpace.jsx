@@ -16,7 +16,6 @@ import {
   Headphones,
   Heart,
   HelpCircle,
-  LockKeyhole,
   Mail,
   MapPin,
   MessageCircle,
@@ -43,6 +42,7 @@ import { Swiper, SwiperSlide } from "swiper/react";
 import { Link } from "react-router-dom";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
 import MobileProfileActions from "./MobileProfileActions.jsx";
+import AccountSecuritySettings from "./AccountSecuritySettings.jsx";
 import { apiOrigin } from "../config/runtime.js";
 
 const imageSource = (url) =>
@@ -1550,19 +1550,17 @@ export function ClientSettingsContent({ api }) {
   const [securityMessage, setSecurityMessage] = useState("");
   const defaults = {
     orderUpdates: true,
-    promotions: true,
     messages: true,
     profileVisibility: false,
   };
   const [preferences, setPreferences] = useState(defaults);
   const settings = [
     [Bell, "Suivi des commandes", "Recevoir les changements de statut.", "orderUpdates"],
-    [Sparkles, "Offres et promotions", "Recevoir les meilleures offres VinnHT.", "promotions"],
     [MessageCircle, "Nouveaux messages", "Être alerté lorsqu’un vendeur répond.", "messages"],
     [
       ShieldCheck,
       "Profil public",
-      "Autoriser l’affichage public de votre profil.",
+      "Afficher votre photo dans les avis publics laissés aux boutiques.",
       "profileVisibility",
     ],
   ];
@@ -1610,21 +1608,7 @@ export function ClientSettingsContent({ api }) {
           </motion.article>
         ))}
       </div>
-      <section className="settings-security-panel">
-        <span>
-          <LockKeyhole />
-        </span>
-        <div>
-          <small>Sécurité du compte</small>
-          <h2>Votre session est protégée</h2>
-          <p>Un changement de mot de passe et la double authentification seront disponibles ici.</p>
-        </div>
-        <button
-          onClick={() => setSecurityMessage("Votre session actuelle est active et sécurisée.")}
-        >
-          Vérifier ma session
-        </button>
-      </section>
+      <AccountSecuritySettings api={api} onMessage={setSecurityMessage} />
       {securityMessage && <div className="client-api-notice">{securityMessage}</div>}
     </ClientPageFrame>
   );

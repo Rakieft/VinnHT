@@ -156,6 +156,8 @@ const runFlow = async () => {
   const sellerRequest = new FormData();
   sellerRequest.append("businessName", "Boutique Smoke VinnHT");
   sellerRequest.append("description", "Boutique temporaire pour la validation finale.");
+  sellerRequest.append("termsAccepted", "true");
+  sellerRequest.append("termsVersion", "2026-06-24-v2");
   await request("/seller/requests", {
     method: "POST",
     cookie: sellerRegistration.cookie,

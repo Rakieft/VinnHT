@@ -28,16 +28,24 @@ const categories = [
   "Autres",
 ];
 
+const SELLER_TERMS_VERSION = "2026-06-24-v2";
 const terms = [
-  "Je certifie que toutes les informations fournies sont exactes.",
-  "J’accepte que VinnHT vérifie mon profil avant d’approuver mon compte vendeur.",
+  "Je certifie que toutes les informations fournies sont exactes et à jour.",
+  "J’accepte que VinnHT vérifie mon profil avant l’approbation de mon espace vendeur.",
   "J’accepte que ma photo de profil soit obligatoire et visible par les acheteurs.",
   "J’accepte que mon nom, ma ville et le nom de ma boutique soient visibles publiquement sur VinnHT.",
-  "Je m’engage à vendre uniquement des produits légaux et conformes aux règles de VinnHT.",
-  "Je m’engage à publier des photos réelles et des descriptions honnêtes de mes produits.",
-  "Je m’engage à préparer les commandes dans les délais indiqués.",
-  "Je comprends que VinnHT peut refuser, suspendre ou désactiver mon compte vendeur en cas de fraude, fausses informations ou mauvais comportement.",
-  "Je comprends que VinnHT peut demander des informations supplémentaires pour confirmer mon profil vendeur.",
+  "Je m’engage à vendre uniquement des produits légaux, authentiques et conformes aux règles de VinnHT.",
+  "Je m’engage à publier des photos réelles, des prix exacts et des descriptions honnêtes.",
+  "Je m’engage à maintenir mes stocks à jour et à préparer les commandes dans les délais annoncés.",
+  "Je comprends que les paiements sont envoyés directement sur mon compte MonCash et que je dois vérifier chaque preuve avant de préparer une commande.",
+  "Je m’engage à protéger les informations des clients et à les utiliser uniquement pour traiter leurs commandes.",
+  "Je comprends que VinnHT peut refuser, suspendre ou désactiver mon espace vendeur en cas de fraude, fausses informations, produits interdits ou mauvais comportement.",
+  "Je comprends que VinnHT peut demander des informations supplémentaires pour confirmer mon profil ou ma boutique.",
+  "Je reste responsable de la légalité, de la qualité, de l’authenticité et de la sécurité des produits que je propose.",
+  "Je m’engage à respecter les règles VinnHT applicables aux annulations, retours, remboursements et produits défectueux.",
+  "Je garantis disposer des droits nécessaires sur les marques, images, descriptions et autres contenus publiés.",
+  "Je m’engage à collaborer avec VinnHT lors d’une plainte, d’une suspicion de fraude ou d’une contestation de paiement.",
+  "Je comprends que VinnHT agit comme plateforme intermédiaire et que mes obligations fiscales, commerciales et réglementaires restent sous ma responsabilité.",
   "J’accepte les conditions générales pour devenir vendeur sur VinnHT.",
 ];
 
@@ -111,7 +119,6 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
       profilePhoto:
         form.profilePhoto instanceof File ? form.profilePhoto.name : form.profilePhoto || "",
       shopLogo: form.shopLogo instanceof File ? form.shopLogo.name : "",
-      acceptedTerms: true,
       status: "pending",
     }),
     [form]
@@ -163,6 +170,8 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
       delete requestDetails.shopLogo;
       requestFormData.append("businessName", sellerRequestData.shopName);
       requestFormData.append("description", JSON.stringify(requestDetails, null, 2));
+      requestFormData.append("termsAccepted", "true");
+      requestFormData.append("termsVersion", SELLER_TERMS_VERSION);
       if (form.profilePhoto instanceof File) {
         requestFormData.append("profilePhoto", form.profilePhoto);
       }
@@ -236,7 +245,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
           [
             ShieldCheck,
             "Paiement sécurisé",
-            "VinnHT protège les transactions et prépare un système de paiement fiable pour les vendeurs.",
+            "Le client paie directement votre numéro MonCash et vous vérifiez sa preuve avant la préparation.",
           ],
         ].map(([Icon, title, text]) => (
           <motion.article whileHover={{ y: -5 }} key={title}>
@@ -256,7 +265,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
             <h2>{message || "Votre demande vendeur est enregistrée."}</h2>
             <p>
               L’équipe VinnHT examinera vos informations. Vous recevrez une réponse après validation
-              par un administrateur ou un superviseur.
+              par un manager ou un administrateur.
             </p>
             <strong>Statut de la demande : {request.status || "En attente d’approbation"}</strong>
           </div>
@@ -443,7 +452,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
         </FormSection>
 
         <button className="seller-submit-button" type="submit">
-          Envoyer la demande
+          Continuer vers les conditions
         </button>
       </form>
 
@@ -469,7 +478,8 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
               </span>
               <h2>Conditions pour devenir vendeur VinnHT</h2>
               <p>
-                Avant d’envoyer votre demande, veuillez lire et accepter les conditions suivantes.
+                Votre formulaire est prêt. Lisez et acceptez toutes les conditions avant son envoi
+                définitif. Version {SELLER_TERMS_VERSION}.
               </p>
               <div className="terms-checklist">
                 {terms.map((term, index) => (
@@ -494,7 +504,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
                   Annuler
                 </button>
                 <button type="button" disabled={!allTermsAccepted} onClick={confirmSubmit}>
-                  Confirmer et envoyer
+                  Accepter et envoyer la demande
                 </button>
               </footer>
             </motion.div>

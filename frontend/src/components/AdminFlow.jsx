@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
 import MobileProfileActions from "./MobileProfileActions.jsx";
+import AccountSecuritySettings from "./AccountSecuritySettings.jsx";
 import { assetUrl } from "../config/runtime.js";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-HT")} HTG`;
@@ -1754,13 +1755,10 @@ export function AdminSettingsContent({ api, role = "admin" }) {
           [BarChart3, "Activité marketplace", "Recevoir les résumés sur l’évolution des commandes.", "weeklyReport"],
           [Truck, "Suivi des livraisons", "Être alerté des retards et échecs de livraison.", "securityAlerts"],
           [Store, "Suivi des vendeurs", "Recevoir les nouvelles demandes et alertes boutiques.", "sellerRequests"],
-          [Package, "Commandes à surveiller", "Recevoir les résumés opérationnels utiles.", "paymentAlerts"],
         ]
       : role === "delivery"
         ? [
             [Truck, "Nouvelles missions", "Recevoir une alerte lorsqu’une commande vous est assignée.", "sellerRequests"],
-            [Package, "Mises à jour livraison", "Être informé des changements importants d’une mission.", "paymentAlerts"],
-            [Bell, "Rappels de livraison", "Recevoir les rappels utiles avant une récupération.", "weeklyReport"],
             [ShieldCheck, "Alertes de sécurité", "Être informé des actions sensibles liées à votre compte.", "securityAlerts"],
           ]
       : role === "superviseur"
@@ -1772,7 +1770,6 @@ export function AdminSettingsContent({ api, role = "admin" }) {
           ]
         : [
             [Store, "Demandes vendeurs", "Etre alerte lorsqu un client demande a devenir vendeur.", "sellerRequests"],
-            [Wallet, "Alertes financieres", "Recevoir les alertes de paiements et lots vendeurs.", "paymentAlerts"],
             [FileText, "Rapport hebdomadaire", "Recevoir le rappel du rapport officiel chaque samedi.", "weeklyReport"],
             [ShieldCheck, "Securite", "Etre informe des actions administratives sensibles.", "securityAlerts"],
           ];
@@ -1804,6 +1801,7 @@ export function AdminSettingsContent({ api, role = "admin" }) {
           <p>Ces préférences contrôlent les alertes visibles dans votre espace VinnHT.</p>
         </div>
       </section>
+      <AccountSecuritySettings api={api} onMessage={setMessage} />
       {message && <div className="admin-message">{message}</div>}
     </div>
   );

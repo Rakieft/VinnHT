@@ -608,6 +608,7 @@ function Navbar() {
         <nav className={open ? "nav-links open" : "nav-links"}>
           <Link to="/">Accueil</Link>
           <Link to="/categories">Rayons</Link>
+          <Link to="/about">À propos</Link>
           <Link to="/contact">Contact</Link>
           {user ? (
             <>
@@ -719,6 +720,7 @@ function Footer() {
         <Link to="/">Accueil</Link>
         <Link to="/categories">Rayons</Link>
         <Link to="/products">Catalogue</Link>
+        <Link to="/about">À propos</Link>
         <Link to="/contact">Support</Link>
       </div>
 
@@ -1375,6 +1377,220 @@ function Contact() {
         <div><MapPin /><h2>VinnHT opère depuis Haïti</h2><p>{config.supportAddress || "Port-au-Prince, Haïti"} · {config.supportHours || "Lundi au samedi"}</p><a href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(config.supportAddress || "Port-au-Prince, Haiti")}`} target="_blank">Voir sur OpenStreetMap <ArrowRight /></a></div>
         <iframe title="Localisation VinnHT à Port-au-Prince" src="https://www.openstreetmap.org/export/embed.html?bbox=-72.38%2C18.50%2C-72.25%2C18.62&layer=mapnik" loading="lazy" />
       </section>
+    </PublicLayout>
+  );
+}
+
+function About() {
+  const ecosystem = [
+    {
+      icon: ShoppingBag,
+      title: "Pour les clients",
+      text: "Découvrir des produits disponibles en Haïti, comparer les boutiques et suivre chaque commande depuis un seul espace.",
+    },
+    {
+      icon: Store,
+      title: "Pour les vendeurs",
+      text: "Créer une boutique professionnelle, présenter ses produits et développer son activité auprès d’un public national.",
+    },
+    {
+      icon: Truck,
+      title: "Pour les livreurs",
+      text: "Recevoir des missions claires, suivre le parcours de livraison et confirmer la remise au client avec confiance.",
+    },
+  ];
+  const commitments = [
+    [ShieldCheck, "Confiance", "Des profils, boutiques, paiements et livraisons suivis avec des étapes compréhensibles."],
+    [MapPin, "Proximité", "Une marketplace pensée pour les départements, les villes et les réalités commerciales d’Haïti."],
+    [Users, "Opportunités", "Un espace où clients, commerçants et professionnels peuvent évoluer ensemble."],
+    [Sparkles, "Qualité", "Une expérience rapide, moderne et soignée sur téléphone, tablette et ordinateur."],
+  ];
+  const journey = [
+    ["01", "Découvrir", "Explorer les rayons et trouver des produits selon ses besoins et son département."],
+    ["02", "Échanger", "Contacter directement une boutique dans VinnHT ou par WhatsApp avant l’achat."],
+    ["03", "Commander", "Payer le vendeur, transmettre la preuve et suivre la préparation de la commande."],
+    ["04", "Recevoir", "Identifier le livreur, suivre la livraison puis confirmer la réception en toute clarté."],
+  ];
+
+  return (
+    <PublicLayout>
+      <section className="about-hero">
+        <motion.div
+          className="about-hero-copy"
+          initial={{ opacity: 0, x: -28 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.7 }}
+        >
+          <span className="about-eyebrow">À propos de VinnHT</span>
+          <h1>Le marché numérique conçu pour faire avancer Haïti.</h1>
+          <p>
+            VinnHT rapproche les clients, les vendeurs et les livreurs dans une
+            marketplace locale, simple et professionnelle.
+          </p>
+          <div className="about-hero-actions">
+            <Button to="/categories">
+              Explorer les rayons <ArrowRight />
+            </Button>
+            <Button to="/register" variant="secondary">
+              Rejoindre VinnHT
+            </Button>
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="about-brand-visual"
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.75 }}
+        >
+          <div className="about-brand-orbit orbit-one" />
+          <div className="about-brand-orbit orbit-two" />
+          <div className="about-logo-core">
+            <img src="/vinnht-logo.png" alt="Logo officiel VinnHT" />
+          </div>
+          <motion.article
+            className="about-floating-card about-card-client"
+            animate={{ y: [0, -8, 0] }}
+            transition={{ duration: 4, repeat: Infinity }}
+          >
+            <ShoppingBag />
+            <span><b>Acheter</b><small>Simplement</small></span>
+          </motion.article>
+          <motion.article
+            className="about-floating-card about-card-seller"
+            animate={{ y: [0, 9, 0] }}
+            transition={{ duration: 4.6, repeat: Infinity }}
+          >
+            <Store />
+            <span><b>Vendre</b><small>Partout en Haïti</small></span>
+          </motion.article>
+          <motion.article
+            className="about-floating-card about-card-delivery"
+            animate={{ x: [0, 7, 0] }}
+            transition={{ duration: 4.2, repeat: Infinity }}
+          >
+            <Truck />
+            <span><b>Livrer</b><small>Avec confiance</small></span>
+          </motion.article>
+        </motion.div>
+      </section>
+
+      <AnimatedSection className="about-mission section">
+        <div className="about-mission-heading">
+          <span>Notre mission</span>
+          <h2>Rendre le commerce local plus visible, plus accessible et mieux organisé.</h2>
+        </div>
+        <div className="about-mission-copy">
+          <p>
+            Beaucoup de produits, de services et de talents existent déjà en
+            Haïti. VinnHT leur offre un espace numérique commun pour être
+            découverts, présentés et commandés plus facilement.
+          </p>
+          <p>
+            Notre ambition est de construire une référence locale où la
+            technologie soutient réellement le commerce, sans effacer la
+            relation humaine entre le client et la boutique.
+          </p>
+        </div>
+      </AnimatedSection>
+
+      <section className="about-ecosystem section">
+        <SectionHead
+          eyebrow="Un écosystème complet"
+          title="Une plateforme, trois expériences connectées"
+        />
+        <div className="about-ecosystem-grid">
+          {ecosystem.map(({ icon: Icon, title, text }, index) => (
+            <AnimatedSection delay={index * 0.08} key={title}>
+              <motion.article whileHover={{ y: -7 }}>
+                <span><Icon /></span>
+                <small>VinnHT {index + 1}</small>
+                <h3>{title}</h3>
+                <p>{text}</p>
+              </motion.article>
+            </AnimatedSection>
+          ))}
+        </div>
+      </section>
+
+      <AnimatedSection className="about-story section">
+        <div className="about-story-panel">
+          <span>Notre vision</span>
+          <h2>Une marketplace haïtienne qui grandit avec ses utilisateurs.</h2>
+          <p>
+            VinnHT est construit progressivement autour des besoins réels:
+            vendre, acheter, communiquer, payer, livrer et suivre son activité.
+            Chaque fonction vise une expérience plus claire et plus rassurante.
+          </p>
+          <Link to="/contact">
+            Parler avec l’équipe VinnHT <ArrowRight />
+          </Link>
+        </div>
+        <div className="about-vision-board">
+          <div className="about-vision-logo">
+            <img src="/vinnht-logo.png" alt="VinnHT" />
+          </div>
+          <div className="about-vision-values">
+            <article>
+              <strong>Local</strong>
+              <small>Pensé depuis Haïti</small>
+            </article>
+            <article>
+              <strong>Utile</strong>
+              <small>Construit pour le commerce réel</small>
+            </article>
+            <article>
+              <strong>Évolutif</strong>
+              <small>Prêt à grandir avec le marché</small>
+            </article>
+          </div>
+        </div>
+      </AnimatedSection>
+
+      <section className="about-commitments section">
+        <SectionHead eyebrow="Nos engagements" title="Ce qui guide VinnHT" />
+        <div className="about-commitment-grid">
+          {commitments.map(([Icon, title, text], index) => (
+            <AnimatedSection delay={index * 0.06} key={title}>
+              <article>
+                <span><Icon /></span>
+                <h3>{title}</h3>
+                <p>{text}</p>
+              </article>
+            </AnimatedSection>
+          ))}
+        </div>
+      </section>
+
+      <AnimatedSection className="about-journey section">
+        <SectionHead eyebrow="L’expérience VinnHT" title="De la découverte à la réception" />
+        <div className="about-journey-grid">
+          {journey.map(([number, title, text]) => (
+            <article key={number}>
+              <span>{number}</span>
+              <div>
+                <h3>{title}</h3>
+                <p>{text}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </AnimatedSection>
+
+      <AnimatedSection className="about-final-cta section">
+        <div>
+          <span>Bienvenue dans le marché numérique d’Haïti</span>
+          <h2>Découvrez ce que VinnHT peut vous offrir aujourd’hui.</h2>
+        </div>
+        <div>
+          <Button to="/products">
+            Voir le catalogue <ArrowRight />
+          </Button>
+          <Button to="/contact" variant="secondary">
+            Contacter VinnHT
+          </Button>
+        </div>
+      </AnimatedSection>
     </PublicLayout>
   );
 }
@@ -2380,19 +2596,6 @@ function AuthPage({ register = false }) {
             >
               {busy ? "Veuillez patienter..." : register ? "Creer mon compte" : "Se connecter"}
             </motion.button>
-            <div className="social-divider">
-              <span />
-              Ou continuer avec
-              <span />
-            </div>
-            <div className="social-login">
-              <button type="button">
-                <b>G</b> Google
-              </button>
-              <button type="button">
-                <b>f</b> Facebook
-              </button>
-            </div>
             <p className="auth-switch">
               {register ? "Deja membre " : "Pas encore membre "}{" "}
               <Link to={register ? "/login" : "/register"}>
@@ -3609,6 +3812,7 @@ function AppRoutes() {
       <Route path="/shops/:sellerId" element={<ShopDetails />} />
       <Route path="/login" element={<AuthPage />} />
       <Route path="/register" element={<AuthPage register />} />
+      <Route path="/about" element={<About />} />
       <Route path="/contact" element={<Contact />} />
       <Route path="/become-seller" element={<BecomeSeller />} />
       <Route

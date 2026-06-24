@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
 import MobileProfileActions from "./MobileProfileActions.jsx";
+import AccountSecuritySettings from "./AccountSecuritySettings.jsx";
 import { apiOrigin } from "../config/runtime.js";
 import { shopPublicPath } from "../utils/shopUrl.js";
 
@@ -1895,9 +1896,10 @@ export function SellerSettingsContent({ api }) {
         <Bell />
         <div>
           <h2>Notifications intelligentes</h2>
-          <p>Les alertes email, WhatsApp et push seront connectees avant la mise en production.</p>
+          <p>Ces choix contrôlent les alertes affichées dans votre espace vendeur VinnHT.</p>
         </div>
       </section>
+      <AccountSecuritySettings api={api} onMessage={setMessage} />
       {message && <div className="seller-message">{message}</div>}
     </SellerPageHeader>
   );
@@ -2221,7 +2223,12 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
               ["Situation actuelle precisee", Boolean(details.activityStatus && details.institutionName)],
               ["Projet commercial decrit", Boolean(details.shopDescription && details.mainCategory)],
               ["Adresse de recuperation", Boolean(details.pickupAddress)],
-              ["Conditions acceptees", Boolean(details.acceptedTerms)],
+              [
+                request.terms_accepted_at
+                  ? `Conditions ${request.terms_version} acceptees le ${new Date(request.terms_accepted_at).toLocaleDateString("fr-HT")}`
+                  : "Conditions vendeur acceptees",
+                Boolean(request.terms_accepted_at && request.terms_version),
+              ],
             ].map(([label, valid]) => <p className={valid ? "valid" : "missing"} key={label}><span>{valid ? "OK" : "!"}</span>{label}</p>)}
           </section>
           {request.reviewed_at && (
