@@ -348,6 +348,90 @@
   box-shadow: 0 18px 55px rgba(15, 23, 42, 0.07);
 }
 
+.admin-support-page {
+  display: grid;
+  gap: 20px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.admin-support-page .marketplace-messages-page {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.admin-support-page .client-messages-shell {
+  height: clamp(480px, calc(100dvh - 330px), 680px);
+}
+
+.admin-support-view-switcher {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 22px;
+  border: 1px solid #dbeafe;
+  border-radius: 27px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 92% 8%, rgba(245, 158, 11, 0.16), transparent 27%),
+    linear-gradient(135deg, #ffffff, #eff6ff);
+  box-shadow: 0 18px 55px rgba(15, 23, 42, 0.07);
+}
+
+.admin-support-view-switcher span {
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.admin-support-view-switcher h1 {
+  margin: 6px 0;
+  color: #0f172a;
+  font-size: clamp(26px, 3vw, 38px);
+}
+
+.admin-support-view-switcher p {
+  max-width: 680px;
+  margin: 0;
+  color: #64748b;
+}
+
+.admin-support-view-switcher nav {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  padding: 5px;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.admin-support-view-switcher button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 13px;
+  padding: 0 14px;
+  color: #64748b;
+  background: transparent;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.admin-support-view-switcher button.active {
+  color: #ffffff;
+  background: #2563eb;
+  box-shadow: 0 12px 25px rgba(37, 99, 235, 0.22);
+}
+
+.admin-support-view-switcher button svg {
+  width: 18px;
+}
+
 .admin-support-list {
   max-height: 720px;
   display: grid;
@@ -403,6 +487,24 @@
   overflow: hidden;
   color: #64748b;
   font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-support-list p b {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-support-list p strong {
+  overflow: hidden;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -465,10 +567,22 @@
 }
 
 .admin-support-room header p b,
-.admin-support-room header p small {
+.admin-support-room header p small,
+.admin-support-room header p strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.admin-support-room header p b {
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.admin-support-room header p strong {
+  color: #475569;
+  font-size: 12px;
 }
 
 .admin-support-room header p small {
@@ -951,47 +1065,6 @@
 }
 
 .admin-health-groups p small {
-  color: #64748b;
-  font-size: 10px;
-}
-
-.admin-audit-panel > div {
-  display: grid;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.admin-audit-panel article {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px;
-  border-radius: 15px;
-  background: #f8fafc;
-}
-
-.admin-audit-panel article > span {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  flex: 0 0 36px;
-  place-items: center;
-  border-radius: 12px;
-  color: #2563eb;
-  background: #dbeafe;
-}
-
-.admin-audit-panel article svg {
-  width: 16px;
-}
-
-.admin-audit-panel article p {
-  display: grid;
-  gap: 3px;
-  margin: 0;
-}
-
-.admin-audit-panel article small {
   color: #64748b;
   font-size: 10px;
 }
@@ -3078,6 +3151,46 @@
 }
 
 @media (max-width: 620px) {
+  .admin-support-page.mobile-discussion-open {
+    gap: 0;
+  }
+
+  .admin-support-page.mobile-discussion-open .admin-support-view-switcher {
+    display: none;
+  }
+
+  .admin-support-page.mobile-discussion-open .client-messages-shell {
+    height: calc(100dvh - 145px);
+    min-height: 480px;
+  }
+
+  .admin-support-page {
+    overflow: visible;
+  }
+
+  .admin-support-page .client-messages-shell {
+    height: calc(100dvh - 300px);
+    min-height: 360px;
+  }
+
+  .admin-support-view-switcher {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 19px;
+  }
+
+  .admin-support-view-switcher nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .admin-support-view-switcher button {
+    justify-content: center;
+    padding: 0 9px;
+    font-size: 11px;
+  }
+
   .admin-staff-create-form {
     grid-template-columns: 1fr;
     padding: 17px;

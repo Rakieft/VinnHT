@@ -15,7 +15,12 @@ function ConversationAvatar({ image, name, large = false }) {
   );
 }
 
-export default function MarketplaceMessages({ api, user, sellerMode = false }) {
+export default function MarketplaceMessages({
+  api,
+  user,
+  sellerMode = false,
+  onMobileConversationChange,
+}) {
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const requestedConversation = Number(queryParams.get("conversation")) || null;
@@ -27,12 +32,24 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [supportError, setSupportError] = useState("");
   const [mobileConversationOpen, setMobileConversationOpen] = useState(Boolean(requestedConversation || openSupport));
 
-  const loadConversations = async () => {
+  useEffect(() => {
+    onMobileConversationChange?.(mobileConversationOpen);
+  }, [mobileConversationOpen, onMobileConversationChange]);
+
+  const loadConversations = async (preferredConversation = null) => {
     const { data } = await api.get("/messages/conversations");
     setConversations(data);
-    setActive((current) => requestedConversation || current || data[0]?.id || null);
+    setActive(
+      (current) =>
+        preferredConversation ||
+        requestedConversation ||
+        current ||
+        data[0]?.id ||
+        null,
+    );
   };
 
   const loadMessages = async (id) => {
@@ -43,12 +60,20 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
 
   useEffect(() => {
     const initialize = async () => {
-      if (openSupport && !sellerMode) {
-        const { data } = await api.post("/messages/support");
-        setActive(data.id);
-        setMobileConversationOpen(true);
+      let supportConversation = null;
+      try {
+        if (openSupport && !sellerMode) {
+          const { data } = await api.post("/messages/support");
+          supportConversation = data.id;
+          setMobileConversationOpen(true);
+        }
+        await loadConversations(supportConversation);
+      } catch (error) {
+        setSupportError(
+          error.response?.data?.message ||
+            "Impossible d’ouvrir le support VinnHT.",
+        );
       }
-      await loadConversations();
     };
     initialize();
     if (preparedDraft) setDraft(preparedDraft);
@@ -87,6 +112,7 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
 
   return (
     <div className="seller-flow marketplace-messages-page">
+      {supportError && <div className="seller-message">{supportError}</div>}
       <div className={`client-messages-shell ${mobileConversationOpen ? "conversation-open" : ""}`}>
         <aside className="conversation-list">
           {!sellerMode && (
@@ -109,23 +135,30 @@ export default function MarketplaceMessages({ api, user, sellerMode = false }) {
               placeholder="Rechercher"
             />
           </label>
-          {visible.map((conversation) => (
-            <button
-              className={active === conversation.id ? "active" : ""}
-              onClick={() => {
-                setActive(conversation.id);
-                setMobileConversationOpen(true);
-              }}
-              key={conversation.id}
-            >
-              <ConversationAvatar image={conversation.image_url} name={conversation.name} />
-              <p>
-                <b>{conversation.name}</b>
-                <small>{conversation.last_message || "Nouvelle conversation"}</small>
-              </p>
-              <time>{conversation.unread_count ? `${conversation.unread_count} nouveau` : ""}</time>
-            </button>
-          ))}
+          <div className="conversation-contacts-scroll">
+            {visible.map((conversation) => (
+              <button
+                className={active === conversation.id ? "active" : ""}
+                onClick={() => {
+                  setActive(conversation.id);
+                  setMobileConversationOpen(true);
+                }}
+                key={conversation.id}
+              >
+                <ConversationAvatar image={conversation.image_url} name={conversation.name} />
+                <p>
+                  <b>{conversation.name}</b>
+                  <small>{conversation.last_message || "Nouvelle conversation"}</small>
+                </p>
+                <time>{conversation.unread_count ? `${conversation.unread_count} nouveau` : ""}</time>
+              </button>
+            ))}
+            {!visible.length && (
+              <div className="conversation-list-empty">
+                Aucune discussion trouvée.
+              </div>
+            )}
+          </div>
         </aside>
         <section className="conversation-room">
           {current ? (

@@ -1102,6 +1102,7 @@ function Contact() {
   const [form, setForm] = useState({
     name: user?.name || "",
     email: user?.email || "",
+    phone: user?.phone || "",
     category: "general",
     orderId: "",
     subject: "",
@@ -1178,6 +1179,12 @@ function Contact() {
   useEffect(() => {
     api.get("/public/config").then(({ data }) => setConfig(data));
     if (user) {
+      setForm((current) => ({
+        ...current,
+        name: current.name || user.name || "",
+        email: current.email || user.email || "",
+        phone: current.phone || user.phone || "",
+      }));
       api.get("/orders/mine").then(({ data }) => setOrders(data));
       loadRequests();
     }
@@ -1191,6 +1198,7 @@ function Contact() {
       const endpoint = user ? "/support/requests" : "/contact";
       const payload = user
         ? {
+            phone: form.phone,
             category: form.category,
             orderId: form.orderId || undefined,
             subject: form.subject,
@@ -1199,7 +1207,12 @@ function Contact() {
         : form;
       const { data } = await api.post(endpoint, payload);
       setFeedback(data.message);
-      setForm((current) => ({ ...current, orderId: "", subject: "", message: "" }));
+      setForm((current) => ({
+        ...current,
+        orderId: "",
+        subject: "",
+        message: "",
+      }));
       loadRequests();
     } catch (error) {
       setFeedback(error.response?.data?.message || "Impossible d’envoyer votre message.");
@@ -1279,6 +1292,18 @@ function Contact() {
         <form className="glass-form" onSubmit={submitContact}>
           {!user && <label>Nom complet<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Votre nom" /></label>}
           {!user && <label>Email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="vous@email.com" /></label>}
+          <label>
+            Numéro de téléphone
+            <input
+              required
+              type="tel"
+              minLength="8"
+              maxLength="30"
+              value={form.phone}
+              onChange={(event) => setForm({ ...form, phone: event.target.value })}
+              placeholder="Ex : 37 00 00 00"
+            />
+          </label>
           <label>Type de demande<select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{supportCategories.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
           {user && <label>Commande concernée<select value={form.orderId} onChange={(event) => setForm({ ...form, orderId: event.target.value })}><option value="">Aucune commande</option>{orders.map((order) => <option value={order.id} key={order.id}>{order.order_number}</option>)}</select></label>}
           <label>
@@ -1527,22 +1552,65 @@ function About() {
           </Link>
         </div>
         <div className="about-vision-board">
-          <div className="about-vision-logo">
-            <img src="/vinnht-logo.png" alt="VinnHT" />
-          </div>
-          <div className="about-vision-values">
-            <article>
-              <strong>Local</strong>
-              <small>Pensé depuis Haïti</small>
-            </article>
-            <article>
-              <strong>Utile</strong>
-              <small>Construit pour le commerce réel</small>
-            </article>
-            <article>
-              <strong>Évolutif</strong>
-              <small>Prêt à grandir avec le marché</small>
-            </article>
+          <div
+            className="about-haiti-network"
+            role="img"
+            aria-label="VinnHT connecte les clients, les boutiques et les livraisons à travers Haïti"
+          >
+            <img
+              className="haiti-map-image"
+              src="/haiti-map-vinnht.png"
+              alt=""
+              aria-hidden="true"
+            />
+
+            <svg
+              className="haiti-network-map"
+              viewBox="0 0 520 320"
+              aria-hidden="true"
+            >
+              <g className="haiti-routes">
+                <path d="M258 166 C205 125 154 116 111 146" />
+                <path d="M258 166 C310 118 360 113 404 139" />
+                <path d="M258 166 C207 202 168 225 127 224" />
+                <path d="M258 166 C310 196 348 221 397 211" />
+              </g>
+              <g className="haiti-map-points">
+                <circle cx="111" cy="146" r="6" />
+                <circle cx="404" cy="139" r="6" />
+                <circle cx="127" cy="224" r="6" />
+                <circle cx="397" cy="211" r="6" />
+                <circle className="center-point" cx="258" cy="166" r="9" />
+              </g>
+            </svg>
+
+            <div className="haiti-network-caption" aria-hidden="true">
+              <span />
+              Haïti connectée
+            </div>
+
+            <div className="haiti-network-core">
+              <span />
+              <img src="/vinnht-logo.png" alt="VinnHT" />
+            </div>
+
+            <span className="haiti-network-node node-shop" title="Boutiques">
+              <Store />
+            </span>
+            <span className="haiti-network-node node-client" title="Clients">
+              <Users />
+            </span>
+            <span className="haiti-network-node node-product" title="Produits">
+              <Package />
+            </span>
+            <span className="haiti-network-node node-delivery" title="Livraisons">
+              <Truck />
+            </span>
+
+            <i className="haiti-flow flow-one" />
+            <i className="haiti-flow flow-two" />
+            <i className="haiti-flow flow-three" />
+            <i className="haiti-flow flow-four" />
           </div>
         </div>
       </AnimatedSection>
@@ -3720,9 +3788,52 @@ function AdminProductsPage() {
 }
 
 function AdminContactRequestsPage() {
+  const { user } = useAuth();
+  const [supportView, setSupportView] = useState("messages");
+  const [mobileDiscussionOpen, setMobileDiscussionOpen] = useState(false);
+
   return (
     <DashboardLayout>
-      <AdminContactRequestsContent api={api} />
+      <div
+        className={`admin-support-page ${
+          mobileDiscussionOpen ? "mobile-discussion-open" : ""
+        }`}
+      >
+        <header className="admin-support-view-switcher">
+          <div>
+            <span>Centre de support</span>
+            <h1>Messages et demandes clients</h1>
+            <p>
+              Les discussions instantanées et les dossiers du formulaire Contact
+              sont regroupés ici.
+            </p>
+          </div>
+          <nav>
+            <button
+              className={supportView === "messages" ? "active" : ""}
+              onClick={() => setSupportView("messages")}
+            >
+              <MessageCircle /> Discussions directes
+            </button>
+            <button
+              className={supportView === "requests" ? "active" : ""}
+              onClick={() => setSupportView("requests")}
+            >
+              <Headphones /> Dossiers support
+            </button>
+          </nav>
+        </header>
+        {supportView === "messages" ? (
+          <MarketplaceMessages
+            api={api}
+            user={user}
+            sellerMode
+            onMobileConversationChange={setMobileDiscussionOpen}
+          />
+        ) : (
+          <AdminContactRequestsContent api={api} />
+        )}
+      </div>
     </DashboardLayout>
   );
 }

@@ -934,6 +934,7 @@ app.post(
   [
     body("name").trim().isLength({ min: 2, max: 160 }),
     body("email").isEmail().normalizeEmail(),
+    body("phone").trim().isLength({ min: 8, max: 30 }),
     body("category").isIn(["general", "order", "payment", "delivery", "seller", "technical", "partnership"]),
     body("subject").trim().isLength({ min: 3, max: 190 }),
     body("message").trim().isLength({ min: 10, max: 3000 }),
@@ -941,9 +942,16 @@ app.post(
   validate,
   asyncRoute(async (req, res) => {
     const [result] = await pool.query(
-      `INSERT INTO contact_requests (name,email,category,reference,subject,message)
-       VALUES (?,?,?,CONCAT('VHT-SUP-',UPPER(SUBSTRING(MD5(CONCAT(NOW(),RAND())),1,8))),?,?)`,
-      [req.body.name, req.body.email, req.body.category, req.body.subject, req.body.message],
+      `INSERT INTO contact_requests (name,email,phone,category,reference,subject,message)
+       VALUES (?,?,?,?,CONCAT('VHT-SUP-',UPPER(SUBSTRING(MD5(CONCAT(NOW(),RAND())),1,8))),?,?)`,
+      [
+        req.body.name,
+        req.body.email,
+        req.body.phone,
+        req.body.category,
+        req.body.subject,
+        req.body.message,
+      ],
     );
     const [[request]] = await pool.query(
       "SELECT reference FROM contact_requests WHERE id=?",
@@ -981,6 +989,7 @@ app.post(
   writeRateLimiter,
   [
     body("category").isIn(["general", "order", "payment", "delivery", "seller", "technical", "partnership"]),
+    body("phone").trim().isLength({ min: 8, max: 30 }),
     body("orderId").optional({ checkFalsy: true }).isInt({ min: 1 }),
     body("subject").trim().isLength({ min: 3, max: 190 }),
     body("message").trim().isLength({ min: 10, max: 3000 }),
@@ -997,12 +1006,13 @@ app.post(
     const reference = `VHT-SUP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const [result] = await pool.query(
       `INSERT INTO contact_requests
-        (user_id,name,email,category,order_id,reference,subject,message)
-       VALUES (?,?,?,?,?,?,?,?)`,
+        (user_id,name,email,phone,category,order_id,reference,subject,message)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
       [
         req.user.id,
         req.user.name,
         req.user.email,
+        req.body.phone,
         req.body.category,
         req.body.orderId || null,
         reference,
@@ -4926,7 +4936,7 @@ app.get(
   noStore,
   asyncRoute(async (_req, res) => {
     const [rows] = await pool.query(
-      `SELECT cr.id,cr.reference,cr.name,cr.email,cr.category,cr.subject,cr.message,
+      `SELECT cr.id,cr.reference,cr.name,cr.email,cr.phone,cr.category,cr.subject,cr.message,
         cr.user_id,cr.status,cr.created_at,cr.resolved_at,o.order_number,
         (SELECT COUNT(*) FROM support_request_messages srm WHERE srm.request_id=cr.id) reply_count,
         (SELECT COUNT(*) FROM support_request_messages srm
@@ -5066,8 +5076,16 @@ app.get(
   asyncRoute(async (req, res) => {
     const [rows] = await pool.query(
       `SELECT c.id,c.client_id,c.seller_id,c.updated_at,
-        CASE WHEN c.client_id=? THEN COALESCE(sp.shop_name,seller.name) ELSE client.name END name,
-        CASE WHEN c.client_id=? THEN COALESCE(sp.shop_logo_url,seller.profile_image_url) ELSE client.profile_image_url END image_url,
+        CASE
+          WHEN c.client_id=? AND seller.role='admin' THEN 'Support VinnHT'
+          WHEN c.client_id=? THEN COALESCE(sp.shop_name,seller.name)
+          ELSE client.name
+        END name,
+        CASE
+          WHEN c.client_id=? AND seller.role='admin' THEN '/vinnht-logo.png'
+          WHEN c.client_id=? THEN COALESCE(sp.shop_logo_url,seller.profile_image_url)
+          ELSE client.profile_image_url
+        END image_url,
         (SELECT body FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) last_message,
         (SELECT created_at FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) last_message_at,
         (SELECT COUNT(*) FROM messages WHERE conversation_id=c.id AND sender_id<>? AND read_at IS NULL) unread_count
@@ -5077,7 +5095,15 @@ app.get(
        LEFT JOIN seller_profiles sp ON sp.seller_id=c.seller_id
        WHERE c.client_id=? OR c.seller_id=?
        ORDER BY COALESCE(last_message_at,c.updated_at) DESC`,
-      [req.user.id, req.user.id, req.user.id, req.user.id, req.user.id],
+      [
+        req.user.id,
+        req.user.id,
+        req.user.id,
+        req.user.id,
+        req.user.id,
+        req.user.id,
+        req.user.id,
+      ],
     );
     res.json(rows);
   }),
@@ -5169,10 +5195,23 @@ app.post(
       Number(conversation.client_id) === Number(req.user.id)
         ? conversation.seller_id
         : conversation.client_id;
+    const recipientIsClient =
+      Number(conversation.client_id) === Number(recipientId);
+    const [[recipientAccount]] = await pool.query(
+      "SELECT role FROM users WHERE id=?",
+      [recipientId],
+    );
     const recipientRole =
-      Number(conversation.client_id) === Number(recipientId)
-        ? "client"
-        : "seller";
+      recipientAccount?.role === "admin"
+        ? "admin"
+        : recipientIsClient
+          ? "client"
+          : "seller";
+    const notificationLink = {
+      admin: "/admin/contact-requests",
+      seller: "/seller/messages",
+      client: "/messages",
+    }[recipientRole];
     await notifyUser(
       pool,
       recipientId,
@@ -5180,7 +5219,7 @@ app.post(
       "message.received",
       "Nouveau message",
       `${req.user.name} vous a envoyé un message.`,
-      recipientRole === "seller" ? "/seller/messages" : "/messages",
+      notificationLink,
       "conversation",
       conversation.id,
     );

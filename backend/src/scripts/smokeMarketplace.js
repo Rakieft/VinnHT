@@ -129,6 +129,7 @@ const startTemporaryServer = async () => {
 
 const runFlow = async () => {
   const suffix = Date.now();
+  const adminEmail = `smoke.admin.${suffix}@vinnht.test`;
   const managerEmail = `smoke.manager.${suffix}@vinnht.test`;
   const sellerEmail = `smoke.seller.${suffix}@vinnht.test`;
   const buyerEmail = `smoke.buyer.${suffix}@vinnht.test`;
@@ -146,6 +147,15 @@ const runFlow = async () => {
   await database.query(
     "INSERT INTO user_roles (user_id,role) VALUES (?,'manager')",
     [managerResult.insertId],
+  );
+  const [adminResult] = await database.query(
+    `INSERT INTO users (name,email,password_hash,role,status)
+     VALUES (?,?,?,'admin','active')`,
+    ["Admin Support Smoke", adminEmail, managerHash],
+  );
+  await database.query(
+    "INSERT INTO user_roles (user_id,role) VALUES (?,'admin')",
+    [adminResult.insertId],
   );
 
   const sellerRegistration = await register({
@@ -239,6 +249,57 @@ const runFlow = async () => {
     email: buyerEmail,
     phone: "37000003",
   });
+  const supportConversation = await request("/messages/support", {
+    method: "POST",
+    cookie: buyer.cookie,
+  });
+  await request(`/messages/conversations/${supportConversation.data.id}`, {
+    method: "POST",
+    cookie: buyer.cookie,
+    body: { body: "Bonjour Support VinnHT, ceci est un test." },
+  });
+  const admin = await login(adminEmail);
+  await request("/contact", {
+    method: "POST",
+    body: {
+      name: "Contact Public Smoke",
+      email: `contact.${suffix}@vinnht.test`,
+      phone: "38000009",
+      category: "general",
+      subject: "Question avant achat",
+      message: "Je souhaite vérifier le dossier support avec téléphone.",
+    },
+  });
+  const supportRequests = await request("/admin/contact-requests", {
+    cookie: admin.cookie,
+  });
+  const publicContact = supportRequests.data.find(
+    (item) => item.name === "Contact Public Smoke",
+  );
+  assert(publicContact);
+  assert.equal(publicContact.phone, "38000009");
+  assert.equal(publicContact.subject, "Question avant achat");
+
+  const adminConversations = await request("/messages/conversations", {
+    cookie: admin.cookie,
+  });
+  const receivedSupportConversation = adminConversations.data.find(
+    (conversation) => Number(conversation.id) === Number(supportConversation.data.id),
+  );
+  assert(receivedSupportConversation);
+  assert.equal(receivedSupportConversation.name, "Client Smoke");
+  assert.equal(Number(receivedSupportConversation.unread_count), 1);
+  const adminNotifications = await request("/notifications?role=admin", {
+    cookie: admin.cookie,
+  });
+  const supportNotification = adminNotifications.data.find(
+    (notification) =>
+      notification.type === "message.received" &&
+      Number(notification.entity_id) === Number(supportConversation.data.id),
+  );
+  assert(supportNotification);
+  assert.equal(supportNotification.link, "/admin/contact-requests");
+
   await request(`/cart/${createdProduct.data.id}`, {
     method: "PUT",
     cookie: buyer.cookie,
@@ -355,6 +416,8 @@ const runFlow = async () => {
   console.log("✓ Détection de session anonyme sans erreur 401");
   console.log("✓ Boutique et produit créés");
   console.log("✓ Panier, commande et stock validés");
+  console.log("✓ Message support client reçu et notifié côté admin");
+  console.log("✓ Téléphone et identité du formulaire Contact visibles côté admin");
   console.log("✓ Preuve MonCash validée par le vendeur");
   console.log("✓ Préparation et assignation au livreur validées");
   console.log("✓ Signature et livraison finale validées");

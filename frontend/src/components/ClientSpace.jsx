@@ -580,7 +580,7 @@ export function ClientDashboardContent({
           </span>
         </div>
         <nav>
-          <Link to="/messagessupport=1">Support</Link>
+          <Link to="/messages?support=1">Support</Link>
         </nav>
       </footer>
     </div>

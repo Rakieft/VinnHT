@@ -236,7 +236,6 @@ export function AdminDashboardContent({ api, user }) {
   };
 
   const stats = data?.stats || {};
-  const recentAudit = data?.recentAudit || [];
   const dailySales = data?.dailySales || [];
   const paymentHealth = data?.paymentHealth || [];
   const orderHealth = data?.orderHealth || [];
@@ -345,16 +344,6 @@ export function AdminDashboardContent({ api, user }) {
     1,
     ...dailySales.map((item) => Number(item.total || 0))
   );
-  const auditLabel = {
-    "staff.create": "Compte manager créé",
-    "user.status.update": "Statut utilisateur modifié",
-    "user.roles.update": "Rôles utilisateur modifiés",
-    "category.create": "Catégorie créée",
-    "category.update": "Catégorie modifiée",
-    "product.status.update": "Statut produit modifié",
-    "seller.sponsorship.activate": "Campagne vendeur activée",
-    "seller.sponsorship.cancel": "Campagne vendeur annulée",
-  };
   const orderTotal = orderHealth.reduce((total, item) => total + Number(item.total || 0), 0);
   const currentDate = new Intl.DateTimeFormat("fr-HT", {
     weekday: "long",
@@ -636,35 +625,6 @@ export function AdminDashboardContent({ api, user }) {
           </button>
         </section>
 
-        <section className="admin-panel admin-audit-panel">
-          <header>
-            <div>
-              <ShieldCheck />
-              <span>
-                <b>Journal de sécurité</b>
-                <small>Dernières actions administratives</small>
-              </span>
-            </div>
-          </header>
-          <div>
-            {recentAudit.map((item) => (
-              <article key={item.id}>
-                <span>
-                  {item.action.includes("user") ? <UserPlus /> : <Clock3 />}
-                </span>
-                <p>
-                  <b>{auditLabel[item.action] || item.action}</b>
-                  <small>
-                    {item.actor_name || "Système"} · {shortDate(item.created_at)}
-                  </small>
-                </p>
-              </article>
-            ))}
-            {data && !recentAudit.length && (
-              <div className="admin-empty">Aucune action administrative enregistrée.</div>
-            )}
-          </div>
-        </section>
       </div>
     </div>
   );
@@ -1872,7 +1832,7 @@ export function AdminContactRequestsContent({ api }) {
 
   const visible = requests.filter((request) => {
     const matchesStatus = statusFilter === "all" || request.status === statusFilter;
-    const matchesQuery = `${request.reference} ${request.name} ${request.email} ${request.subject}`
+    const matchesQuery = `${request.reference} ${request.name} ${request.email} ${request.phone || ""} ${request.subject}`
       .toLowerCase()
       .includes(query.toLowerCase());
     return matchesStatus && matchesQuery;
@@ -1909,7 +1869,7 @@ export function AdminContactRequestsContent({ api }) {
       <section className="admin-filter-bar">
         <label className="admin-search">
           <Search />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Référence, client, email ou sujet" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, téléphone, email, référence ou sujet" />
         </label>
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
           <option value="all">Tous les statuts</option>
@@ -1928,8 +1888,9 @@ export function AdminContactRequestsContent({ api }) {
             >
               <span><MessageCircle /></span>
               <p>
-                <b>{request.subject}</b>
-                <small>{request.name} · {request.reference}</small>
+                <b>{request.name}</b>
+                <strong>{request.subject}</strong>
+                <small>{request.phone || "Téléphone non renseigné"} · {request.reference}</small>
                 <small>{request.last_reply || request.message}</small>
               </p>
               <div>
@@ -1948,8 +1909,9 @@ export function AdminContactRequestsContent({ api }) {
                   <span><MessageCircle /></span>
                   <p>
                     <small>{selected.reference} · {selected.category}</small>
-                    <b>{selected.subject}</b>
-                    <small>{selected.name} · {selected.email}</small>
+                    <b>{selected.name}</b>
+                    <strong>{selected.subject}</strong>
+                    <small>{selected.email} · {selected.phone || "Téléphone non renseigné"}</small>
                   </p>
                 </div>
                 <Status value={selected.status} />

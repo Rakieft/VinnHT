@@ -5122,14 +5122,14 @@ th {
 .about-vision-board {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(190px, 1fr) auto;
-  gap: 14px;
+  min-height: 330px;
   overflow: hidden;
   border-radius: 25px;
-  padding: 24px;
+  padding: 18px;
   background:
-    radial-gradient(circle at 82% 12%, rgba(245, 158, 11, 0.26), transparent 26%),
-    linear-gradient(145deg, #172554, #1e3a8a 58%, #2563eb);
+    radial-gradient(circle at 82% 12%, rgba(245, 158, 11, 0.3), transparent 24%),
+    radial-gradient(circle at 16% 88%, rgba(96, 165, 250, 0.28), transparent 28%),
+    linear-gradient(145deg, #071536, #172554 54%, #1d4ed8);
 }
 
 .about-vision-board::before {
@@ -5143,58 +5143,340 @@ th {
   border-radius: 50%;
 }
 
-.about-vision-logo {
-  position: relative;
-  display: grid;
-  place-items: center;
-}
-
-.about-vision-logo::before {
+.about-vision-board::after {
   content: "";
   position: absolute;
-  width: 170px;
-  height: 170px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  inset: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 20px;
+  pointer-events: none;
 }
 
-.about-vision-logo img {
+.about-haiti-network {
   position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 294px;
+  overflow: hidden;
+  border-radius: 19px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+.haiti-network-map {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.haiti-map-image {
+  position: absolute;
   z-index: 1;
-  width: 118px;
-  height: 118px;
+  inset: 50% auto auto 50%;
+  width: min(92%, 475px);
+  height: 88%;
   object-fit: contain;
-  filter: drop-shadow(0 20px 25px rgba(0, 0, 0, 0.28));
+  opacity: 0.42;
+  filter:
+    saturate(0.9)
+    brightness(0.92)
+    drop-shadow(0 18px 30px rgba(2, 6, 23, 0.38))
+    drop-shadow(0 0 22px rgba(59, 130, 246, 0.28));
+  transform: translate(-50%, -50%);
+  animation: haiti-map-breathe 5.5s ease-in-out infinite;
 }
 
-.about-vision-values {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.haiti-network-caption {
+  position: absolute;
+  z-index: 6;
+  top: 17px;
+  left: 50%;
+  display: flex;
+  align-items: center;
   gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 8px 13px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(15, 23, 42, 0.54);
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.2);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
 }
 
-.about-vision-values article {
+.haiti-network-caption span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.13), 0 0 14px #22c55e;
+  animation: haiti-caption-pulse 2s ease-in-out infinite;
+}
+
+.haiti-routes path {
+  fill: none;
+  stroke: rgba(251, 191, 36, 0.72);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 4 10;
+  animation: haiti-route-flow 3s linear infinite;
+}
+
+.haiti-routes path:nth-child(even) {
+  animation-direction: reverse;
+  animation-duration: 3.8s;
+}
+
+.haiti-map-points circle {
+  fill: #fbbf24;
+  stroke: rgba(255, 255, 255, 0.8);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.95));
+  animation: haiti-point-pulse 2.2s ease-in-out infinite;
+}
+
+.haiti-map-points circle:nth-child(2) {
+  animation-delay: 0.35s;
+}
+
+.haiti-map-points circle:nth-child(3) {
+  animation-delay: 0.7s;
+}
+
+.haiti-map-points circle:nth-child(4) {
+  animation-delay: 1.05s;
+}
+
+.haiti-map-points .center-point {
+  fill: #ffffff;
+  stroke: #60a5fa;
+}
+
+.haiti-network-core {
+  position: absolute;
+  z-index: 5;
+  top: 52%;
+  left: 50%;
+  width: 112px;
+  height: 112px;
   display: grid;
-  gap: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 22px 55px rgba(2, 6, 23, 0.36),
+    0 0 55px rgba(37, 99, 235, 0.42);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(14px);
+}
+
+.haiti-network-core::before,
+.haiti-network-core::after,
+.haiti-network-core > span {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 50%;
+  animation: haiti-core-ring 3.2s ease-out infinite;
+}
+
+.haiti-network-core::after {
+  animation-delay: 1.05s;
+}
+
+.haiti-network-core > span {
+  animation-delay: 2.1s;
+}
+
+.haiti-network-core img {
+  position: relative;
+  z-index: 2;
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 15px rgba(15, 23, 42, 0.24));
+  animation: haiti-logo-breathe 3s ease-in-out infinite;
+}
+
+.haiti-network-node {
+  position: absolute;
+  z-index: 4;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.36);
   border-radius: 15px;
-  padding: 12px;
   color: #ffffff;
-  background: rgba(255, 255, 255, 0.09);
-  backdrop-filter: blur(10px);
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.32);
+  backdrop-filter: blur(12px);
+  animation: haiti-node-float 3.6s ease-in-out infinite;
 }
 
-.about-vision-values strong {
-  font-size: 13px;
+.haiti-network-node svg {
+  width: 20px;
 }
 
-.about-vision-values small {
-  color: #bfdbfe;
-  font-size: 9px;
-  line-height: 1.4;
+.node-shop {
+  top: 28%;
+  left: 13%;
+  color: #fbbf24;
+}
+
+.node-client {
+  top: 25%;
+  right: 12%;
+  animation-delay: 0.7s;
+}
+
+.node-product {
+  bottom: 20%;
+  left: 17%;
+  animation-delay: 1.35s;
+}
+
+.node-delivery {
+  right: 14%;
+  bottom: 23%;
+  color: #86efac;
+  animation-delay: 2s;
+}
+
+.haiti-flow {
+  position: absolute;
+  z-index: 3;
+  top: 52%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 8px #ffffff,
+    0 0 18px #fbbf24;
+  animation: haiti-signal 3s ease-in-out infinite;
+}
+
+.flow-one {
+  --signal-x: -148px;
+  --signal-y: -70px;
+}
+
+.flow-two {
+  --signal-x: 148px;
+  --signal-y: -76px;
+  animation-delay: 0.75s;
+}
+
+.flow-three {
+  --signal-x: -128px;
+  --signal-y: 72px;
+  animation-delay: 1.5s;
+}
+
+.flow-four {
+  --signal-x: 142px;
+  --signal-y: 66px;
+  animation-delay: 2.25s;
+}
+
+@keyframes haiti-route-flow {
+  to {
+    stroke-dashoffset: -42;
+  }
+}
+
+@keyframes haiti-map-breathe {
+  50% {
+    opacity: 0.5;
+    transform: translate(-50%, -50%) scale(1.018);
+  }
+}
+
+@keyframes haiti-point-pulse {
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: scale(0.85);
+    transform-origin: center;
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.25);
+    transform-origin: center;
+  }
+}
+
+@keyframes haiti-caption-pulse {
+  50% {
+    opacity: 0.55;
+    transform: scale(0.72);
+  }
+}
+
+@keyframes haiti-core-ring {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.78);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.42);
+  }
+}
+
+@keyframes haiti-logo-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes haiti-node-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+
+@keyframes haiti-signal {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4);
+  }
+  18% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform:
+      translate(
+        calc(-50% + var(--signal-x)),
+        calc(-50% + var(--signal-y))
+      )
+      scale(1.25);
+  }
 }
 
 .about-commitment-grid {
@@ -5562,40 +5844,98 @@ th {
   }
 
   .about-vision-board {
-    min-height: 245px;
-    grid-template-rows: 135px auto;
-    padding: 16px;
+    min-height: 238px;
+    padding: 10px;
     border-radius: 19px;
   }
 
-  .about-vision-logo::before {
-    width: 120px;
-    height: 120px;
+  .about-vision-board::after {
+    inset: 10px;
+    border-radius: 14px;
   }
 
-  .about-vision-logo img {
+  .about-haiti-network {
+    min-height: 218px;
+    border-radius: 14px;
+    background-size: 22px 22px;
+  }
+
+  .haiti-map-image {
+    width: 96%;
+    height: 84%;
+    opacity: 0.4;
+  }
+
+  .haiti-network-caption {
+    top: 10px;
+    padding: 6px 10px;
+    font-size: 9px;
+  }
+
+  .haiti-network-core {
     width: 82px;
     height: 82px;
   }
 
-  .about-vision-values {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 5px;
+  .haiti-network-core img {
+    width: 56px;
+    height: 56px;
   }
 
-  .about-vision-values article {
-    gap: 2px;
+  .haiti-network-core::before,
+  .haiti-network-core::after,
+  .haiti-network-core > span {
+    inset: -10px;
+  }
+
+  .haiti-network-node {
+    width: 34px;
+    height: 34px;
     border-radius: 11px;
-    padding: 9px 6px;
-    text-align: center;
   }
 
-  .about-vision-values strong {
-    font-size: 10px;
+  .haiti-network-node svg {
+    width: 16px;
   }
 
-  .about-vision-values small {
-    font-size: 7px;
+  .node-shop {
+    top: 24%;
+    left: 9%;
+  }
+
+  .node-client {
+    top: 22%;
+    right: 8%;
+  }
+
+  .node-product {
+    bottom: 17%;
+    left: 13%;
+  }
+
+  .node-delivery {
+    right: 10%;
+    bottom: 19%;
+  }
+
+  .flow-one {
+    --signal-x: -105px;
+    --signal-y: -50px;
+  }
+
+  .flow-two {
+    --signal-x: 105px;
+    --signal-y: -53px;
+  }
+
+  .flow-three {
+    --signal-x: -92px;
+    --signal-y: 51px;
+  }
+
+  .flow-four {
+    --signal-x: 98px;
+    --signal-y: 47px;
   }
 
   .about-commitment-grid {
@@ -5683,6 +6023,29 @@ th {
 
   .about-final-cta .button {
     min-height: 46px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .haiti-routes path,
+  .haiti-map-points circle,
+  .haiti-map-image,
+  .haiti-network-core::before,
+  .haiti-network-core::after,
+  .haiti-network-core > span,
+  .haiti-network-core img,
+  .haiti-network-node,
+  .haiti-network-caption span,
+  .haiti-flow {
+    animation: none !important;
+  }
+
+  .haiti-flow {
+    display: none;
+  }
+
+  .haiti-map-points circle {
+    opacity: 1;
   }
 }
 
