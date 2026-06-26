@@ -14,6 +14,7 @@ import {
   Eye,
   ExternalLink,
   ImagePlus,
+  MapPin,
   Package,
   Plus,
   Power,
@@ -35,6 +36,10 @@ import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
 import MobileProfileActions from "./MobileProfileActions.jsx";
 import AccountSecuritySettings from "./AccountSecuritySettings.jsx";
 import { apiOrigin } from "../config/runtime.js";
+import {
+  getProductAttributeFields,
+  parseProductAttributes,
+} from "../config/productAttributes.js";
 import { shopPublicPath } from "../utils/shopUrl.js";
 
 const imageSource = (url) => (url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url);
@@ -77,12 +82,14 @@ const haitiDepartments = [
 
 export function SellerProductsContent({ api }) {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const load = () =>
     api
@@ -92,7 +99,27 @@ export function SellerProductsContent({ api }) {
 
   useEffect(() => {
     load();
+    api
+      .get("/categories")
+      .then(({ data }) => setCategories(Array.isArray(data) ? data : []))
+      .catch(() => setCategories([]));
   }, []);
+
+  useEffect(() => {
+    if (!editing) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setEditing(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [editing]);
 
   const toggle = async (product) => {
     setError("");
@@ -119,9 +146,13 @@ export function SellerProductsContent({ api }) {
   const saveEdit = async (event) => {
     event.preventDefault();
     setError("");
+    setMessage("");
+    setSaving(true);
     try {
+      const editedAttributes = parseProductAttributes(editing.attributes);
       await api.patch(`/seller/products/${editing.id}`, {
         name: editing.name,
+        categoryId: Number(editing.category_id),
         price: Number(editing.price),
         promotionalPrice: editing.promotional_price ? Number(editing.promotional_price) : "",
         isFeatured: Boolean(editing.is_featured),
@@ -130,13 +161,39 @@ export function SellerProductsContent({ api }) {
         description: editing.description || "",
         department: editing.department || "",
         city: editing.city || "",
+        attributes: Object.keys(editedAttributes).length ? editedAttributes : undefined,
       });
       setEditing(null);
       setMessage("Produit modifie avec succes.");
-      load();
+      await load();
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Impossible de modifier le produit.");
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const openEditor = (product) => {
+    setError("");
+    setMessage("");
+    setAdding(false);
+    setEditing({
+      ...product,
+      attributes: parseProductAttributes(product.attributes),
+    });
+  };
+
+  const changeEditingCategory = (categoryId) => {
+    const category = categories.find(
+      (item) => String(item.id) === String(categoryId),
+    );
+    setEditing((current) => ({
+      ...current,
+      category_id: categoryId,
+      category_name: category?.name || "",
+      category_slug: category?.slug || "autres",
+      attributes: {},
+    }));
   };
 
   return (
@@ -193,34 +250,64 @@ export function SellerProductsContent({ api }) {
       )}
       <div className="seller-product-grid">
         {visibleProducts.map((product) => (
-          <motion.article whileHover={{ y: -5 }} key={product.id}>
-            <img src={imageSource(product.image_url)} alt={product.name} />
-            <div>
-              <span className={`flow-status ${product.status}`}>{product.status}</span>
+          <motion.article className="product-card seller-catalog-product-card" whileHover={{ y: -5 }} key={product.id}>
+            <Link className="product-media" to={`/products/${product.id}`}>
+              <img src={imageSource(product.image_url)} alt={product.name} />
+              {Boolean(product.is_featured) && product.promotional_price ? (
+                <span className="vinnht-offer-badge" aria-label="Offre spéciale VinnHT">
+                  <Sparkles size={13} />
+                  Offre
+                </span>
+              ) : (
+                <span className="seller-product-status-badge">{product.status}</span>
+              )}
+            </Link>
+            <div className="product-body">
+              <div className="product-meta">
+                <span>{product.category_name || "Produit"}</span>
+                <span>
+                  <MapPin size={13} />
+                  {product.city || "Haïti"}
+                </span>
+              </div>
               {Number(product.stock) <= 5 && (
                 <span className="low-stock-badge">
-                  <AlertTriangle /> Stock faible
+                  <AlertTriangle />
+                  {Number(product.stock) === 0
+                    ? "Épuisé · invisible aux clients"
+                    : "Stock faible"}
                 </span>
               )}
               {Boolean(product.is_featured) && product.promotional_price && (
                 <span className="flow-status confirmed">Offre speciale</span>
               )}
-              <h3>{product.name}</h3>
+              <Link to={`/products/${product.id}`}>
+                <h3>{product.name}</h3>
+              </Link>
               <p>
-                {product.category_name || "Produit"} - Stock : {product.stock}
+                <ShieldCheck size={14} />
+                Produit boutique - Stock : {product.stock}
               </p>
               <p className="seller-product-location">
                 {product.department || "Departement"} - {product.city || "Ville non renseignee"}
               </p>
-              <strong>
-                {Number(product.promotional_price || product.price).toLocaleString("fr-HT")} HTG
-              </strong>
+              <div className="product-bottom seller-product-price-row">
+                <strong>
+                  {Number(product.promotional_price || product.price).toLocaleString("fr-HT")} HTG
+                </strong>
+              </div>
             </div>
             <footer>
-              <button title="Modifier" onClick={() => setEditing({ ...product })}>
+              <button
+                type="button"
+                title="Modifier"
+                aria-label={`Modifier ${product.name}`}
+                onClick={() => openEditor(product)}
+              >
                 <Edit3 />
+                <span>Modifier</span>
               </button>
-              <button onClick={() => toggle(product)}>
+              <button type="button" onClick={() => toggle(product)}>
                 <Power />
                 {product.status === "active" ? "Desactiver" : "Activer"}
               </button>
@@ -229,98 +316,175 @@ export function SellerProductsContent({ api }) {
         ))}
       </div>
       {editing && (
-        <form className="seller-edit-panel" onSubmit={saveEdit}>
-          <header>
-            <div>
-              <span>Modification rapide</span>
-              <h2>{editing.name}</h2>
-            </div>
-            <button type="button" onClick={() => setEditing(null)}>
-              <X />
-            </button>
-          </header>
-          <label>
-            Nom
-            <input
-              value={editing.name}
-              onChange={(event) => setEditing({ ...editing, name: event.target.value })}
-            />
-          </label>
-          <label>
-            Prix HTG
-            <input
-              type="number"
-              value={editing.price}
-              onChange={(event) => setEditing({ ...editing, price: event.target.value })}
-            />
-          </label>
-          <label>
-            Stock
-            <input
-              type="number"
-              value={editing.stock}
-              onChange={(event) => setEditing({ ...editing, stock: event.target.value })}
-            />
-          </label>
-          <label>
-            Departement
-            <select
-              value={editing.department || ""}
-              onChange={(event) => setEditing({ ...editing, department: event.target.value })}
-            >
-              <option value="">Choisir un departement</option>
-              {haitiDepartments.map((department) => (
-                <option value={department} key={department}>{department}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Ville ou commune
-            <input
-              value={editing.city || ""}
-              onChange={(event) => setEditing({ ...editing, city: event.target.value })}
-              placeholder="Ex. Port-au-Prince, Jacmel, Cap-Haitien"
-            />
-          </label>
-          <label>
-            Prix promotionnel HTG
-            <input
-              min="0"
-              max={editing.price}
-              type="number"
-              placeholder="Laisser vide sans promotion"
-              value={editing.promotional_price || ""}
-              onChange={(event) =>
-                setEditing({ ...editing, promotional_price: event.target.value })
-              }
-            />
-          </label>
-          <label>
-            Fin de l'offre
-            <input
-              type="datetime-local"
-              value={editing.offer_ends_at?.slice(0, 16) || ""}
-              onChange={(event) => setEditing({ ...editing, offer_ends_at: event.target.value })}
-            />
-          </label>
-          <label className="seller-featured-toggle">
-            <input
-              type="checkbox"
-              checked={Boolean(editing.is_featured)}
-              onChange={(event) => setEditing({ ...editing, is_featured: event.target.checked })}
-            />
-            Afficher dans les offres speciales VinnHT
-          </label>
-          <label className="full">
-            Description
-            <textarea
-              rows="4"
-              value={editing.description || ""}
-              onChange={(event) => setEditing({ ...editing, description: event.target.value })}
-            />
-          </label>
-          <button>Enregistrer les modifications</button>
-        </form>
+        <div
+          className="seller-edit-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Modifier ${editing.name}`}
+        >
+          <button
+            className="seller-edit-backdrop"
+            type="button"
+            aria-label="Fermer la modification"
+            onClick={() => setEditing(null)}
+          />
+          <form className="seller-edit-panel" onSubmit={saveEdit}>
+            <header>
+              <div>
+                <span>Fiche produit</span>
+                <h2>Modifier {editing.name}</h2>
+                <p>Les changements seront immédiatement appliqués au catalogue.</p>
+              </div>
+              <button type="button" onClick={() => setEditing(null)} aria-label="Fermer">
+                <X />
+              </button>
+            </header>
+
+            {error && <div className="flow-error seller-edit-error">{error}</div>}
+
+            <label>
+              Nom du produit
+              <input
+                required
+                minLength="2"
+                value={editing.name}
+                onChange={(event) => setEditing({ ...editing, name: event.target.value })}
+              />
+            </label>
+            <label>
+              Rayon
+              <select
+                required
+                value={editing.category_id || ""}
+                onChange={(event) => changeEditingCategory(event.target.value)}
+              >
+                <option value="">Choisir un rayon</option>
+                {categories.map((category) => (
+                  <option value={category.id} key={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Prix HTG
+              <input
+                required
+                min="0"
+                type="number"
+                value={editing.price}
+                onChange={(event) => setEditing({ ...editing, price: event.target.value })}
+              />
+            </label>
+            <label>
+              Stock
+              <input
+                required
+                min="0"
+                type="number"
+                value={editing.stock}
+                onChange={(event) => setEditing({ ...editing, stock: event.target.value })}
+              />
+              <small>
+                Un stock à zéro masque automatiquement le produit côté client.
+              </small>
+            </label>
+            <label>
+              Département
+              <select
+                required
+                value={editing.department || ""}
+                onChange={(event) => setEditing({ ...editing, department: event.target.value })}
+              >
+                <option value="">Choisir un département</option>
+                {haitiDepartments.map((department) => (
+                  <option value={department} key={department}>{department}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Ville ou commune
+              <input
+                required
+                value={editing.city || ""}
+                onChange={(event) => setEditing({ ...editing, city: event.target.value })}
+                placeholder="Ex. Port-au-Prince, Jacmel, Cap-Haïtien"
+              />
+            </label>
+            <label>
+              Prix promotionnel HTG
+              <input
+                min="0"
+                max={editing.price}
+                type="number"
+                placeholder="Laisser vide sans promotion"
+                value={editing.promotional_price || ""}
+                onChange={(event) =>
+                  setEditing({ ...editing, promotional_price: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              Fin de l’offre
+              <input
+                type="datetime-local"
+                value={editing.offer_ends_at?.slice(0, 16) || ""}
+                onChange={(event) => setEditing({ ...editing, offer_ends_at: event.target.value })}
+              />
+            </label>
+            <label className="seller-featured-toggle">
+              <input
+                type="checkbox"
+                checked={Boolean(editing.is_featured)}
+                onChange={(event) => setEditing({ ...editing, is_featured: event.target.checked })}
+              />
+              Afficher dans les offres spéciales VinnHT
+            </label>
+            <label className="full">
+              Description
+              <textarea
+                rows="5"
+                value={editing.description || ""}
+                onChange={(event) => setEditing({ ...editing, description: event.target.value })}
+              />
+            </label>
+
+            <section className="seller-edit-attributes">
+              <div>
+                <span>Caractéristiques du rayon</span>
+                <p>Complétez les informations utiles aux clients.</p>
+              </div>
+              <div>
+                {getProductAttributeFields(editing).map((field) => (
+                  <ProductAttributeField
+                    field={field}
+                    value={editing.attributes?.[field.key] || ""}
+                    onChange={(value) =>
+                      setEditing({
+                        ...editing,
+                        attributes: {
+                          ...(editing.attributes || {}),
+                          [field.key]: value,
+                        },
+                      })
+                    }
+                    key={field.key}
+                  />
+                ))}
+              </div>
+            </section>
+
+            <footer className="seller-edit-actions">
+              <button type="button" onClick={() => setEditing(null)}>
+                Annuler
+              </button>
+              <button type="submit" disabled={saving}>
+                <Check />
+                {saving ? "Enregistrement..." : "Enregistrer les modifications"}
+              </button>
+            </footer>
+          </form>
+        </div>
       )}
     </SellerPageHeader>
   );
@@ -339,6 +503,7 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
     department: "Ouest",
     city: "",
   });
+  const [attributes, setAttributes] = useState({});
   const [images, setImages] = useState([]);
   const [previews, setPreviews] = useState([]);
 
@@ -352,10 +517,12 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
     try {
       const data = new FormData();
       Object.entries(form).forEach(([key, value]) => data.append(key, value));
-      images.forEach((image) => data.append("images", image));
+      data.append("attributes", JSON.stringify(attributes));
+      if (images[0]) data.append("images", images[0]);
       await api.post("/products", data);
       setMessage("Produit ajoute avec succes.");
       setForm({ name: "", categoryId: "", description: "", price: "", stock: "", department: "Ouest", city: "" });
+      setAttributes({});
       setImages([]);
       setPreviews([]);
       onCreated?.();
@@ -363,6 +530,11 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
       setError(requestError.response?.data?.message || "Impossible d'ajouter le produit.");
     }
   };
+
+  const selectedCategory = categories.find(
+    (category) => String(category.id) === String(form.categoryId),
+  );
+  const attributeFields = getProductAttributeFields(selectedCategory);
 
   const studio = (
     <>
@@ -397,7 +569,10 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
               <select
                 required
                 value={form.categoryId}
-                onChange={(event) => setForm({ ...form, categoryId: event.target.value })}
+                onChange={(event) => {
+                  setForm({ ...form, categoryId: event.target.value });
+                  setAttributes({});
+                }}
               >
                 <option value="">Choisir une categorie</option>
                 {categories.map((category) => (
@@ -411,6 +586,44 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
 
           <ProductStudioSection
             number="02"
+            title={
+              selectedCategory
+                ? `Détails du rayon ${selectedCategory.name}`
+                : "Caractéristiques du produit"
+            }
+            text={
+              selectedCategory
+                ? "Ces informations sont adaptées à ce rayon et aideront les clients à comparer les offres."
+                : "Choisissez d’abord un rayon pour afficher les informations adaptées."
+            }
+          >
+            {attributeFields.length ? (
+              attributeFields.map((field) => (
+                <ProductAttributeField
+                  field={field}
+                  value={attributes[field.key] || ""}
+                  onChange={(value) =>
+                    setAttributes((current) => ({
+                      ...current,
+                      [field.key]: value,
+                    }))
+                  }
+                  key={field.key}
+                />
+              ))
+            ) : (
+              <div className="seller-attribute-placeholder">
+                <Package />
+                <span>
+                  <b>Sélectionnez un rayon</b>
+                  <small>Le formulaire affichera ensuite les détails réellement utiles.</small>
+                </span>
+              </div>
+            )}
+          </ProductStudioSection>
+
+          <ProductStudioSection
+            number="03"
             title="Localisation de l'offre"
             text="Indiquez le departement et la ville depuis lesquels ce produit est disponible."
           >
@@ -439,7 +652,7 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
           </ProductStudioSection>
 
           <ProductStudioSection
-            number="03"
+            number="04"
             title="Prix et disponibilite"
             text="Indiquez un prix clair et le stock reellement disponible."
           >
@@ -461,43 +674,43 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
               Quantite en stock
               <input
                 required
-                min="0"
+                min="1"
                 type="number"
                 value={form.stock}
                 onChange={(event) => setForm({ ...form, stock: event.target.value })}
-                placeholder="0"
+                placeholder="1"
               />
+              <small>Minimum 1 unité pour rendre le produit visible aux clients.</small>
             </label>
           </ProductStudioSection>
 
           <section className="seller-product-form-section">
             <header>
-              <b>04</b>
+              <b>05</b>
               <div>
                 <h3>Photos et description</h3>
-                <p>Utilisez des photos nettes prises sous plusieurs angles.</p>
+                <p>Ajoutez une image principale nette pour presenter ce produit.</p>
               </div>
             </header>
             <label className="seller-images-upload seller-studio-upload">
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
-                multiple
                 onChange={(event) => {
-                  const files = Array.from(event.target.files || []).slice(0, 5);
-                  setImages(files);
-                  setPreviews(files.map((file) => URL.createObjectURL(file)));
+                  const file = event.target.files?.[0];
+                  setImages(file ? [file] : []);
+                  setPreviews(file ? [URL.createObjectURL(file)] : []);
                 }}
               />
               <span>
                 <UploadCloud />
-                <b>Choisir les images</b>
-                <small>JPG, PNG ou WebP - maximum 5 images</small>
+                <b>Choisir l'image principale</b>
+                <small>JPG, PNG ou WebP - une seule image par produit</small>
               </span>
               {previews.length > 0 && (
                 <div>
-                  {previews.map((preview, index) => (
-                    <img src={preview} alt={`Apercu ${index + 1}`} key={preview} />
+                  {previews.map((preview) => (
+                    <img src={preview} alt="Image principale du produit" key={preview} />
                   ))}
                 </div>
               )}
@@ -535,6 +748,14 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
           <h3>{form.name || "Nom de votre produit"}</h3>
           <strong>{Number(form.price || 0).toLocaleString("fr-HT")} HTG</strong>
           <p>{form.description || "La description de votre produit apparaitra ici."}</p>
+          {attributeFields.slice(0, 3).map((field) =>
+            attributes[field.key] ? (
+              <p className="seller-preview-attribute" key={field.key}>
+                <b>{field.label}</b>
+                <span>{attributes[field.key]}</span>
+              </p>
+            ) : null
+          )}
           <p className="seller-preview-location">{form.department || "Departement"} - {form.city || "Ville"}</p>
           <div>
             <CheckCircle2 /> Fiche prete a etre publiee
@@ -573,6 +794,42 @@ function ProductStudioSection({ number, title, text, children }) {
       </header>
       <div className="seller-product-fields">{children}</div>
     </section>
+  );
+}
+
+function ProductAttributeField({ field, value, onChange }) {
+  if (field.type === "select") {
+    return (
+      <label>
+        {field.label}
+        <select
+          required={field.required}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value="">Choisir</option>
+          {field.options.map((option) => (
+            <option value={option} key={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  return (
+    <label>
+      {field.label}
+      <input
+        required={field.required}
+        type={field.type || "text"}
+        min={field.min}
+        value={value}
+        placeholder={field.placeholder}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
   );
 }
 
@@ -1591,13 +1848,6 @@ export function SellerShopContent({ api }) {
             />
           </label>
           <label>
-            Categorie principale
-            <input
-              value={shop.category}
-              onChange={(event) => setShop({ ...shop, category: event.target.value })}
-            />
-          </label>
-          <label>
             WhatsApp professionnel
             <input
               required
@@ -1945,10 +2195,8 @@ export function SupervisorRequestsContent({ api }) {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
-  const [category, setCategory] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [categories, setCategories] = useState([]);
   const [summary, setSummary] = useState({});
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
 
@@ -1958,7 +2206,6 @@ export function SupervisorRequestsContent({ api }) {
         params: {
           q: query.trim() || undefined,
           status: status === "all" ? undefined : status,
-          category: category === "all" ? undefined : category,
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
           page: pagination.page,
@@ -1967,7 +2214,6 @@ export function SupervisorRequestsContent({ api }) {
       })
       .then(({ data }) => {
         setRequests(data.items || []);
-        setCategories(data.categories || []);
         setSummary(data.summary || {});
         setPagination(data.pagination || { page: 1, pages: 1, total: 0 });
       })
@@ -1978,7 +2224,7 @@ export function SupervisorRequestsContent({ api }) {
   useEffect(() => {
     const timer = window.setTimeout(load, 250);
     return () => window.clearTimeout(timer);
-  }, [query, status, category, dateFrom, dateTo, pagination.page]);
+  }, [query, status, dateFrom, dateTo, pagination.page]);
 
   const resetPage = (setter) => (event) => {
     setter(event.target.value);
@@ -2022,10 +2268,6 @@ export function SupervisorRequestsContent({ api }) {
           <option value="approved">Approuvées</option>
           <option value="rejected">Refusées</option>
         </select>
-        <select value={category} onChange={resetPage(setCategory)}>
-          <option value="all">Toutes les catégories</option>
-          {categories.map((item) => <option value={item} key={item}>{item}</option>)}
-        </select>
         <input type="date" value={dateFrom} onChange={resetPage(setDateFrom)} aria-label="Date de début" />
         <input type="date" value={dateTo} onChange={resetPage(setDateTo)} aria-label="Date de fin" />
       </section>
@@ -2046,7 +2288,7 @@ export function SupervisorRequestsContent({ api }) {
               </small>
               <h3>{request.business_name}</h3>
               <p>{details(request).shopDescription || "Aucune description fournie."}</p>
-              <small>{request.main_category} · Soumise le {new Date(request.created_at).toLocaleDateString("fr-HT")}</small>
+              <small>Soumise le {new Date(request.created_at).toLocaleDateString("fr-HT")}</small>
               {request.reviewed_at && (
                 <small>Décision : {request.reviewer_name || "Manager VinnHT"} · {new Date(request.reviewed_at).toLocaleDateString("fr-HT")}</small>
               )}
@@ -2089,7 +2331,6 @@ const requestFieldLabels = {
   institutionName: "Ecole, universite, entreprise ou etablissement",
   activityDetails: "Fonction, niveau ou precision",
   shopName: "Nom de la boutique",
-  mainCategory: "Categorie principale",
   shopDescription: "Description de la boutique",
   pickupAddress: "Adresse de recuperation",
 };
@@ -2148,7 +2389,7 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
   const details = parseRequestDetails(request.description);
   const identityFields = ["fullName", "birthDate", "primaryPhone", "secondaryPhone", "email", "fullAddress", "city", "department"];
   const activityFields = ["activityStatus", "institutionName", "activityDetails"];
-  const shopFields = ["shopName", "mainCategory", "shopDescription", "pickupAddress"];
+  const shopFields = ["shopName", "shopDescription", "pickupAddress"];
   const completenessFields = [...identityFields.filter((field) => field !== "secondaryPhone"), ...activityFields.slice(0, 2), ...shopFields];
   const completed = completenessFields.filter((field) => details[field]).length;
   const completeness = Math.round((completed / completenessFields.length) * 100);
@@ -2213,7 +2454,7 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
             <span>{request.shop_logo_url ? <img src={imageSource(request.shop_logo_url)} alt={request.business_name} /> : <Store />}</span>
             <small>Boutique proposee</small>
             <h2>{request.business_name}</h2>
-            <p>{details.mainCategory || "Categorie non renseignee"}</p>
+            <p>Boutique multirayons VinnHT</p>
           </section>
           <section className="seller-verification-checklist">
             <h2>Points de controle</h2>
@@ -2221,7 +2462,7 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
               ["Identite coherente", Boolean(details.fullName && request.name)],
               ["Coordonnees disponibles", Boolean(request.email && request.phone)],
               ["Situation actuelle precisee", Boolean(details.activityStatus && details.institutionName)],
-              ["Projet commercial decrit", Boolean(details.shopDescription && details.mainCategory)],
+              ["Projet commercial decrit", Boolean(details.shopDescription)],
               ["Adresse de recuperation", Boolean(details.pickupAddress)],
               [
                 request.terms_accepted_at

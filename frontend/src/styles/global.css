@@ -692,6 +692,56 @@ main {
   left: 14px;
   top: 14px;
 }
+.vinnht-offer-badge {
+  position: absolute;
+  z-index: 2;
+  top: 14px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  color: #ffffff;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(245, 158, 11, 0.68), transparent 34%),
+    linear-gradient(135deg, #0f172a, #2563eb 62%, #1d4ed8);
+  box-shadow:
+    0 14px 30px rgba(15, 23, 42, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(12px);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.vinnht-offer-badge svg {
+  color: #fbbf24;
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.5));
+}
+.vinnht-offer-detail-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  padding: 10px 14px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 999px;
+  color: #ffffff;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(245, 158, 11, 0.75), transparent 30%),
+    linear-gradient(135deg, #0f172a, #2563eb);
+  box-shadow: 0 18px 42px rgba(37, 99, 235, 0.22);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.vinnht-offer-detail-badge svg {
+  color: #fbbf24;
+}
 .product-body {
   padding: 19px;
 }
@@ -1809,6 +1859,69 @@ main {
   text-transform: uppercase;
 }
 
+.product-characteristics {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  background: #ffffff;
+}
+
+.product-characteristics > header {
+  padding: 15px 17px;
+  background: linear-gradient(135deg, #eff6ff, #f8fafc);
+}
+
+.product-characteristics > header span {
+  color: #2563eb;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.product-characteristics > header h3 {
+  margin: 3px 0 0;
+  font-size: 16px;
+}
+
+.product-characteristics > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.product-characteristics article {
+  display: grid;
+  gap: 4px;
+  padding: 13px 17px;
+  border-top: 1px solid #eef2f7;
+}
+
+.product-characteristics article:nth-child(odd) {
+  border-right: 1px solid #eef2f7;
+}
+
+.product-characteristics small {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.product-characteristics strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+@media (max-width: 560px) {
+  .product-characteristics > div {
+    grid-template-columns: 1fr;
+  }
+
+  .product-characteristics article:nth-child(odd) {
+    border-right: 0;
+  }
+}
+
 .product-description p {
   margin: 6px 0 0;
   color: #64748b;
@@ -2906,6 +3019,19 @@ th {
   .product-media .best-price-ribbon {
     width: 76px;
     height: 76px;
+  }
+
+  .vinnht-offer-badge {
+    top: 9px;
+    left: 9px;
+    gap: 4px;
+    padding: 7px 9px;
+    font-size: 9px;
+  }
+
+  .vinnht-offer-detail-badge {
+    padding: 9px 12px;
+    font-size: 10px;
   }
 
   .product-body {

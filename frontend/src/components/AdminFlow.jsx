@@ -2,13 +2,18 @@
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
+  Apple,
   ArrowRight,
+  Baby,
   BarChart3,
   Bell,
+  BookOpen,
   BriefcaseBusiness,
   Building2,
   Boxes,
+  Camera,
   Car,
+  ChefHat,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -16,18 +21,26 @@ import {
   Clock3,
   CreditCard,
   Download,
+  Dumbbell,
   Edit3,
   ExternalLink,
   Eye,
   FileText,
+  Gamepad2,
+  Gem,
+  Gift,
+  Hammer,
+  HeartPulse,
   ImageIcon,
   Laptop,
   Mail,
   MapPin,
   MessageCircle,
+  Music,
   Package,
   PawPrint,
   Phone,
+  Plane,
   Plus,
   RefreshCw,
   Search,
@@ -53,6 +66,7 @@ import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
 import MobileProfileActions from "./MobileProfileActions.jsx";
 import AccountSecuritySettings from "./AccountSecuritySettings.jsx";
 import { assetUrl } from "../config/runtime.js";
+import { productAttributeEntries } from "../config/productAttributes.js";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-HT")} HTG`;
 const shortDate = (value) =>
@@ -72,16 +86,29 @@ const percentageChange = (current, previous) => {
 
 const categoryIconOptions = [
   { value: "shopping-basket", label: "Supermarché", icon: ShoppingBasket },
+  { value: "apple", label: "Alimentation", icon: Apple },
   { value: "smartphone", label: "Électronique", icon: Smartphone },
+  { value: "laptop", label: "Informatique", icon: Laptop },
+  { value: "gamepad", label: "Jeux & consoles", icon: Gamepad2 },
+  { value: "camera", label: "Photo & vidéo", icon: Camera },
   { value: "shirt", label: "Mode", icon: Shirt },
+  { value: "gem", label: "Bijoux", icon: Gem },
+  { value: "gift", label: "Cadeaux", icon: Gift },
   { value: "sofa", label: "Maison & meubles", icon: Sofa },
+  { value: "hammer", label: "Outils", icon: Hammer },
   { value: "car", label: "Véhicules", icon: Car },
   { value: "building", label: "Immobilier", icon: Building2 },
-  { value: "briefcase", label: "Services et emplois", icon: BriefcaseBusiness },
+  { value: "briefcase", label: "Services", icon: BriefcaseBusiness },
+  { value: "book-open", label: "Éducation", icon: BookOpen },
+  { value: "heart-pulse", label: "Santé", icon: HeartPulse },
+  { value: "dumbbell", label: "Sport", icon: Dumbbell },
+  { value: "music", label: "Musique", icon: Music },
+  { value: "plane", label: "Voyage", icon: Plane },
+  { value: "chef-hat", label: "Restaurants", icon: ChefHat },
   { value: "wheat", label: "Agriculture", icon: Wheat },
   { value: "paw-print", label: "Animaux", icon: PawPrint },
+  { value: "baby", label: "Bébé & enfants", icon: Baby },
   { value: "sparkles", label: "Beauté & soins", icon: Sparkles },
-  { value: "laptop", label: "Informatique", icon: Laptop },
   { value: "boxes", label: "Autres", icon: Boxes },
 ];
 
@@ -101,6 +128,15 @@ const categoryIconAliases = {
   animals: PawPrint,
   beauty: Sparkles,
   computer: Laptop,
+  food: Apple,
+  jewelry: Gem,
+  tools: Hammer,
+  education: BookOpen,
+  health: HeartPulse,
+  sport: Dumbbell,
+  travel: Plane,
+  restaurant: ChefHat,
+  kids: Baby,
 };
 
 const inferCategoryIcon = (value = "") => {
@@ -111,15 +147,27 @@ const inferCategoryIcon = (value = "") => {
 
   if (/supermarche|alimentation|boisson/.test(normalized)) return "shopping-basket";
   if (/electronique|telephone|mobile/.test(normalized)) return "smartphone";
+  if (/informatique|ordinateur|laptop/.test(normalized)) return "laptop";
+  if (/jeu|console|gaming/.test(normalized)) return "gamepad";
+  if (/photo|camera|video/.test(normalized)) return "camera";
   if (/mode|vetement|chaussure/.test(normalized)) return "shirt";
+  if (/bijou|montre|luxe/.test(normalized)) return "gem";
+  if (/cadeau|fete/.test(normalized)) return "gift";
   if (/maison|meuble|decoration/.test(normalized)) return "sofa";
+  if (/outil|construction|bricolage/.test(normalized)) return "hammer";
   if (/vehicule|voiture|moto/.test(normalized)) return "car";
   if (/immobilier|terrain|maison-a-vendre/.test(normalized)) return "building";
   if (/service|emploi|travail/.test(normalized)) return "briefcase";
+  if (/education|ecole|universite|livre/.test(normalized)) return "book-open";
+  if (/sante|pharmacie|medical/.test(normalized)) return "heart-pulse";
+  if (/sport|fitness|gym/.test(normalized)) return "dumbbell";
+  if (/musique|instrument/.test(normalized)) return "music";
+  if (/voyage|tourisme|hotel/.test(normalized)) return "plane";
+  if (/restaurant|repas|cuisine/.test(normalized)) return "chef-hat";
   if (/agriculture|ferme|recolte/.test(normalized)) return "wheat";
   if (/animaux|animal/.test(normalized)) return "paw-print";
+  if (/bebe|enfant|jouet/.test(normalized)) return "baby";
   if (/beaute|soin|cosmetique/.test(normalized)) return "sparkles";
-  if (/informatique|ordinateur/.test(normalized)) return "laptop";
   return "boxes";
 };
 
@@ -655,6 +703,8 @@ export function AdminUsersContent({ api, currentUser }) {
   const [creatingStaff, setCreatingStaff] = useState(false);
   const [sponsorship, setSponsorship] = useState({
     amount: "",
+    paymentReference: "",
+    adminNote: "",
     startsAt: new Date().toISOString().slice(0, 10),
     endsAt: "",
   });
@@ -761,12 +811,16 @@ export function AdminUsersContent({ api, currentUser }) {
     setSelectedSeller(seller);
     setSponsorship({
       amount: seller.sponsorship_amount || "",
+      paymentReference: "",
+      adminNote: "",
       startsAt: new Date().toISOString().slice(0, 10),
       endsAt: end.toISOString().slice(0, 10),
     });
   };
   const saveCampaign = async (event) => {
     event.preventDefault();
+    setMessage("");
+    setError("");
     try {
       const { data } = await api.post(`/admin/sellers/${selectedSeller.id}/sponsorship`, sponsorship);
       setMessage(data.message);
@@ -777,6 +831,7 @@ export function AdminUsersContent({ api, currentUser }) {
     }
   };
   const cancelCampaign = async (user) => {
+    if (!window.confirm(`Arrêter la visibilité payée de ${user.shop_name} ?`)) return;
     const { data } = await api.patch(`/admin/sellers/${user.id}/sponsorship/cancel`);
     setMessage(data.message);
     load();
@@ -904,6 +959,22 @@ export function AdminUsersContent({ api, currentUser }) {
               <span><b>{money(seller.sales_volume)}</b><small>volume ventes</small></span>
               <span><b>{Number(seller.rating || 0).toFixed(1)}</b><small>{seller.review_count || 0} avis</small></span>
             </div>
+            <div className="admin-sponsor-mini">
+              <TrendingUp />
+              <span>
+                <b>{seller.sponsored ? "Visibilité payée active" : "Classement naturel"}</b>
+                <small>
+                  {seller.sponsored
+                    ? `Jusqu'au ${shortDate(seller.sponsorship_ends_at)}`
+                    : seller.sponsorship_status
+                      ? `Dernier statut : ${seller.sponsorship_status}`
+                      : "Aucune campagne validée"}
+                </small>
+              </span>
+              {seller.sponsorship_payment_reference && (
+                <em>Réf. {seller.sponsorship_payment_reference}</em>
+              )}
+            </div>
             <footer>
               <button className="secondary" onClick={() => openSellerDetail(seller)}>
                 <Eye /> Voir la fiche
@@ -939,11 +1010,13 @@ export function AdminUsersContent({ api, currentUser }) {
       )}
       {selectedSeller && (
         <form className="admin-sponsor-form" onSubmit={saveCampaign}>
-          <header><TrendingUp /><div><small>Campagne vendeur payée</small><h2>Promouvoir {selectedSeller.shop_name}</h2><p>Tous les produits actifs et pertinents de cette boutique passeront avant les résultats naturels.</p></div><button type="button" onClick={() => setSelectedSeller(null)}>×</button></header>
-          <label>Montant payé (HTG)<input required type="number" min="0" value={sponsorship.amount} onChange={(event) => setSponsorship({ ...sponsorship, amount: event.target.value })} /></label>
+          <header><TrendingUp /><div><small>Campagne vendeur payée</small><h2>Promouvoir {selectedSeller.shop_name}</h2><p>Seul l’admin peut valider une visibilité après confirmation du paiement. Tous les produits actifs de cette boutique passeront avant les résultats naturels.</p></div><button type="button" onClick={() => setSelectedSeller(null)}>×</button></header>
+          <label>Montant payé (HTG)<input required type="number" min="1" value={sponsorship.amount} onChange={(event) => setSponsorship({ ...sponsorship, amount: event.target.value })} /></label>
+          <label>Référence paiement<input required minLength="3" value={sponsorship.paymentReference} onChange={(event) => setSponsorship({ ...sponsorship, paymentReference: event.target.value })} placeholder="Ex. MonCash-458921" /></label>
           <label>Date de début<input required type="date" value={sponsorship.startsAt} onChange={(event) => setSponsorship({ ...sponsorship, startsAt: event.target.value })} /></label>
           <label>Date de fin<input required type="date" value={sponsorship.endsAt} onChange={(event) => setSponsorship({ ...sponsorship, endsAt: event.target.value })} /></label>
-          <button>Confirmer le paiement et activer</button>
+          <label className="full">Note admin<textarea rows="3" value={sponsorship.adminNote} onChange={(event) => setSponsorship({ ...sponsorship, adminNote: event.target.value })} placeholder="Ex. Paiement vérifié sur le compte VinnHT." /></label>
+          <button>Valider le paiement et promouvoir</button>
         </form>
       )}
       {sellerDetail && (
@@ -989,6 +1062,23 @@ export function AdminUsersContent({ api, currentUser }) {
                     </article>
                   ))}
                   {!sellerDetail.products.length && <div className="admin-empty">Aucun produit.</div>}
+                </div>
+              </section>
+              <section>
+                <h3>Campagnes de visibilité</h3>
+                <div className="admin-detail-history">
+                  {sellerDetail.campaigns.map((campaign) => (
+                    <p key={campaign.id}>
+                      <b>{money(campaign.amount)} · {campaign.status}</b>
+                      <small>
+                        {shortDate(campaign.starts_at)} - {shortDate(campaign.ends_at)}
+                        {campaign.payment_reference ? ` · Réf. ${campaign.payment_reference}` : ""}
+                        {campaign.approved_by_name ? ` · Validée par ${campaign.approved_by_name}` : ""}
+                      </small>
+                      {campaign.admin_note && <small>{campaign.admin_note}</small>}
+                    </p>
+                  ))}
+                  {!sellerDetail.campaigns.length && <small>Aucune campagne enregistrée.</small>}
                 </div>
               </section>
               <section>
@@ -1108,9 +1198,9 @@ export function AdminCategoriesContent({ api }) {
       <section className="admin-category-summary">
         {[
           [Boxes, "Rayons", categories.length],
-          [Package, "Produits associes", totals.products],
+          [Package, "Produits associés", totals.products],
           [CheckCircle2, "Produits actifs", totals.active],
-          [AlertTriangle, "Produits epuises", totals.outOfStock],
+          [AlertTriangle, "Produits épuisés", totals.outOfStock],
         ].map(([Icon, label, value]) => (
           <article key={label}>
             <Icon />
@@ -1124,7 +1214,7 @@ export function AdminCategoriesContent({ api }) {
             <span><Edit3 /></span>
             <div>
               <small>{editing ? "Modification" : "Nouveau rayon"}</small>
-                <h2>{editing ? "Modifier la categorie" : "Creer une categorie"}</h2>
+              <h2>{editing ? "Modifier la catégorie" : "Créer une catégorie"}</h2>
             </div>
           </header>
           <label>
@@ -1160,17 +1250,27 @@ export function AdminCategoriesContent({ api }) {
               }
             />
           </label>
-          <label>
-            Icône du rayon
-            <select
-              value={form.icon}
-              onChange={(event) => setForm({ ...form, icon: event.target.value })}
-            >
-              {categoryIconOptions.map(({ value, label }) => (
-                <option value={value} key={value}>{label}</option>
+          <section className="admin-category-icon-library" aria-label="Bibliothèque d’icônes">
+            <div>
+              <small>Bibliothèque d’icônes</small>
+              <b>Choisissez le symbole du rayon</b>
+            </div>
+            <div className="admin-category-icon-grid">
+              {categoryIconOptions.map(({ value, label, icon: Icon }) => (
+                <button
+                  type="button"
+                  className={form.icon === value ? "active" : ""}
+                  key={value}
+                  onClick={() => setForm({ ...form, icon: value })}
+                  title={label}
+                  aria-label={`Utiliser l’icône ${label}`}
+                >
+                  <Icon />
+                  <span>{label}</span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </section>
           <div className="admin-category-icon-preview">
             <span><CategoryIcon category={form} /></span>
             <div>
@@ -1432,8 +1532,16 @@ export function AdminProductsContent({ api }) {
       <section className="admin-product-grid">
         {products.map((product) => {
           const promoted = promotionIsActive(product);
+          const outOfStock = Number(product.stock || 0) <= 0;
           return (
-            <article className={selectedIds.includes(product.id) ? "selected" : ""} key={product.id}>
+            <article
+              className={[
+                selectedIds.includes(product.id) ? "selected" : "",
+                promoted ? "promoted" : "",
+                outOfStock ? "out-of-stock" : "",
+              ].filter(Boolean).join(" ")}
+              key={product.id}
+            >
               <label className="admin-product-select">
                 <input
                   type="checkbox"
@@ -1444,13 +1552,40 @@ export function AdminProductsContent({ api }) {
               </label>
               <div className="admin-product-image">
                 {product.image_url ? <img src={assetUrl(product.image_url)} alt={product.name} /> : <ImageIcon />}
-                {promoted && <b><TrendingUp /> Promotion</b>}
+                <span className="admin-product-category">{product.category_name}</span>
+                {promoted && <b><Sparkles /> Offre active</b>}
               </div>
-              <header><div><small>{product.category_name}</small><h3>{product.name}</h3><p>{product.seller_name}</p></div><Status value={product.status} /></header>
-              <p className="admin-product-location"><MapPin /> {product.city || "Haïti"}, {product.department || "Non précisé"}</p>
+              <div className="admin-product-card-body">
+                <header>
+                  <div>
+                    <h3>{product.name}</h3>
+                    <p className="admin-product-seller">
+                      <span>
+                        {product.seller_logo_url ? (
+                          <img src={assetUrl(product.seller_logo_url)} alt="" />
+                        ) : (
+                          <Store />
+                        )}
+                      </span>
+                      <b>{product.seller_name}</b>
+                    </p>
+                  </div>
+                  <Status value={product.status} />
+                </header>
+                <p className="admin-product-location">
+                  <MapPin /> {product.city || "Haïti"}, {product.department || "Non précisé"}
+                </p>
+              </div>
               <div className="admin-product-numbers">
-                <span><small>Prix</small><b>{money(promoted ? product.promotional_price : product.price)}</b></span>
-                <span className={Number(product.stock) <= 5 ? "warning" : ""}><small>Stock</small><b>{product.stock}</b></span>
+                <span>
+                  <small>{promoted ? "Prix offre" : "Prix"}</small>
+                  <b>{money(promoted ? product.promotional_price : product.price)}</b>
+                  {promoted && <em>{money(product.price)}</em>}
+                </span>
+                <span className={Number(product.stock) <= 5 ? "warning" : ""}>
+                  <small>Stock</small>
+                  <b>{outOfStock ? "Épuisé" : product.stock}</b>
+                </span>
               </div>
               <footer>
                 <button className="secondary" onClick={() => openProduct(product)}><Eye /> Aperçu</button>
@@ -1505,6 +1640,12 @@ export function AdminProductsContent({ api }) {
                 <span><b>Localisation</b>{selectedProduct.product.city || "Haïti"}, {selectedProduct.product.department || "Non précisé"}</span>
                 <span><b>Prix</b>{money(selectedProduct.product.price)}</span>
                 <span><b>Stock</b>{selectedProduct.product.stock}</span>
+                {productAttributeEntries(selectedProduct.product).map((attribute) => (
+                  <span key={attribute.key}>
+                    <b>{attribute.label}</b>
+                    {attribute.value}
+                  </span>
+                ))}
               </section>
               {selectedProduct.images.length > 1 && (
                 <section>

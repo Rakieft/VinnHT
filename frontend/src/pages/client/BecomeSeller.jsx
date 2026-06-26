@@ -13,21 +13,6 @@ import {
 } from "lucide-react";
 import { apiOrigin } from "../../config/runtime.js";
 
-const categories = [
-  "Supermarché",
-  "Électronique",
-  "Mode",
-  "Maison & Meubles",
-  "Véhicules",
-  "Immobilier",
-  "Services",
-  "Emplois",
-  "Agriculture",
-  "Animaux",
-  "Beauté & Soins",
-  "Autres",
-];
-
 const SELLER_TERMS_VERSION = "2026-06-24-v2";
 const terms = [
   "Je certifie que toutes les informations fournies sont exactes et à jour.",
@@ -63,7 +48,6 @@ const initialForm = {
   institutionName: "",
   activityDetails: "",
   shopName: "",
-  mainCategory: "",
   shopDescription: "",
   shopLogo: null,
   pickupAddress: "",
@@ -81,7 +65,6 @@ const requiredLabels = {
   activityStatus: "Statut actuel",
   institutionName: "École, université, entreprise ou établissement",
   shopName: "Nom de la boutique",
-  mainCategory: "Catégorie principale",
   shopDescription: "Description de la boutique",
   pickupAddress: "Adresse de récupération",
 };
@@ -403,7 +386,11 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
           </label>
         </FormSection>
 
-        <FormSection icon={Store} title="Informations boutique">
+        <FormSection
+          icon={Store}
+          title="Informations boutique"
+          note="Une boutique VinnHT peut vendre dans plusieurs rayons. Vous choisirez le rayon adapté chaque fois que vous publierez un produit."
+        >
           <TextField
             label="Nom de la boutique"
             field="shopName"
@@ -411,19 +398,6 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
             errors={errors}
             onChange={setField}
           />
-          <label>
-            Catégorie principale
-            <select
-              value={form.mainCategory}
-              onChange={(event) => setField("mainCategory", event.target.value)}
-            >
-              <option value="">Choisir une catégorie</option>
-              {categories.map((category) => (
-                <option key={category}>{category}</option>
-              ))}
-            </select>
-            {errors.mainCategory && <small>{errors.mainCategory}</small>}
-          </label>
           <label className="full">
             Description de la boutique
             <textarea

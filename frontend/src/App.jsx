@@ -112,6 +112,7 @@ import {
 import BecomeSellerPage from "./pages/client/BecomeSeller.jsx";
 import MarketplaceMessages from "./components/MarketplaceMessages.jsx";
 import { apiOrigin, assetUrl } from "./config/runtime.js";
+import { productAttributeEntries } from "./config/productAttributes.js";
 import { shopPublicPath, shopSellerIdFromParam } from "./utils/shopUrl.js";
 import sousHeroImage from "./assets/images/sous-hero-vinnht-student.png";
 import contactSupportImage from "./assets/images/contact-support-hands-vinnht.png";
@@ -129,6 +130,77 @@ const whatsappNumber = (value = "") => {
   const digits = String(value || "").replace(/\D/g, "");
   return digits.length === 8 ? `509${digits}` : digits;
 };
+
+const productSimilarityStopWords = new Set([
+  "avec",
+  "pour",
+  "dans",
+  "sans",
+  "produit",
+  "nouveau",
+  "nouvelle",
+  "original",
+  "originale",
+  "homme",
+  "femme",
+  "enfant",
+  "garcon",
+  "fille",
+  "mode",
+  "chaussure",
+  "chaussures",
+  "soulier",
+  "souliers",
+  "taille",
+  "couleur",
+  "noir",
+  "noire",
+  "blanc",
+  "blanche",
+  "rouge",
+  "bleu",
+  "bleue",
+]);
+
+const normalizeProductText = (value = "") =>
+  String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const productSimilarityKeywords = (product = {}) => {
+  const attributeWords = productAttributeEntries(product)
+    .filter((attribute) => ["marque", "brand", "modele", "model"].includes(attribute.key))
+    .map((attribute) => attribute.value)
+    .join(" ");
+  return [
+    ...new Set(
+      normalizeProductText(`${product.name || ""} ${attributeWords}`)
+        .split(/[^a-z0-9]+/)
+        .filter((word) => word.length >= 3 && !productSimilarityStopWords.has(word)),
+    ),
+  ].slice(0, 6);
+};
+
+const relevantSimilarProducts = (baseProduct, candidates) => {
+  const keywords = productSimilarityKeywords(baseProduct);
+  if (!keywords.length) return [];
+
+  return candidates
+    .map((candidate) => {
+      const candidateText = normalizeProductText(
+        `${candidate.name || ""} ${candidate.category_name || ""}`,
+      );
+      const score = keywords.reduce(
+        (total, keyword) => total + (candidateText.includes(keyword) ? 1 : 0),
+        0,
+      );
+      return { candidate, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(({ candidate }) => candidate);
+};
 const productPrice = (product) => {
   const promotionIsActive =
     product.is_featured &&
@@ -138,6 +210,13 @@ const productPrice = (product) => {
 
   return promotionIsActive ? Number(product.promotional_price) : Number(product.price || 0);
 };
+const productOfferIsActive = (product) =>
+  Boolean(
+    product?.is_featured &&
+      Number(product.promotional_price) > 0 &&
+      Number(product.promotional_price) < Number(product.price) &&
+      (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date()),
+  );
 
 function WhatsAppIcon({ size = 19 }) {
   return (
@@ -788,16 +867,16 @@ function ProductCard({ product }) {
   const { add } = useCart();
   const { isFavorite, toggle } = useFavorites();
   const favorite = isFavorite(product.id);
+  const activeOffer = productOfferIsActive(product);
   return (
     <motion.article className="product-card" whileHover={{ y: -8 }}>
       <Link className="product-media" to={`/products/${product.id}`}>
         <img src={assetUrl(product.image_url)} alt={product.name} />
-        {product.is_featured ? (
-          <img
-            className="best-price-ribbon"
-            src="/best-price-ribbon.png"
-            alt="Meilleur prix"
-          />
+        {activeOffer ? (
+          <span className="vinnht-offer-badge" aria-label="Offre spéciale VinnHT">
+            <Sparkles size={13} />
+            Offre
+          </span>
         ) : (
           <Badge tone="gold">Tendance</Badge>
         )}
@@ -1772,7 +1851,6 @@ function ProductsCatalog() {
   const [category, setCategory] = useState("");
   const [department, setDepartment] = useState("");
   const [city, setCity] = useState("");
-  const [sort, setSort] = useState("recent");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -1810,12 +1888,6 @@ function ProductsCatalog() {
   }, [category, query, department, city]);
 
   const availableCities = [...new Set(products.map((product) => product.city).filter(Boolean))];
-
-  const sortedProducts = [...products].sort((a, b) => {
-    if (sort === "price-low") return Number(a.price) - Number(b.price);
-    if (sort === "price-high") return Number(b.price) - Number(a.price);
-    return Number(b.id) - Number(a.id);
-  });
   const featuredUniverses = marketplaceDepartments.slice(0, 6);
   const selectUniverse = (slug) => {
     setCategory(category === slug ? "" : slug);
@@ -1951,17 +2023,27 @@ function ProductsCatalog() {
                     : "Tous les produits"}
               </h2>
             </div>
-            <select value={sort} onChange={(event) => setSort(event.target.value)}>
-              <option value="recent">Plus récents</option>
-              <option value="price-low">Prix croissant</option>
-              <option value="price-high">Prix décroissant</option>
+            <select
+              value={department}
+              onChange={(event) => {
+                setDepartment(event.target.value);
+                setCity("");
+              }}
+              aria-label="Filtrer les produits par département"
+            >
+              <option value="">Tous les départements</option>
+              {haitiDepartments.map((value) => (
+                <option value={value} key={value}>
+                  {value}
+                </option>
+              ))}
             </select>
           </header>
           {loading ? (
             <div className="catalog-empty">Chargement du marché...</div>
-          ) : sortedProducts.length ? (
+          ) : products.length ? (
             <div className="product-grid">
-              {sortedProducts.map((product) => (
+              {products.map((product) => (
                 <ProductCard product={product} key={product.id} />
               ))}
             </div>
@@ -2088,7 +2170,8 @@ function ProductDetails() {
         const response = await api.get("/products", {
           params: { category: data.category_slug },
         });
-        setSimilar(response.data.filter((item) => item.id !== data.id));
+        const candidates = response.data.filter((item) => item.id !== data.id);
+        setSimilar(relevantSimilarProducts(data, candidates));
       })
       .catch(() => setMissing(true));
   }, [id]);
@@ -2151,25 +2234,21 @@ function ProductDetails() {
   const whatsappMessage = encodeURIComponent(
     `Bonjour, je vous contacte depuis VinnHT au sujet du produit « ${product.name} ».`,
   );
+  const productAttributes = productAttributeEntries(product);
+  const activeOffer = productOfferIsActive(product);
 
   return (
     <MarketplaceLayout>
       <section className="product-detail">
         <div className="gallery">
           <img src={assetUrl(product.image_url)} alt={product.name} />
-          <div>
-            {similar.slice(0, 3).map((p) => (
-              <img key={p.id} src={p.image_url} alt="Apercu" />
-            ))}
-          </div>
         </div>
         <div className="product-info">
-          {Boolean(product.is_featured) && (
-            <img
-              className="best-price-detail-ribbon"
-              src="/best-price-ribbon.png"
-              alt="Meilleur prix"
-            />
+          {activeOffer && (
+            <span className="vinnht-offer-detail-badge">
+              <Sparkles size={15} />
+              Offre spéciale VinnHT
+            </span>
           )}
           <Badge tone="gold">Vendeur verifie</Badge>
           <h1>{product.name}</h1>
@@ -2195,6 +2274,22 @@ function ProductDetails() {
                 "Contactez le vendeur pour obtenir plus d'informations sur ce produit."}
             </p>
           </div>
+          {productAttributes.length > 0 && (
+            <div className="product-characteristics">
+              <header>
+                <span>Caractéristiques</span>
+                <h3>Détails du produit</h3>
+              </header>
+              <div>
+                {productAttributes.map((attribute) => (
+                  <article key={attribute.key}>
+                    <small>{attribute.label}</small>
+                    <strong>{attribute.value}</strong>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
           {cartMessage && <div className="product-cart-feedback">{cartMessage}</div>}
           <div className="detail-actions">
             <Button onClick={addProductToCart}>
@@ -2265,7 +2360,7 @@ function ProductDetails() {
           <div className="catalog-empty">
             <ShoppingBag />
             <h3>Aucun produit similaire pour le moment</h3>
-            <p>Les nouveaux produits de ce rayon apparaîtront ici.</p>
+            <p>Seuls les produits qui correspondent vraiment à celui-ci apparaîtront ici.</p>
           </div>
         )}
       </section>
@@ -3335,10 +3430,10 @@ function LegacyBecomeSeller() {
                 Nom de votre boutique
                 <input required placeholder="Ex: Marché Lakay" />
               </label>
-              <label>
-                Catégorie principale
-                <input required placeholder="Ex: Supermarché, Mode, Électronique" />
-              </label>
+              <p className="seller-form-note">
+                Votre boutique pourra publier dans tous les rayons VinnHT. Le rayon sera choisi
+                séparément pour chaque produit.
+              </p>
               <label>
                 Téléphone WhatsApp
                 <input required placeholder="+509 37 00 00 00" />

@@ -204,7 +204,7 @@ const runFlow = async () => {
   });
 
   const [[category]] = await database.query(
-    "SELECT id FROM categories ORDER BY id LIMIT 1",
+    "SELECT id FROM categories WHERE slug='autres' LIMIT 1",
   );
   assert(category?.id, "Aucune catégorie disponible après les migrations.");
 
@@ -217,6 +217,9 @@ const runFlow = async () => {
       description: "Produit temporaire de validation.",
       price: 2500,
       stock: 5,
+      attributes: {
+        condition: "Neuf",
+      },
       department: "Ouest",
       city: "Delmas",
       imageUrl: "https://images.unsplash.com/photo-1523275335684-37898b6baf30",

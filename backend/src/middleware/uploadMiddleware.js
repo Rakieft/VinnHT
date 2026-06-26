@@ -33,14 +33,14 @@ const imageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export const uploadProductImages = multer({
   storage: createStorage(uploadDirectories.products, "produit"),
-  limits: { fileSize: 5 * 1024 * 1024, files: 5 },
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, callback) => {
     if (!imageTypes.has(file.mimetype)) {
       return callback(new Error("Format image non supporté. Utilisez JPG, PNG ou WebP."));
     }
     callback(null, true);
   },
-}).array("images", 5);
+}).array("images", 1);
 
 const createImageUpload = (storage) =>
   multer({

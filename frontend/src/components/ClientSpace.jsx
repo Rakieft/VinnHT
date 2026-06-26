@@ -61,6 +61,13 @@ const clientProductPrice = (product) => {
 
   return activeOffer ? Number(product.promotional_price) : Number(product.price);
 };
+const clientProductOfferIsActive = (product) =>
+  Boolean(
+    product?.is_featured &&
+      Number(product.promotional_price) > 0 &&
+      Number(product.promotional_price) < Number(product.price) &&
+      (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date()),
+  );
 
 const products = [
   {
@@ -202,43 +209,49 @@ function ClientProductCard({
   favorite = false,
   onToggleFavorite,
 }) {
+  const activeOffer = clientProductOfferIsActive(product);
+
   return (
     <motion.article
-      className={`client-product-card ${compact ? "compact" : ""}`}
+      className={`product-card client-catalog-product-card ${compact ? "compact" : ""}`}
       whileHover={{ y: -6 }}
     >
-      <div className="client-product-image">
+      <Link className="product-media" to={`/products/${product.id}`}>
         <img src={imageSource(product.image_url)} alt={product.name} />
-        {Boolean(product.is_featured) && (
-          <img
-            className="client-best-price-ribbon"
-            src="/best-price-ribbon.png"
-            alt="Meilleur prix"
-          />
+        {activeOffer && (
+          <span className="vinnht-offer-badge" aria-label="Offre spéciale VinnHT">
+            <Sparkles size={13} />
+            Offre
+          </span>
         )}
-        <button
-          className={favorite ? "active" : ""}
-          onClick={() => onToggleFavorite?.(product)}
-          aria-label={favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
-        >
-          <Heart size={17} fill={favorite ? "currentColor" : "none"} />
-        </button>
-        {!compact && !product.is_featured && <span>Nouveau</span>}
-      </div>
-      <div className="client-product-info">
-        <small>
-          <MapPin size={12} />
-          {product.city}
-        </small>
-        <Link to={`/products/${product.id}`}>{product.name}</Link>
+        {!activeOffer && <span className="badge badge-gold">Tendance</span>}
+      </Link>
+      <button
+        className={`product-favorite-button ${favorite ? "active" : ""}`}
+        onClick={() => onToggleFavorite?.(product)}
+        aria-label={favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
+      >
+        <Heart size={18} fill={favorite ? "currentColor" : "none"} />
+      </button>
+      <div className="product-body">
+        <div className="product-meta">
+          <span>{product.category_name || "Produit"}</span>
+          <span>
+            <MapPin size={13} />
+            {product.city || "Haïti"}
+          </span>
+        </div>
+        <Link to={`/products/${product.id}`}>
+          <h3>{product.name}</h3>
+        </Link>
         <p>
-          <ShieldCheck size={13} />
-          {product.seller_name}
+          <ShieldCheck size={14} />
+          Vendeur vérifié : {product.seller_name || product.shop_name || "Boutique VinnHT"}
         </p>
-        <div>
+        <div className="product-bottom">
           <strong>{clientProductPrice(product).toLocaleString("fr-HT")} HTG</strong>
-          <button onClick={() => onAdd?.(product)} aria-label="Ajouter au panier">
-            <ShoppingCart size={17} />
+          <button className="round-btn" onClick={() => onAdd?.(product)} aria-label="Ajouter au panier">
+            <ShoppingCart size={18} />
           </button>
         </div>
       </div>
@@ -458,7 +471,7 @@ export function ClientDashboardContent({
           </span>
           <h2>Des prix pensés pour votre quotidien.</h2>
           <p>Découvrez les réductions, nouveautés et produits populaires sélectionnés pour vous.</p>
-          <Link to="/productsoffers=true">
+          <Link to="/products?offers=true">
             Voir les offres
             <ArrowRight size={17} />
           </Link>
@@ -988,18 +1001,13 @@ export function ClientFavoritesContent({ onAdd, favorites = [], isFavorite, onTo
       </section>
       <div className="client-products-grid favorites-premium-grid">
         {favorites.map((product) => (
-          <div className="favorite-product-wrap" key={product.id}>
-            <ClientProductCard
-              product={product}
-              onAdd={onAdd}
-              favorite={isFavorite?.(product.id)}
-              onToggleFavorite={onToggleFavorite}
-            />
-            <button className="remove-favorite" onClick={() => onToggleFavorite?.(product)}>
-              <Trash2 size={15} />
-              Supprimer des favoris
-            </button>
-          </div>
+          <ClientProductCard
+            product={product}
+            onAdd={onAdd}
+            favorite={isFavorite?.(product.id)}
+            onToggleFavorite={onToggleFavorite}
+            key={product.id}
+          />
         ))}
       </div>
       {!favorites.length && (

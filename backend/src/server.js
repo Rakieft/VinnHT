@@ -69,10 +69,18 @@ app.use("/api", apiRateLimiter);
 
 const validate = (req, res, next) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty())
+  if (!errors.isEmpty()) {
+    const firstMessage = errors.array()[0]?.msg;
     return res
       .status(422)
-      .json({ message: "Données invalides.", errors: errors.array() });
+      .json({
+        message:
+          firstMessage && firstMessage !== "Invalid value"
+            ? firstMessage
+            : "Données invalides.",
+        errors: errors.array(),
+      });
+  }
   next();
 };
 const asyncRoute = (handler) => (req, res, next) =>
@@ -98,6 +106,108 @@ const SELLER_TERMS = [
   "Je comprends que VinnHT agit comme plateforme intermédiaire et que mes obligations fiscales, commerciales et réglementaires restent sous ma responsabilité.",
   "J’accepte les conditions générales pour devenir vendeur sur VinnHT.",
 ];
+
+const PRODUCT_ATTRIBUTE_RULES = {
+  supermarche: {
+    allowed: ["brand", "format", "origin", "expiryDate"],
+    required: ["format"],
+  },
+  electronique: {
+    allowed: ["brand", "model", "condition", "color", "capacity", "warranty"],
+    required: ["brand", "model", "condition"],
+  },
+  mode: {
+    allowed: ["audience", "size", "color", "material", "condition"],
+    required: ["audience", "size", "color", "condition"],
+  },
+  "maison-meubles": {
+    allowed: ["material", "dimensions", "color", "condition"],
+    required: ["material", "condition"],
+  },
+  vehicules: {
+    allowed: ["brand", "model", "year", "mileage", "fuel", "transmission", "condition"],
+    required: ["brand", "model", "year", "fuel", "transmission", "condition"],
+  },
+  immobilier: {
+    allowed: ["listingType", "propertyType", "area", "bedrooms", "bathrooms", "furnished"],
+    required: ["listingType", "propertyType", "area"],
+  },
+  services: {
+    allowed: ["serviceType", "deliveryMode", "availability", "experience"],
+    required: ["serviceType", "deliveryMode"],
+  },
+  emplois: {
+    allowed: ["jobTitle", "contractType", "salary", "experience", "education", "deadline"],
+    required: ["jobTitle", "contractType"],
+  },
+  agriculture: {
+    allowed: ["productType", "variety", "unit", "harvestDate", "origin", "organic"],
+    required: ["productType", "unit", "origin"],
+  },
+  animaux: {
+    allowed: ["species", "breed", "age", "sex", "vaccinated"],
+    required: ["species", "age", "sex", "vaccinated"],
+  },
+  "beaute-soins": {
+    allowed: ["brand", "productType", "format", "skinType", "expiryDate"],
+    required: ["productType", "format"],
+  },
+  autres: {
+    allowed: ["brand", "model", "condition"],
+    required: ["condition"],
+  },
+};
+
+const sanitizeProductAttributes = (rawAttributes, categorySlug) => {
+  let parsed = rawAttributes;
+
+  if (typeof rawAttributes === "string") {
+    if (Buffer.byteLength(rawAttributes, "utf8") > 8192) {
+      const error = new Error("Les caractéristiques du produit sont trop volumineuses.");
+      error.status = 422;
+      throw error;
+    }
+
+    try {
+      parsed = rawAttributes ? JSON.parse(rawAttributes) : {};
+    } catch {
+      const error = new Error("Les caractéristiques du produit sont invalides.");
+      error.status = 422;
+      throw error;
+    }
+  }
+
+  if (!parsed) parsed = {};
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    const error = new Error("Les caractéristiques du produit sont invalides.");
+    error.status = 422;
+    throw error;
+  }
+
+  const rule = PRODUCT_ATTRIBUTE_RULES[categorySlug] || PRODUCT_ATTRIBUTE_RULES.autres;
+  const sanitized = {};
+
+  for (const key of rule.allowed) {
+    if (parsed[key] === undefined || parsed[key] === null) continue;
+    const value = String(parsed[key]).trim();
+    if (!value) continue;
+    if (value.length > 160) {
+      const error = new Error(`La caractéristique « ${key} » est trop longue.`);
+      error.status = 422;
+      throw error;
+    }
+    sanitized[key] = value;
+  }
+
+  const missing = rule.required.filter((key) => !sanitized[key]);
+  if (missing.length) {
+    const error = new Error("Veuillez compléter toutes les caractéristiques obligatoires du rayon.");
+    error.status = 422;
+    throw error;
+  }
+
+  return sanitized;
+};
 
 const dateOnly = (value) => new Date(`${value}T12:00:00`);
 const sqlDate = (date) => date.toISOString().slice(0, 10);
@@ -1207,8 +1317,9 @@ app.get(
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 48));
     const offset = (page - 1) * limit;
     const [rows] = await pool.query(
-      `SELECT p.*, c.name category_name, u.name seller_name,
-        COALESCE(sp.pickup_address,'Haïti') city,
+      `SELECT p.*, c.name category_name, c.slug category_slug,
+        COALESCE(sp.shop_name,u.name) seller_name,
+        COALESCE(p.city,sp.pickup_address,'Haïti') city,
         EXISTS(
           SELECT 1 FROM seller_sponsorships ss
           WHERE ss.seller_id=p.seller_id
@@ -1557,23 +1668,32 @@ app.post(
     body("name").trim().isLength({ min: 2 }),
     body("categoryId").isInt(),
     body("price").isFloat({ min: 0 }),
-    body("stock").isInt({ min: 0 }),
+    body("stock")
+      .isInt({ min: 1 })
+      .withMessage("Ajoutez au moins une unité en stock pour publier ce produit."),
     body("department").trim().isLength({ min: 2, max: 80 }),
     body("city").trim().isLength({ min: 2, max: 120 }),
   ],
   validate,
   asyncRoute(async (req, res) => {
     const { name, categoryId, description, price, stock, imageUrl, department, city } = req.body;
+    const [[category]] = await pool.query(
+      "SELECT id,slug FROM categories WHERE id=?",
+      [categoryId],
+    );
+    if (!category) return res.status(422).json({ message: "Rayon invalide." });
+    const attributes = sanitizeProductAttributes(req.body.attributes, category.slug);
     const uploadedImages = await storeImages(req.files, "products");
     const primaryImage = uploadedImages[0] || imageUrl || null;
     const [result] = await pool.query(
-      "INSERT INTO products (seller_id,category_id,name,slug,description,price,stock,department,city,image_url) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO products (seller_id,category_id,name,slug,description,attributes,price,stock,department,city,image_url) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
       [
         req.user.id,
         categoryId,
         name,
         slugify(name),
         description || null,
+        JSON.stringify(attributes),
         price,
         stock,
         department,
@@ -1596,7 +1716,7 @@ app.get(
   authorize("seller"),
   asyncRoute(async (req, res) => {
     const [rows] = await pool.query(
-      "SELECT p.*,c.name category_name FROM products p JOIN categories c ON c.id=p.category_id WHERE p.seller_id=? ORDER BY p.created_at DESC",
+      "SELECT p.*,c.name category_name,c.slug category_slug FROM products p JOIN categories c ON c.id=p.category_id WHERE p.seller_id=? ORDER BY p.created_at DESC",
       [req.user.id],
     );
     res.json(rows);
@@ -1988,6 +2108,16 @@ app.patch(
   ],
   validate,
   asyncRoute(async (req, res) => {
+    const [[currentProduct]] = await pool.query(
+      `SELECT p.id,p.category_id,c.slug category_slug
+       FROM products p
+       JOIN categories c ON c.id=p.category_id
+       WHERE p.id=? AND p.seller_id=?`,
+      [req.params.id, req.user.id],
+    );
+    if (!currentProduct)
+      return res.status(404).json({ message: "Produit introuvable." });
+
     const fields = [];
     const values = [];
     const mapping = {
@@ -2004,6 +2134,20 @@ app.patch(
       imageUrl: "image_url",
       status: "status",
     };
+
+    if (req.body.attributes !== undefined) {
+      let categorySlug = currentProduct.category_slug;
+      if (req.body.categoryId !== undefined) {
+        const [[category]] = await pool.query(
+          "SELECT slug FROM categories WHERE id=?",
+          [req.body.categoryId],
+        );
+        if (!category) return res.status(422).json({ message: "Rayon invalide." });
+        categorySlug = category.slug;
+      }
+      fields.push("attributes=?");
+      values.push(JSON.stringify(sanitizeProductAttributes(req.body.attributes, categorySlug)));
+    }
 
     for (const [input, column] of Object.entries(mapping)) {
       if (req.body[input] !== undefined) {
@@ -3572,22 +3716,16 @@ app.get(
     const status = ["pending", "approved", "rejected"].includes(req.query.status)
       ? req.query.status
       : null;
-    const category = String(req.query.category || "").trim() || null;
     const dateFrom = /^\d{4}-\d{2}-\d{2}$/.test(req.query.dateFrom || "") ? req.query.dateFrom : null;
     const dateTo = /^\d{4}-\d{2}-\d{2}$/.test(req.query.dateTo || "") ? req.query.dateTo : null;
     const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
     const limit = Math.min(50, Math.max(6, Number.parseInt(req.query.limit, 10) || 12));
     const offset = (page - 1) * limit;
     const searchValue = `%${query}%`;
-    const categoryExpression = `COALESCE(
-      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(sr.description,'$.mainCategory')),''),
-      'Non précisée'
-    )`;
     const where = [
       `(?='' OR sr.business_name LIKE ? OR u.name LIKE ? OR u.email LIKE ?
         OR COALESCE(u.phone,'') LIKE ? OR CAST(sr.id AS CHAR) LIKE ?)`,
       "(? IS NULL OR sr.status=?)",
-      `(? IS NULL OR ${categoryExpression}=?)`,
       "(? IS NULL OR DATE(sr.created_at)>=?)",
       "(? IS NULL OR DATE(sr.created_at)<=?)",
     ].join(" AND ");
@@ -3600,8 +3738,6 @@ app.get(
       searchValue,
       status,
       status,
-      category,
-      category,
       dateFrom,
       dateFrom,
       dateTo,
@@ -3615,8 +3751,7 @@ app.get(
       params,
     );
     const [rows] = await pool.query(
-      `SELECT sr.*,u.name,u.email,u.phone,reviewer.name reviewer_name,
-        ${categoryExpression} main_category
+      `SELECT sr.*,u.name,u.email,u.phone,reviewer.name reviewer_name
        FROM seller_requests sr
        JOIN users u ON u.id=sr.user_id
        LEFT JOIN users reviewer ON reviewer.id=sr.reviewed_by
@@ -3625,17 +3760,11 @@ app.get(
        LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
-    const [categories] = await pool.query(
-      `SELECT DISTINCT ${categoryExpression} category
-       FROM seller_requests sr
-       ORDER BY category`,
-    );
     const [health] = await pool.query(
       "SELECT status,COUNT(*) total FROM seller_requests GROUP BY status",
     );
     res.json({
       items: rows,
-      categories: categories.map((item) => item.category),
       summary: health.reduce(
         (summary, item) => ({ ...summary, [item.status]: Number(item.total) }),
         {},
@@ -3853,6 +3982,9 @@ app.get(
   authorize("admin"),
   noStore,
   asyncRoute(async (req, res) => {
+    await pool.query(
+      "UPDATE seller_sponsorships SET status='expired' WHERE status='active' AND ends_at<=NOW()",
+    );
     const query = String(req.query.q || "").trim();
     const status = ["active", "suspended"].includes(req.query.status)
       ? req.query.status
@@ -4270,7 +4402,11 @@ app.get(
          (SELECT latest_ss.starts_at FROM seller_sponsorships latest_ss
           WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_starts_at,
          (SELECT latest_ss.ends_at FROM seller_sponsorships latest_ss
-          WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_ends_at
+          WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_ends_at,
+         (SELECT latest_ss.payment_reference FROM seller_sponsorships latest_ss
+          WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_payment_reference,
+         (SELECT latest_ss.approved_at FROM seller_sponsorships latest_ss
+          WHERE latest_ss.seller_id=u.id ORDER BY latest_ss.created_at DESC LIMIT 1) sponsorship_approved_at
        FROM users u
        JOIN user_roles ur ON ur.user_id=u.id
        LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
@@ -4338,10 +4474,13 @@ app.get(
       [seller.id],
     );
     const [campaigns] = await pool.query(
-      `SELECT id,amount,status,starts_at,ends_at,created_at
-       FROM seller_sponsorships
-       WHERE seller_id=?
-       ORDER BY created_at DESC
+      `SELECT ss.id,ss.amount,ss.payment_reference,ss.admin_note,ss.status,
+        ss.starts_at,ss.ends_at,ss.approved_at,ss.cancelled_at,ss.created_at,
+        approver.name approved_by_name
+       FROM seller_sponsorships ss
+       LEFT JOIN users approver ON approver.id=ss.approved_by
+       WHERE ss.seller_id=?
+       ORDER BY ss.created_at DESC
        LIMIT 8`,
       [seller.id],
     );
@@ -4536,7 +4675,7 @@ app.get(
   noStore,
   asyncRoute(async (req, res) => {
     const [[product]] = await pool.query(
-      `SELECT p.*,c.name category_name,COALESCE(sp.shop_name,u.name) seller_name,
+      `SELECT p.*,c.name category_name,c.slug category_slug,COALESCE(sp.shop_name,u.name) seller_name,
         sp.shop_logo_url seller_logo_url,u.email seller_email,u.phone seller_phone
        FROM products p
        JOIN categories c ON c.id=p.category_id
@@ -4596,36 +4735,75 @@ app.post(
   authorize("admin"),
   writeRateLimiter,
   [
-    body("amount").isFloat({ min: 0 }),
+    body("amount").isFloat({ min: 1 }).withMessage("Le montant payé doit être supérieur à 0."),
+    body("paymentReference")
+      .trim()
+      .isLength({ min: 3, max: 120 })
+      .withMessage("Ajoutez une référence de paiement valide."),
+    body("adminNote").optional({ checkFalsy: true }).trim().isLength({ max: 1000 }),
     body("startsAt").isISO8601(),
     body("endsAt").isISO8601(),
   ],
   validate,
   asyncRoute(async (req, res) => {
     const [[seller]] = await pool.query(
-      `SELECT u.id,COALESCE(sp.shop_name,u.name) seller_name
+      `SELECT u.id,u.status,COALESCE(sp.shop_name,u.name) seller_name,
+        SUM(CASE WHEN p.status='active' AND p.stock>0 THEN 1 ELSE 0 END) active_products
        FROM users u
        JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'
        LEFT JOIN products p ON p.seller_id=u.id
        LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
        WHERE u.id=?
-       GROUP BY u.id,sp.shop_name`,
+       GROUP BY u.id,u.status,sp.shop_name`,
       [req.params.id],
     );
     if (!seller) return res.status(404).json({ message: "Vendeur introuvable." });
+    if (seller.status !== "active") {
+      return res.status(422).json({
+        message: "Cette boutique doit être active avant de lancer une campagne.",
+      });
+    }
+    if (Number(seller.active_products || 0) <= 0) {
+      return res.status(422).json({
+        message: "Cette boutique doit avoir au moins un produit actif en stock.",
+      });
+    }
     if (new Date(req.body.endsAt) <= new Date(req.body.startsAt)) {
       return res.status(422).json({ message: "La date de fin doit suivre la date de debut." });
     }
+    await pool.query(
+      "UPDATE seller_sponsorships SET status='expired' WHERE status='active' AND ends_at<=NOW()",
+    );
     await pool.query(
       "UPDATE seller_sponsorships SET status='expired' WHERE seller_id=? AND status IN ('pending','active')",
       [seller.id],
     );
     const [result] = await pool.query(
-      `INSERT INTO seller_sponsorships (seller_id,amount,status,starts_at,ends_at)
-       VALUES (?,?,'active',?,?)`,
-      [seller.id, req.body.amount, req.body.startsAt, req.body.endsAt],
+      `INSERT INTO seller_sponsorships
+        (seller_id,amount,payment_reference,admin_note,status,starts_at,ends_at,approved_by,approved_at)
+       VALUES (?,?,?,?,'active',?,?,?,NOW())`,
+      [
+        seller.id,
+        req.body.amount,
+        req.body.paymentReference,
+        req.body.adminNote || null,
+        req.body.startsAt,
+        req.body.endsAt,
+        req.user.id,
+      ],
     );
     await audit(req, "seller.sponsorship.activate", "seller", seller.id, req.body);
+    await notifyUser(
+      pool,
+      seller.id,
+      "seller",
+      "seller.sponsorship.active",
+      "Visibilité boutique activée",
+      `Votre campagne VinnHT est active jusqu'au ${new Date(req.body.endsAt).toLocaleDateString("fr-HT")}.`,
+      "/seller/products",
+      "seller_sponsorship",
+      result.insertId,
+    );
     res.status(201).json({
       id: result.insertId,
       message: `Campagne activee pour ${seller.seller_name}. Ses produits pertinents seront prioritaires.`,
@@ -4638,11 +4816,18 @@ app.get(
   authorize("admin"),
   noStore,
   asyncRoute(async (_req, res) => {
+    await pool.query(
+      "UPDATE seller_sponsorships SET status='expired' WHERE status='active' AND ends_at<=NOW()",
+    );
     const [rows] = await pool.query(
       `SELECT u.id seller_id,COALESCE(sp.shop_name,u.name) seller_name,sp.shop_logo_url logo_url,
         COUNT(p.id) product_count,
         SUM(CASE WHEN p.status='active' AND p.stock>0 THEN 1 ELSE 0 END) active_product_count,
         ss.id sponsorship_id,ss.amount sponsorship_amount,ss.status sponsorship_status,
+        ss.payment_reference sponsorship_payment_reference,
+        ss.admin_note sponsorship_admin_note,
+        ss.approved_at sponsorship_approved_at,
+        approver.name sponsorship_approved_by,
         ss.starts_at sponsorship_starts_at,ss.ends_at sponsorship_ends_at
        FROM users u
        JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'
@@ -4653,7 +4838,8 @@ app.get(
          WHERE latest_ss.seller_id=u.id
          ORDER BY latest_ss.created_at DESC LIMIT 1
        )
-       GROUP BY u.id,sp.shop_name,sp.shop_logo_url,ss.id
+       LEFT JOIN users approver ON approver.id=ss.approved_by
+       GROUP BY u.id,sp.shop_name,sp.shop_logo_url,ss.id,approver.name
        ORDER BY sponsorship_status='active' DESC,active_product_count DESC,seller_name`,
     );
     res.json(rows);
@@ -4665,12 +4851,16 @@ app.patch(
   authorize("admin"),
   writeRateLimiter,
   asyncRoute(async (req, res) => {
-    await pool.query(
-      "UPDATE seller_sponsorships SET status='cancelled' WHERE seller_id=? AND status='active'",
+    const [result] = await pool.query(
+      "UPDATE seller_sponsorships SET status='cancelled',cancelled_at=NOW() WHERE seller_id=? AND status='active'",
       [req.params.id],
     );
     await audit(req, "seller.sponsorship.cancel", "seller", req.params.id);
-    res.json({ message: "Campagne vendeur annulee." });
+    res.json({
+      message: result.affectedRows
+        ? "Campagne vendeur annulee."
+        : "Aucune campagne active à annuler.",
+    });
   }),
 );
 app.post(
@@ -4686,36 +4876,9 @@ app.post(
   ],
   validate,
   asyncRoute(async (req, res) => {
-    const [[product]] = await pool.query("SELECT id,seller_id,name FROM products WHERE id=?", [
-      req.params.id,
-    ]);
-    if (!product) return res.status(404).json({ message: "Produit introuvable." });
-    if (new Date(req.body.endsAt) <= new Date(req.body.startsAt)) {
-      return res.status(422).json({ message: "La date de fin doit suivre la date de début." });
-    }
-    await pool.query(
-      `UPDATE product_sponsorships
-       SET status='expired'
-       WHERE product_id=? AND status='active'`,
-      [product.id],
-    );
-    const [result] = await pool.query(
-      `INSERT INTO product_sponsorships
-        (product_id,seller_id,keyword,amount,status,starts_at,ends_at)
-       VALUES (?,?,?,?,'active',?,?)`,
-      [
-        product.id,
-        product.seller_id,
-        req.body.keyword.toLowerCase(),
-        req.body.amount,
-        req.body.startsAt,
-        req.body.endsAt,
-      ],
-    );
-    await audit(req, "product.sponsorship.activate", "product", product.id, req.body);
-    res.status(201).json({
-      id: result.insertId,
-      message: "Placement sponsorisé activé. Ce produit sera prioritaire pour ce mot-clé.",
+    res.status(410).json({
+      message:
+        "La sponsorisation par produit est désactivée. Utilisez la promotion boutique depuis la page vendeurs.",
     });
   }),
 );
@@ -4725,12 +4888,10 @@ app.patch(
   authorize("admin"),
   writeRateLimiter,
   asyncRoute(async (req, res) => {
-    await pool.query(
-      "UPDATE product_sponsorships SET status='cancelled' WHERE product_id=? AND status='active'",
-      [req.params.id],
-    );
-    await audit(req, "product.sponsorship.cancel", "product", req.params.id);
-    res.json({ message: "Placement sponsorisé annulé." });
+    res.status(410).json({
+      message:
+        "La sponsorisation par produit est désactivée. Les campagnes se gèrent par boutique.",
+    });
   }),
 );
 app.patch(
