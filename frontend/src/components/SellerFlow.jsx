@@ -58,12 +58,46 @@ const sellerNextActionLabel = (order) => {
   if (order.seller_status === "confirmed") return "Commencer la preparation";
   if (order.seller_status === "preparing") return "Marquer prete";
   if (order.seller_status === "ready") {
-    return order.seller_delivery_user_id ? "Livraison assignee" : "Assigner un livreur";
+    return order.seller_delivery_user_id ? "Suivre la livraison" : "Assigner un livreur";
   }
   if (order.seller_status === "completed") return "Commande finalisee";
   if (order.seller_status === "cancelled") return "Vente annulee";
   return "Ouvrir la commande";
 };
+
+const sellerNextActionDescription = (order) => {
+  if (!order?.payment_proof_url) {
+    return "Le client doit encore envoyer sa preuve de paiement MonCash.";
+  }
+  if (order.seller_payment_status === "failed") {
+    return "Le client doit envoyer une nouvelle preuve avant toute preparation.";
+  }
+  if (order.seller_payment_status !== "paid") {
+    return "Verifiez la reference et la preuve, puis confirmez uniquement le paiement recu.";
+  }
+  if (order.seller_status === "confirmed") {
+    return "Le paiement est valide. Vous pouvez maintenant commencer la preparation des articles.";
+  }
+  if (order.seller_status === "preparing") {
+    return "Terminez l'emballage, puis indiquez que la commande est prete pour la livraison.";
+  }
+  if (order.seller_status === "ready" && !order.seller_delivery_user_id) {
+    return "Choisissez maintenant un livreur rattache a votre boutique.";
+  }
+  if (order.seller_status === "ready" && order.seller_delivery_user_id) {
+    return "La mission est transmise au livreur. Suivez son avancement jusqu'a la signature du client.";
+  }
+  if (order.seller_status === "completed" || order.delivery_status === "delivered") {
+    return "La reception a ete confirmee. Cette commande est maintenant classee parmi les commandes livrees.";
+  }
+  if (order.seller_status === "cancelled") {
+    return "Cette vente est annulee et ne demande plus aucune action.";
+  }
+  return "Consultez les informations de la commande avant de poursuivre.";
+};
+
+const isDeliveredSellerOrder = (order) =>
+  order?.seller_status === "completed" || order?.delivery_status === "delivered";
 
 const sellerWorkflowClass = (done, active) => (done ? "done" : active ? "active" : "locked");
 
@@ -1089,10 +1123,34 @@ export function SellerOrdersContent({ api }) {
     setRejectReason("");
   }, [selected]);
 
+  useEffect(() => {
+    if (!selected) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setSelected(null);
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [selected]);
+
   const updateStatus = async (saleId, status) => {
     const { data } = await api.patch(`/seller/sales/${saleId}/status`, { status });
     setMessage(data.message);
-    setSelected(null);
+    setSelected((current) =>
+      current?.sale_id === saleId
+        ? {
+            ...current,
+            seller_status: status,
+          }
+        : current
+    );
     load();
   };
 
@@ -1170,7 +1228,14 @@ export function SellerOrdersContent({ api }) {
     load();
   };
 
-  const visible = orders.filter((order) => filter === "all" || order.seller_status === filter);
+  const visible = orders.filter((order) => {
+    const delivered = isDeliveredSellerOrder(order);
+
+    if (filter === "all") return !delivered;
+    if (filter === "completed") return delivered;
+
+    return !delivered && order.seller_status === filter;
+  });
   const selectedPaymentStatus = selected?.seller_payment_status || "pending";
   const selectedPaymentIsValid = selectedPaymentStatus === "paid";
   const selectedCanValidatePayment = Boolean(
@@ -1188,7 +1253,7 @@ export function SellerOrdersContent({ api }) {
       <div className="seller-catalog-toolbar seller-orders-toolbar">
         <div>
           {[
-            ["all", "Toutes"],
+            ["all", "Commandes actives"],
             ["pending", "Paiement en attente"],
             ["confirmed", "A preparer"],
             ["preparing", "En preparation"],
@@ -1276,7 +1341,7 @@ export function SellerOrdersContent({ api }) {
               </div>
             </header>
             <div className="seller-order-items">
-              {order.items.map((item) => (
+              {(order.items || []).map((item) => (
                 <div key={item.product_id}>
                   <img src={imageSource(item.image_url)} alt={item.name} />
                   <span>
@@ -1302,16 +1367,41 @@ export function SellerOrdersContent({ api }) {
         {!visible.length && <div className="seller-empty-state">Aucune commande ici.</div>}
       </section>
       {selected && (
-        <section className="seller-order-detail">
+        <div
+          className="seller-order-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelected(null);
+          }}
+        >
+        <motion.section
+          className="seller-order-detail seller-order-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="seller-order-modal-title"
+          initial={{ opacity: 0, y: 24, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 18, scale: 0.98 }}
+          transition={{ duration: 0.22, ease: "easeOut" }}
+        >
           <header>
             <div>
               <span>Detail commande</span>
-              <h2>{selected.order_number}</h2>
+              <h2 id="seller-order-modal-title">{selected.order_number}</h2>
             </div>
-            <button onClick={() => setSelected(null)}>
+            <button type="button" onClick={() => setSelected(null)} aria-label="Fermer le detail">
               <X />
             </button>
           </header>
+          <div className="seller-order-modal-content">
+          <section className="seller-modal-next-action">
+            <span><Sparkles /></span>
+            <div>
+              <small>Prochaine etape</small>
+              <strong>{sellerNextActionLabel(selected)}</strong>
+              <p>{sellerNextActionDescription(selected)}</p>
+            </div>
+          </section>
           <section className="seller-order-workflow">
             {[
               [
@@ -1338,7 +1428,7 @@ export function SellerOrdersContent({ api }) {
               ],
               [
                 "Livraison",
-                selected.delivery_status || selected.seller_delivery_status || "En attente",
+                selected.seller_delivery_status || selected.delivery_status || "En attente",
                 selected.seller_status === "completed" || selected.delivery_status === "delivered",
                 selected.seller_delivery_user_id && selected.seller_status === "ready",
               ],
@@ -1374,14 +1464,16 @@ export function SellerOrdersContent({ api }) {
                 {selected.seller_delivery_phone || selected.seller_delivery_status || "Aucune mission boutique"}
               </span>
             </article>
-            {selected.delivery_status === "delivered" && (
+            {(selected.seller_status === "completed" ||
+              selected.seller_delivery_status === "delivered" ||
+              selected.delivery_status === "delivered") && (
               <article className="seller-delivery-confirmed">
                 <small>Preuve de reception</small>
                 <strong>Commande finalisee</strong>
                 <span>
-                  Signee par {selected.delivery_signer_name || "le client"}
-                  {selected.delivery_confirmed_at
-                     ? ` le ${shortDate(selected.delivery_confirmed_at)}`
+                  Signee par {selected.seller_delivery_signer_name || selected.delivery_signer_name || "le client"}
+                  {selected.seller_delivery_confirmed_at || selected.delivery_confirmed_at
+                     ? ` le ${shortDate(selected.seller_delivery_confirmed_at || selected.delivery_confirmed_at)}`
                     : ""}
                 </span>
               </article>
@@ -1523,7 +1615,9 @@ export function SellerOrdersContent({ api }) {
                 </button>
               </footer>
             )}
-        </section>
+          </div>
+        </motion.section>
+        </div>
       )}
     </SellerPageHeader>
   );

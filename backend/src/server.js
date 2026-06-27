@@ -1940,6 +1940,12 @@ app.get(
         d.status delivery_status,
         dp.signer_name delivery_signer_name,
         dp.confirmed_at delivery_confirmed_at,
+        sda.delivery_user_id seller_delivery_user_id,
+        sda.status seller_delivery_status,
+        sda.signer_name seller_delivery_signer_name,
+        sda.confirmed_at seller_delivery_confirmed_at,
+        du.name seller_delivery_name,
+        du.phone seller_delivery_phone,
         u.name client_name,
         u.phone client_phone,
         p.status payment_status
@@ -1949,6 +1955,8 @@ app.get(
       LEFT JOIN payments p ON p.order_id=o.id
       LEFT JOIN deliveries d ON d.order_id=o.id
       LEFT JOIN delivery_proofs dp ON dp.delivery_id=d.id
+      LEFT JOIN seller_delivery_assignments sda ON sda.seller_sale_id=ss.id
+      LEFT JOIN users du ON du.id=sda.delivery_user_id
       WHERE ss.seller_id=?
       ORDER BY ss.created_at DESC`,
       [req.user.id],
