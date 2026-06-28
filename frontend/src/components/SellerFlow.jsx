@@ -41,6 +41,7 @@ import {
   parseProductAttributes,
 } from "../config/productAttributes.js";
 import { shopPublicPath } from "../utils/shopUrl.js";
+import "../styles/seller-flow.css";
 
 const imageSource = (url) => (url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url);
 
@@ -286,7 +287,12 @@ export function SellerProductsContent({ api }) {
         {visibleProducts.map((product) => (
           <motion.article className="product-card seller-catalog-product-card" whileHover={{ y: -5 }} key={product.id}>
             <Link className="product-media" to={`/products/${product.id}`}>
-              <img src={imageSource(product.image_url)} alt={product.name} />
+              <img
+                src={imageSource(product.image_url)}
+                alt={product.name}
+                loading="lazy"
+                decoding="async"
+              />
               {Boolean(product.is_featured) && product.promotional_price ? (
                 <span className="vinnht-offer-badge" aria-label="Offre spéciale VinnHT">
                   <Sparkles size={13} />

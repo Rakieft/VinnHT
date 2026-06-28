@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ArrowLeft, CircleUserRound, MessageCircle, Search, Send } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { assetUrl } from "../config/runtime.js";
+import "../styles/client-space.css";
 
 function ConversationAvatar({ image, name, large = false }) {
   return (

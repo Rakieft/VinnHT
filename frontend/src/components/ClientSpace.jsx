@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CountUp from "react-countup";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import {
+  AlertTriangle,
   ArrowRight,
   Bell,
   CalendarDays,
@@ -44,6 +45,7 @@ import ProfilePhotoManager from "./ProfilePhotoManager.jsx";
 import MobileProfileActions from "./MobileProfileActions.jsx";
 import AccountSecuritySettings from "./AccountSecuritySettings.jsx";
 import { apiOrigin } from "../config/runtime.js";
+import "../styles/client-space.css";
 
 const imageSource = (url) =>
   url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url;
@@ -67,6 +69,15 @@ const clientProductOfferIsActive = (product) =>
       Number(product.promotional_price) > 0 &&
       Number(product.promotional_price) < Number(product.price) &&
       (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date()),
+  );
+
+const clientProductOfferHasExpired = (product) =>
+  Boolean(
+    product?.is_featured &&
+      Number(product.promotional_price) > 0 &&
+      Number(product.promotional_price) < Number(product.price) &&
+      product.offer_ends_at &&
+      new Date(product.offer_ends_at) <= new Date(),
   );
 
 const products = [
@@ -210,6 +221,7 @@ function ClientProductCard({
   onToggleFavorite,
 }) {
   const activeOffer = clientProductOfferIsActive(product);
+  const expiredOffer = favorite && clientProductOfferHasExpired(product);
 
   return (
     <motion.article
@@ -217,14 +229,25 @@ function ClientProductCard({
       whileHover={{ y: -6 }}
     >
       <Link className="product-media" to={`/products/${product.id}`}>
-        <img src={imageSource(product.image_url)} alt={product.name} />
-        {activeOffer && (
+        <img
+          src={imageSource(product.image_url)}
+          alt={product.name}
+          loading="lazy"
+          decoding="async"
+        />
+        {activeOffer ? (
           <span className="vinnht-offer-badge" aria-label="Offre spéciale VinnHT">
             <Sparkles size={13} />
             Offre
           </span>
+        ) : expiredOffer ? (
+          <span className="vinnht-expired-offer-badge">
+            <Clock3 size={13} />
+            Offre terminée
+          </span>
+        ) : (
+          <span className="badge badge-gold">Tendance</span>
         )}
-        {!activeOffer && <span className="badge badge-gold">Tendance</span>}
       </Link>
       <button
         className={`product-favorite-button ${favorite ? "active" : ""}`}
@@ -299,6 +322,7 @@ export function ClientDashboardContent({
   shopData = [],
   dashboardData,
 }) {
+  const prefersReducedMotion = useReducedMotion();
   const catalog = productData;
   const dashboard = dashboardData || {};
   const activeOrder = dashboard.activeOrder || null;
@@ -332,7 +356,10 @@ export function ClientDashboardContent({
             Votre espace personnel
           </span>
           <h1>Bonjour, {user.name || "Client"}</h1>
-          <p>Découvrez les meilleures offres du moment sur VinnHT.</p>
+          <p>
+            Privilégiez les produits disponibles dans votre département et vérifiez la photo de
+            profil ainsi que les informations de la boutique avant d’acheter.
+          </p>
           <div className="client-hero-actions">
             <Link className="button primary" to="/products">
               Continuer mes achats
@@ -464,32 +491,71 @@ export function ClientDashboardContent({
       </section>
 
       <section className="client-promo-strip">
-        <div>
+        <div className="client-promo-copy">
           <span>
             <Flame size={16} />
             Offres spéciales VinnHT
           </span>
-          <h2>Des prix pensés pour votre quotidien.</h2>
-          <p>Découvrez les réductions, nouveautés et produits populaires sélectionnés pour vous.</p>
+          <h2>Les bonnes affaires ne durent pas longtemps.</h2>
+          <p>
+            Découvrez les promotions proposées par les boutiques VinnHT et profitez-en
+            avant leur expiration.
+          </p>
           <Link to="/products?offers=true">
-            Voir les offres
+            Découvrir les offres
             <ArrowRight size={17} />
           </Link>
         </div>
-        <div className="promo-badges">
+        <div className="promo-orbit-stage" aria-label="Produits actuellement en promotion">
+          <div className="promo-orbit-core" aria-hidden="true">
+            <img src="/vinnht-logo.png" alt="" />
+            <Sparkles size={16} />
+          </div>
           {offerData.length ? (
-            offerData.slice(0, 3).map((offer) => (
-              <motion.div whileHover={{ scale: 1.04 }} key={offer.id}>
-                <Link to={`/products/${offer.id}`}>
-                  <Tag />
-                  <span>
-                    <b>{offer.name}</b>
-                    {Number(offer.promotional_price).toLocaleString("fr-HT")} HTG
+            <motion.div
+              className="promo-product-orbit"
+              animate={prefersReducedMotion ? undefined : { rotate: 360 }}
+              transition={{ duration: 24, repeat: Infinity, ease: "linear" }}
+            >
+              {offerData.slice(0, 6).map((offer, index, activeOffers) => {
+                const angle = (360 / activeOffers.length) * index;
+
+                return (
+                  <span
+                    className="promo-orbit-slot"
+                    style={{ transform: `rotate(${angle}deg)` }}
+                    key={offer.id}
+                  >
+                    <motion.span
+                      className="promo-orbit-item"
+                      animate={
+                        prefersReducedMotion
+                          ? { rotate: -angle }
+                          : { rotate: [-angle, -angle - 360] }
+                      }
+                      transition={{ duration: 24, repeat: Infinity, ease: "linear" }}
+                      whileHover={{ scale: 1.1 }}
+                    >
+                      <Link
+                        to={`/products/${offer.id}`}
+                        aria-label={`Voir l'offre ${offer.name}`}
+                        title={offer.name}
+                      >
+                        <img
+                          src={imageSource(offer.image_url) || "/vinnht-logo.png"}
+                          alt={offer.name}
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      </Link>
+                    </motion.span>
                   </span>
-                </Link>
-              </motion.div>
-            ))
-          ) : <span>Aucune offre spéciale active actuellement.</span>}
+                );
+              })}
+            </motion.div>
+          ) : (
+            <span className="promo-orbit-empty">De nouvelles offres arrivent bientôt.</span>
+          )}
         </div>
       </section>
 
@@ -1022,7 +1088,13 @@ export function ClientFavoritesContent({ onAdd, favorites = [], isFavorite, onTo
   );
 }
 
-export function ClientCartContent({ cart, remove, updateQuantity }) {
+export function ClientCartContent({
+  cart,
+  remove,
+  updateQuantity,
+  priceNotice,
+  onDismissPriceNotice,
+}) {
   const displayCart = Array.isArray(cart) ? cart : [];
   const groups = useMemo(
     () =>
@@ -1045,6 +1117,30 @@ export function ClientCartContent({ cart, remove, updateQuantity }) {
       title="Mon panier"
       text="Vos articles sont organises par boutique pour une commande plus claire."
     >
+      {priceNotice?.changes?.length > 0 && (
+        <section className="client-price-update-alert" role="status">
+          <span>
+            <AlertTriangle />
+          </span>
+          <div>
+            <small>Prix actualisé</small>
+            <h3>Une promotion de votre panier est terminée.</h3>
+            <p>Vérifiez les nouveaux montants avant de poursuivre votre commande.</p>
+            <div>
+              {priceNotice.changes.map((change) => (
+                <strong key={change.id}>
+                  {change.name} : {Number(change.previousPrice).toLocaleString("fr-HT")} HTG
+                  <ArrowRight />
+                  {Number(change.currentPrice).toLocaleString("fr-HT")} HTG
+                </strong>
+              ))}
+            </div>
+          </div>
+          <button type="button" onClick={onDismissPriceNotice} aria-label="Fermer l’avertissement">
+            <X />
+          </button>
+        </section>
+      )}
       <div className="client-cart-layout">
         <div className="client-cart-groups">
           {displayCart.length ? (
@@ -1143,7 +1239,11 @@ export function ClientCheckoutContent({
   processing,
   result,
   error,
+  priceChanges = [],
+  continueAfterPriceConfirmation = false,
   onSubmit,
+  onConfirmPriceChanges,
+  onCancelPriceChanges,
   onSubmitPaymentProof,
 }) {
   const [form, setForm] = useState({
@@ -1254,6 +1354,51 @@ export function ClientCheckoutContent({
       title="Finaliser la commande"
       text="Verifiez votre adresse et les numeros MonCash des boutiques avant de creer la commande."
     >
+      {priceChanges.length > 0 && (
+        <div className="checkout-price-modal-backdrop" role="presentation">
+          <section
+            className="checkout-price-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="checkout-price-modal-title"
+          >
+            <span>
+              <AlertTriangle />
+            </span>
+            <small>Votre panier a été actualisé</small>
+            <h2 id="checkout-price-modal-title">Une promotion est terminée.</h2>
+            <p>
+              Le prix actuel du vendeur remplace automatiquement le prix promotionnel expiré.
+              Confirmez le nouveau montant avant de continuer.
+            </p>
+            <div className="checkout-price-change-list">
+              {priceChanges.map((change) => (
+                <article key={change.id}>
+                  <strong>{change.name}</strong>
+                  <span>
+                    <del>{Number(change.previousPrice).toLocaleString("fr-HT")} HTG</del>
+                    <ArrowRight />
+                    <b>{Number(change.currentPrice).toLocaleString("fr-HT")} HTG</b>
+                  </span>
+                </article>
+              ))}
+            </div>
+            <div className="checkout-price-modal-actions">
+              <button type="button" className="secondary" onClick={onCancelPriceChanges}>
+                Revoir mon panier
+              </button>
+              <button type="button" onClick={onConfirmPriceChanges} disabled={processing}>
+                <CheckCircle2 />
+                {processing
+                  ? "Vérification..."
+                  : continueAfterPriceConfirmation
+                    ? "Accepter et commander"
+                    : "J’ai compris"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {error && <div className="client-api-error">{error}</div>}
       <form
         className="client-checkout-layout"

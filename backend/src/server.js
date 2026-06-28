@@ -609,6 +609,9 @@ const safeUserWithRoles = async (user) => ({
   name: user.name,
   email: user.email,
   phone: user.phone,
+  education_status: user.education_status || null,
+  education_institution: user.education_institution || null,
+  education_verified_at: user.education_verified_at || null,
   profile_image_url: user.profile_image_url,
   role: user.role,
   roles: await getUserRoles(user.id, user.role),
@@ -829,6 +832,15 @@ app.post(
       .trim()
       .isLength({ min: 8, max: 30 })
       .withMessage("Le numéro de téléphone est invalide."),
+    body("educationStatus")
+      .optional({ checkFalsy: true })
+      .isIn(["school", "university"])
+      .withMessage("Le statut scolaire sélectionné est invalide."),
+    body("educationInstitution")
+      .if((value, { req }) => ["school", "university"].includes(req.body.educationStatus))
+      .trim()
+      .isLength({ min: 2, max: 190 })
+      .withMessage("Indiquez le nom de votre école ou université."),
     body("password")
       .isLength({ min: 10, max: 128 })
       .matches(/[a-z]/)
@@ -840,7 +852,14 @@ app.post(
   ],
   validate,
   asyncRoute(async (req, res) => {
-    const { name, email, phone, password } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      password,
+      educationStatus,
+      educationInstitution,
+    } = req.body;
     const [[existing]] = await pool.query(
       "SELECT id FROM users WHERE email = ?",
       [email],
@@ -851,8 +870,17 @@ app.post(
         .json({ message: "Cette adresse email est déjà utilisée." });
     const hash = await bcrypt.hash(password, 12);
     const [result] = await pool.query(
-      "INSERT INTO users (name,email,phone,password_hash) VALUES (?,?,?,?)",
-      [name, email, phone || null, hash],
+      `INSERT INTO users
+        (name,email,phone,education_status,education_institution,password_hash)
+       VALUES (?,?,?,?,?,?)`,
+      [
+        name,
+        email,
+        phone || null,
+        educationStatus || null,
+        educationStatus ? educationInstitution.trim() : null,
+        hash,
+      ],
     );
     await pool.query("INSERT IGNORE INTO user_roles (user_id,role) VALUES (?,'client')", [
       result.insertId,
@@ -862,6 +890,9 @@ app.post(
       name,
       email,
       phone: phone || null,
+      education_status: educationStatus || null,
+      education_institution: educationStatus ? educationInstitution.trim() : null,
+      education_verified_at: null,
       role: "client",
       roles: ["client"],
     };
@@ -903,7 +934,9 @@ app.get(
       return res.json({ user: null });
     }
     const [[user]] = await pool.query(
-      "SELECT id,name,email,phone,profile_image_url,role,status,created_at FROM users WHERE id = ?",
+      `SELECT id,name,email,phone,education_status,education_institution,education_verified_at,
+        profile_image_url,role,status,created_at
+       FROM users WHERE id = ?`,
       [req.user.id],
     );
     res.json(await safeUserWithRoles(user));
@@ -977,7 +1010,9 @@ app.patch(
       [req.body.name || null, req.body.phone || null, profileImageUrl || null, req.user.id],
     );
     const [[user]] = await pool.query(
-      "SELECT id,name,email,phone,profile_image_url,role,status,created_at FROM users WHERE id=?",
+      `SELECT id,name,email,phone,education_status,education_institution,education_verified_at,
+        profile_image_url,role,status,created_at
+       FROM users WHERE id=?`,
       [req.user.id],
     );
     res.json({ message: "Profil mis à jour.", user: await safeUserWithRoles(user) });
@@ -1438,7 +1473,8 @@ app.get(
       [req.user.id],
     );
     const [rows] = await pool.query(
-      `SELECT p.*,c.name category_name,COALESCE(sp.shop_name,u.name) seller_name,COALESCE(sp.whatsapp,u.phone) seller_moncash,ci.quantity,
+      `SELECT p.*,p.price base_price,c.name category_name,COALESCE(sp.shop_name,u.name) seller_name,COALESCE(sp.whatsapp,u.phone) seller_moncash,ci.quantity,
+        ci.price_snapshot cart_price_snapshot,
         CASE
           WHEN p.is_featured=TRUE
             AND p.promotional_price IS NOT NULL
@@ -1456,7 +1492,47 @@ app.get(
        ORDER BY ci.updated_at DESC`,
       [req.user.id],
     );
-    res.json(rows.map((row) => ({ ...row, price: row.current_price })));
+    const cart = rows.map((row) => {
+      const currentPrice = Number(row.current_price);
+      const previousPrice = Number(row.cart_price_snapshot ?? row.current_price);
+
+      return {
+        ...row,
+        price: currentPrice,
+        previous_price: previousPrice,
+        price_changed:
+          row.cart_price_snapshot !== null &&
+          Math.abs(previousPrice - currentPrice) >= 0.01,
+      };
+    });
+
+    await pool.query(
+      `UPDATE cart_items ci
+       JOIN products p ON p.id=ci.product_id
+       SET ci.price_snapshot=CASE
+         WHEN p.is_featured=TRUE
+           AND p.promotional_price IS NOT NULL
+           AND p.promotional_price<p.price
+           AND (p.offer_ends_at IS NULL OR p.offer_ends_at>NOW())
+         THEN p.promotional_price
+         ELSE p.price
+       END
+       WHERE ci.user_id=?
+         AND (
+           ci.price_snapshot IS NULL OR
+           ABS(ci.price_snapshot-(CASE
+             WHEN p.is_featured=TRUE
+               AND p.promotional_price IS NOT NULL
+               AND p.promotional_price<p.price
+               AND (p.offer_ends_at IS NULL OR p.offer_ends_at>NOW())
+             THEN p.promotional_price
+             ELSE p.price
+           END))>=0.01
+         )`,
+      [req.user.id],
+    );
+
+    res.json(cart);
   }),
 );
 app.put(
@@ -1468,7 +1544,17 @@ app.put(
   validate,
   asyncRoute(async (req, res) => {
     const [[product]] = await pool.query(
-      "SELECT id,stock FROM products WHERE id=? AND status='active' AND stock>0",
+      `SELECT id,stock,
+        CASE
+          WHEN is_featured=TRUE
+            AND promotional_price IS NOT NULL
+            AND promotional_price<price
+            AND (offer_ends_at IS NULL OR offer_ends_at>NOW())
+          THEN promotional_price
+          ELSE price
+        END current_price
+       FROM products
+       WHERE id=? AND status='active' AND stock>0`,
       [req.params.productId],
     );
     if (!product) return res.status(404).json({ message: "Produit indisponible." });
@@ -1476,10 +1562,12 @@ app.put(
       return res.status(409).json({ message: `Stock disponible : ${product.stock}.` });
     }
     await pool.query(
-      `INSERT INTO cart_items (user_id,product_id,quantity)
-       VALUES (?,?,?)
-       ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)`,
-      [req.user.id, product.id, req.body.quantity],
+      `INSERT INTO cart_items (user_id,product_id,quantity,price_snapshot)
+       VALUES (?,?,?,?)
+       ON DUPLICATE KEY UPDATE
+        quantity=VALUES(quantity),
+        price_snapshot=VALUES(price_snapshot)`,
+      [req.user.id, product.id, req.body.quantity, product.current_price],
     );
     res.json({ message: "Panier mis à jour.", quantity: Number(req.body.quantity) });
   }),
@@ -1521,16 +1609,28 @@ app.post(
   asyncRoute(async (req, res) => {
     for (const item of req.body.items) {
       const [[product]] = await pool.query(
-        "SELECT id,stock FROM products WHERE id=? AND status='active' AND stock>0",
+        `SELECT id,stock,
+          CASE
+            WHEN is_featured=TRUE
+              AND promotional_price IS NOT NULL
+              AND promotional_price<price
+              AND (offer_ends_at IS NULL OR offer_ends_at>NOW())
+            THEN promotional_price
+            ELSE price
+          END current_price
+         FROM products
+         WHERE id=? AND status='active' AND stock>0`,
         [item.productId],
       );
       if (!product) continue;
       const quantity = Math.min(Number(item.quantity), Number(product.stock));
       await pool.query(
-        `INSERT INTO cart_items (user_id,product_id,quantity)
-         VALUES (?,?,?)
-         ON DUPLICATE KEY UPDATE quantity=GREATEST(quantity,VALUES(quantity))`,
-        [req.user.id, product.id, quantity],
+        `INSERT INTO cart_items (user_id,product_id,quantity,price_snapshot)
+         VALUES (?,?,?,?)
+         ON DUPLICATE KEY UPDATE
+          quantity=GREATEST(quantity,VALUES(quantity)),
+          price_snapshot=VALUES(price_snapshot)`,
+        [req.user.id, product.id, quantity, product.current_price],
       );
     }
     res.json({ message: "Panier synchronisé." });

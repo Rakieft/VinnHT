@@ -12,7 +12,7 @@ export default defineConfig({
           react: ["react", "react-dom", "react-router-dom"],
           motion: ["framer-motion"],
           marketplace: ["swiper", "swiper/react", "swiper/modules"],
-          visuals: ["lucide-react", "lottie-react", "react-countup"],
+          visuals: ["lucide-react", "react-countup"],
           http: ["axios"],
         },
       },

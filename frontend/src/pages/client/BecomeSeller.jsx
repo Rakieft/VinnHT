@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { apiOrigin } from "../../config/runtime.js";
+import "../../styles/seller-flow.css";
 
 const SELLER_TERMS_VERSION = "2026-06-24-v2";
 const terms = [

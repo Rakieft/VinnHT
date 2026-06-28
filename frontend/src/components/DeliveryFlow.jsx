@@ -24,6 +24,7 @@ import {
   Search,
   XCircle,
 } from "lucide-react";
+import "../styles/delivery-flow.css";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-HT")} HTG`;
 const imageSource = (url) =>

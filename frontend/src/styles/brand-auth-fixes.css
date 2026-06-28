@@ -46,6 +46,47 @@
 .line-field {
   color: #2563eb;
 }
+
+.education-select-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 11px 2px;
+  border-bottom: 1px solid #cbd5e1;
+  color: #2563eb;
+}
+
+.education-select-field > svg {
+  width: 19px;
+}
+
+.education-select-field > span {
+  display: grid;
+  gap: 3px;
+}
+
+.education-select-field small {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.education-select-field select {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  padding: 4px 28px 4px 0;
+  color: #0f172a;
+  background: #ffffff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.education-select-field:focus-within {
+  border-bottom-color: #2563eb;
+}
 .forgot-link,
 .auth-switch a {
   color: #2563eb;
@@ -148,6 +189,9 @@
     margin-bottom: 2px;
   }
   .line-field {
+    padding: 7px 2px;
+  }
+  .education-select-field {
     padding: 7px 2px;
   }
   .magenta-button {

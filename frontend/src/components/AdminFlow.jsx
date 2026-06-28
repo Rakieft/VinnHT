@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import "../styles/admin-flow.css";
 import {
   AlertTriangle,
   Apple,
@@ -1551,7 +1552,16 @@ export function AdminProductsContent({ api }) {
                 <span />
               </label>
               <div className="admin-product-image">
-                {product.image_url ? <img src={assetUrl(product.image_url)} alt={product.name} /> : <ImageIcon />}
+                {product.image_url ? (
+                  <img
+                    src={assetUrl(product.image_url)}
+                    alt={product.name}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <ImageIcon />
+                )}
                 <span className="admin-product-category">{product.category_name}</span>
                 {promoted && <b><Sparkles /> Offre active</b>}
               </div>

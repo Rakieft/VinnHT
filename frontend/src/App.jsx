@@ -1,6 +1,5 @@
 ﻿import axios from "axios";
 import React from "react";
-import Lottie from "lottie-react";
 import {
   ArrowRight,
   BarChart3,
@@ -14,6 +13,7 @@ import {
   CheckCircle2,
   Download,
   Flame,
+  GraduationCap,
   Headphones,
   Heart,
   LayoutDashboard,
@@ -66,64 +66,67 @@ import {
   SearchBar,
   StatCard,
 } from "./components/ui.jsx";
-import {
-  ClientCartContent,
-  ClientCheckoutContent,
-  ClientDashboardContent,
-  ClientFavoritesContent,
-  ClientOrdersContent,
-  ClientProfileContent,
-  ClientSettingsContent,
-} from "./components/ClientSpace.jsx";
-import {
-  AddSellerProductContent,
-  SellerDashboardContent,
-  SellerOrdersContent,
-  SellerPayoutsContent,
-  SellerProfileContent,
-  SellerProductsContent,
-  SellerSalesContent,
-  SellerSettingsContent,
-  SellerShopContent,
-  SupervisorRequestsContent,
-  SupervisorRequestDetailContent,
-} from "./components/SellerFlow.jsx";
-import {
-  DeliveryDashboardContent,
-  DeliveryManagementContent,
-  DeliveryMissionsContent,
-  DeliveryProfileContent,
-} from "./components/DeliveryFlow.jsx";
-import {
-  AdminCategoriesContent,
-  AdminContactRequestsContent,
-  AdminDashboardContent,
-  AdminProfileContent,
-  AdminProductsContent,
-  AdminResourceContent,
-  AdminSettingsContent,
-  AdminUsersContent,
-  OperationsDashboardContent,
-  ReportsContent,
-  SellersOverviewContent,
-  StaffProfileContent,
-  StaffSettingsContent,
-} from "./components/AdminFlow.jsx";
-import BecomeSellerPage from "./pages/client/BecomeSeller.jsx";
-import MarketplaceMessages from "./components/MarketplaceMessages.jsx";
 import { apiOrigin, assetUrl } from "./config/runtime.js";
 import { productAttributeEntries } from "./config/productAttributes.js";
 import { shopPublicPath, shopSellerIdFromParam } from "./utils/shopUrl.js";
-import sousHeroImage from "./assets/images/sous-hero-vinnht-student.png";
-import contactSupportImage from "./assets/images/contact-support-hands-vinnht.png";
+import sousHeroImage from "./assets/images/sous-hero-vinnht-student.jpg";
+import contactSupportImage from "./assets/images/contact-support-hands-vinnht.jpg";
 import "./styles/responsive-overrides.css";
 import "./styles/auth-search.css";
 import "./styles/brand-auth-fixes.css";
 import "./styles/dashboard-navigation.css";
-import "./styles/client-space.css";
-import "./styles/seller-flow.css";
-import "./styles/delivery-flow.css";
-import "./styles/admin-flow.css";
+
+const lazyNamed = (loader, exportName) =>
+  React.lazy(() => loader().then((module) => ({ default: module[exportName] })));
+
+const loadClientSpace = () => import("./components/ClientSpace.jsx");
+const ClientCartContent = lazyNamed(loadClientSpace, "ClientCartContent");
+const ClientCheckoutContent = lazyNamed(loadClientSpace, "ClientCheckoutContent");
+const ClientDashboardContent = lazyNamed(loadClientSpace, "ClientDashboardContent");
+const ClientFavoritesContent = lazyNamed(loadClientSpace, "ClientFavoritesContent");
+const ClientOrdersContent = lazyNamed(loadClientSpace, "ClientOrdersContent");
+const ClientProfileContent = lazyNamed(loadClientSpace, "ClientProfileContent");
+const ClientSettingsContent = lazyNamed(loadClientSpace, "ClientSettingsContent");
+
+const loadSellerFlow = () => import("./components/SellerFlow.jsx");
+const AddSellerProductContent = lazyNamed(loadSellerFlow, "AddSellerProductContent");
+const SellerDashboardContent = lazyNamed(loadSellerFlow, "SellerDashboardContent");
+const SellerOrdersContent = lazyNamed(loadSellerFlow, "SellerOrdersContent");
+const SellerPayoutsContent = lazyNamed(loadSellerFlow, "SellerPayoutsContent");
+const SellerProfileContent = lazyNamed(loadSellerFlow, "SellerProfileContent");
+const SellerProductsContent = lazyNamed(loadSellerFlow, "SellerProductsContent");
+const SellerSalesContent = lazyNamed(loadSellerFlow, "SellerSalesContent");
+const SellerSettingsContent = lazyNamed(loadSellerFlow, "SellerSettingsContent");
+const SellerShopContent = lazyNamed(loadSellerFlow, "SellerShopContent");
+const SupervisorRequestsContent = lazyNamed(loadSellerFlow, "SupervisorRequestsContent");
+const SupervisorRequestDetailContent = lazyNamed(
+  loadSellerFlow,
+  "SupervisorRequestDetailContent",
+);
+
+const loadDeliveryFlow = () => import("./components/DeliveryFlow.jsx");
+const DeliveryDashboardContent = lazyNamed(loadDeliveryFlow, "DeliveryDashboardContent");
+const DeliveryManagementContent = lazyNamed(loadDeliveryFlow, "DeliveryManagementContent");
+const DeliveryMissionsContent = lazyNamed(loadDeliveryFlow, "DeliveryMissionsContent");
+const DeliveryProfileContent = lazyNamed(loadDeliveryFlow, "DeliveryProfileContent");
+
+const loadAdminFlow = () => import("./components/AdminFlow.jsx");
+const AdminCategoriesContent = lazyNamed(loadAdminFlow, "AdminCategoriesContent");
+const AdminContactRequestsContent = lazyNamed(loadAdminFlow, "AdminContactRequestsContent");
+const AdminDashboardContent = lazyNamed(loadAdminFlow, "AdminDashboardContent");
+const AdminProfileContent = lazyNamed(loadAdminFlow, "AdminProfileContent");
+const AdminProductsContent = lazyNamed(loadAdminFlow, "AdminProductsContent");
+const AdminResourceContent = lazyNamed(loadAdminFlow, "AdminResourceContent");
+const AdminSettingsContent = lazyNamed(loadAdminFlow, "AdminSettingsContent");
+const AdminUsersContent = lazyNamed(loadAdminFlow, "AdminUsersContent");
+const OperationsDashboardContent = lazyNamed(loadAdminFlow, "OperationsDashboardContent");
+const ReportsContent = lazyNamed(loadAdminFlow, "ReportsContent");
+const SellersOverviewContent = lazyNamed(loadAdminFlow, "SellersOverviewContent");
+const StaffProfileContent = lazyNamed(loadAdminFlow, "StaffProfileContent");
+const StaffSettingsContent = lazyNamed(loadAdminFlow, "StaffSettingsContent");
+
+const BecomeSellerPage = React.lazy(() => import("./pages/client/BecomeSeller.jsx"));
+const MarketplaceMessages = React.lazy(() => import("./components/MarketplaceMessages.jsx"));
 
 const api = axios.create({ baseURL: `${apiOrigin}/api`, withCredentials: true });
 const whatsappNumber = (value = "") => {
@@ -252,101 +255,6 @@ const roleDisplay = {
   client: { label: "Espace client", icon: CircleUserRound },
   seller: { label: "Espace vendeur", icon: Store },
   delivery: { label: "Espace livreur", icon: Truck },
-};
-
-const lottiePulse = {
-  v: "5.7.0",
-  fr: 30,
-  ip: 0,
-  op: 90,
-  w: 360,
-  h: 360,
-  nm: "VinnHT",
-  ddd: 0,
-  assets: [],
-  layers: [
-    {
-      ddd: 0,
-      ind: 1,
-      ty: 4,
-      nm: "orb",
-      ks: {
-        o: { k: 90 },
-        r: {
-          k: [
-            { t: 0, s: [0] },
-            { t: 90, s: [360] },
-          ],
-        },
-        p: { k: [180, 180, 0] },
-        a: { k: [0, 0, 0] },
-        s: {
-          k: [
-            { t: 0, s: [95, 95, 100] },
-            { t: 45, s: [108, 108, 100] },
-            { t: 90, s: [95, 95, 100] },
-          ],
-        },
-      },
-      shapes: [
-        {
-          ty: "gr",
-          it: [
-            { ty: "el", p: { k: [0, 0] }, s: { k: [210, 210] } },
-            {
-              ty: "gf",
-              p: { k: [0, 0] },
-              s: { k: [210, 210] },
-              g: {
-                p: 3,
-                k: { k: [0, 0.15, 0.39, 0.92, 0.55, 0.96, 0.62, 0.16, 1, 0.06, 0.09, 0.16] },
-              },
-              o: { k: 100 },
-              r: 1,
-            },
-            {
-              ty: "tr",
-              p: { k: [0, 0] },
-              a: { k: [0, 0] },
-              s: { k: [100, 100] },
-              r: { k: 0 },
-              o: { k: 100 },
-            },
-          ],
-        },
-      ],
-    },
-    {
-      ddd: 0,
-      ind: 2,
-      ty: 4,
-      nm: "bag",
-      ks: {
-        o: { k: 100 },
-        r: { k: 0 },
-        p: { k: [180, 185, 0] },
-        a: { k: [0, 0, 0] },
-        s: { k: [100, 100, 100] },
-      },
-      shapes: [
-        {
-          ty: "gr",
-          it: [
-            { ty: "rc", s: { k: [130, 115] }, p: { k: [0, 18] }, r: { k: 24 } },
-            { ty: "st", c: { k: [1, 1, 1, 1] }, w: { k: 10 }, o: { k: 95 } },
-            {
-              ty: "tr",
-              p: { k: [0, 0] },
-              a: { k: [0, 0] },
-              s: { k: [100, 100] },
-              r: { k: 0 },
-              o: { k: 100 },
-            },
-          ],
-        },
-      ],
-    },
-  ],
 };
 
 const categories = [
@@ -497,6 +405,7 @@ function Providers({ children }) {
   const [activeRole, setActiveRole] = useState("client");
   const [cart, setCart] = useState([]);
   const [favorites, setFavorites] = useState([]);
+  const [cartPriceNotice, setCartPriceNotice] = useState(null);
   useEffect(() => {
     localStorage.removeItem("vinnht_messages");
     localStorage.removeItem("vinnht_user");
@@ -535,18 +444,96 @@ function Providers({ children }) {
       })
       .finally(() => setAuthLoading(false));
   }, []);
+  const refreshCart = React.useCallback(
+    async ({ notify = true } = {}) => {
+      if (!user?.roles?.includes("client")) return { cart: [], changes: [] };
+
+      const previousById = new Map(
+        cart.map((item) => [Number(item.id), Number(item.price || 0)]),
+      );
+      const { data } = await api.get("/cart");
+      const refreshedCart = Array.isArray(data) ? data : [];
+      const changes = refreshedCart.flatMap((item) => {
+        const currentPrice = Number(item.price || 0);
+        const previousPrice = item.price_changed
+          ? Number(item.previous_price || 0)
+          : previousById.get(Number(item.id));
+
+        if (
+          previousPrice === undefined ||
+          Math.abs(previousPrice - currentPrice) < 0.01
+        ) {
+          return [];
+        }
+
+        return [
+          {
+            id: item.id,
+            name: item.name,
+            previousPrice,
+            currentPrice,
+          },
+        ];
+      });
+
+      setCart(refreshedCart);
+      if (notify && changes.length) {
+        setCartPriceNotice({ id: Date.now(), changes });
+      }
+
+      return { cart: refreshedCart, changes };
+    },
+    [cart, user],
+  );
+
+  const refreshFavorites = React.useCallback(async () => {
+    if (!user?.roles?.includes("client")) return [];
+    const { data } = await api.get("/favorites");
+    const refreshedFavorites = Array.isArray(data) ? data : [];
+    setFavorites(refreshedFavorites);
+    return refreshedFavorites;
+  }, [user]);
+
   useEffect(() => {
-    if (!user?.roles?.includes("client")) return;
-    const syncClientData = async () => {
-      const [{ data: serverCart }, { data: serverFavorites }] = await Promise.all([
-        api.get("/cart"),
-        api.get("/favorites"),
-      ]);
-      setCart(serverCart);
-      setFavorites(serverFavorites);
-    };
-    syncClientData().catch(() => {});
+    if (!user?.roles?.includes("client")) {
+      setCart([]);
+      setFavorites([]);
+      setCartPriceNotice(null);
+      return;
+    }
+
+    Promise.all([refreshCart(), refreshFavorites()]).catch(() => {});
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.roles?.includes("client")) return undefined;
+
+    const now = Date.now();
+    const nextExpiration = [...cart, ...favorites]
+      .filter(
+        (product) =>
+          product?.is_featured &&
+          Number(product.promotional_price) > 0 &&
+          Number(product.promotional_price) <
+            Number(product.base_price || product.price || Infinity) &&
+          product.offer_ends_at,
+      )
+      .map((product) => new Date(product.offer_ends_at).getTime())
+      .filter((expiration) => Number.isFinite(expiration) && expiration > now)
+      .sort((first, second) => first - second)[0];
+
+    if (!nextExpiration) return undefined;
+
+    const delay = Math.min(
+      Math.max(nextExpiration - now + 500, 500),
+      2_147_000_000,
+    );
+    const timer = window.setTimeout(() => {
+      Promise.all([refreshCart(), refreshFavorites()]).catch(() => {});
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [cart, favorites, user?.id]);
   const auth = useMemo(
     () => ({
       user,
@@ -580,6 +567,9 @@ function Providers({ children }) {
         await api.post("/auth/logout").catch(() => {});
         setUser(null);
         setActiveRole("client");
+        setCart([]);
+        setFavorites([]);
+        setCartPriceNotice(null);
       },
     }),
     [user, activeRole, authLoading]
@@ -587,6 +577,11 @@ function Providers({ children }) {
   const cartValue = useMemo(
     () => ({
       cart,
+      priceNotice: cartPriceNotice,
+      refreshCart,
+      dismissPriceNotice() {
+        setCartPriceNotice(null);
+      },
       async add(product) {
         if (!user?.roles?.includes("client")) {
           throw new Error("CLIENT_REQUIRED");
@@ -621,9 +616,10 @@ function Providers({ children }) {
       async clear() {
         await api.delete("/cart");
         setCart([]);
+        setCartPriceNotice(null);
       },
     }),
-    [cart, user]
+    [cart, user, cartPriceNotice, refreshCart]
   );
   const favoritesValue = useMemo(
     () => ({
@@ -871,7 +867,12 @@ function ProductCard({ product }) {
   return (
     <motion.article className="product-card" whileHover={{ y: -8 }}>
       <Link className="product-media" to={`/products/${product.id}`}>
-        <img src={assetUrl(product.image_url)} alt={product.name} />
+        <img
+          src={assetUrl(product.image_url)}
+          alt={product.name}
+          loading="lazy"
+          decoding="async"
+        />
         {activeOffer ? (
           <span className="vinnht-offer-badge" aria-label="Offre spéciale VinnHT">
             <Sparkles size={13} />
@@ -974,7 +975,10 @@ function Home() {
         >
           <div className="orb orb-one" />
           <div className="orb orb-two" />
-          <Lottie animationData={lottiePulse} loop />
+          <div className="hero-orbit-animation" aria-hidden="true">
+            <span className="hero-orbit-ring" />
+            <ShoppingBag />
+          </div>
           <div className="hero-card floating-a">
             <b>+12 rayons</b>
             <span>Marché complet</span>
@@ -999,6 +1003,8 @@ function Home() {
           <img
             src={sousHeroImage}
             alt="Jeune étudiante VinnHT invitant à découvrir les rayons"
+            loading="lazy"
+            decoding="async"
           />
         </motion.div>
       </AnimatedSection>
@@ -1335,7 +1341,14 @@ function Contact() {
             <span><MessageCircle /> Support humain</span>
           </div>
         </div>
-        <div className="contact-lottie contact-hero-image-card"><img src={contactSupportImage} alt="Equipe support VinnHT unie pour accompagner les clients" /></div>
+        <div className="contact-lottie contact-hero-image-card">
+          <img
+            src={contactSupportImage}
+            alt="Equipe support VinnHT unie pour accompagner les clients"
+            decoding="async"
+            fetchPriority="high"
+          />
+        </div>
       </section>
       <section className="support-steps">
         {[
@@ -1641,6 +1654,8 @@ function About() {
               src="/haiti-map-vinnht.png"
               alt=""
               aria-hidden="true"
+              loading="lazy"
+              decoding="async"
             />
 
             <svg
@@ -2569,6 +2584,8 @@ function AuthPage({ register = false }) {
     name: "",
     phone: "",
     email: "",
+    educationStatus: "",
+    educationInstitution: "",
     password: "",
     confirmPassword: "",
     acceptedTerms: false,
@@ -2608,6 +2625,10 @@ function AuthPage({ register = false }) {
             name: form.name,
             phone: form.phone,
             email: form.email,
+            educationStatus: form.educationStatus || null,
+            educationInstitution: form.educationStatus
+              ? form.educationInstitution
+              : null,
             password: form.password,
           }
         : {
@@ -2620,8 +2641,8 @@ function AuthPage({ register = false }) {
       navigate(roleHome[data.user.role] || "/client");
     } catch (err) {
       setError(
-        err.response.data.errors?.[0].msg ||
-          err.response.data.message ||
+        err.response?.data?.errors?.[0]?.msg ||
+          err.response?.data?.message ||
           "Le serveur est indisponible. Vérifiez que l’API est démarrée."
       );
     } finally {
@@ -2665,7 +2686,7 @@ function AuthPage({ register = false }) {
             </div>
             <h1>{register ? "REGISTER" : "LOGIN"}</h1>
             <p className="auth-subtitle">
-              {register ? "Cr?ez votre compte VinnHT" : "Bienvenue, connectez-vous ? votre espace"}
+              {register ? "Créez votre compte VinnHT" : "Bienvenue, connectez-vous à votre espace"}
             </p>
             {register && (
               <>
@@ -2689,6 +2710,54 @@ function AuthPage({ register = false }) {
                     placeholder="Téléphone, ex. +509 3700 0000"
                   />
                 </label>
+
+                <label className="education-select-field">
+                  <GraduationCap />
+                  <span>
+                    <small>Statut scolaire ou universitaire</small>
+                    <select
+                      value={form.educationStatus}
+                      onChange={(e) => {
+                        const educationStatus = e.target.value;
+                        setForm({
+                          ...form,
+                          educationStatus,
+                          educationInstitution: educationStatus
+                            ? form.educationInstitution
+                            : "",
+                        });
+                      }}
+                    >
+                      <option value="">Facultatif - ne pas préciser</option>
+                      <option value="school">Écolier / Écolière</option>
+                      <option value="university">Étudiant / Étudiante</option>
+                    </select>
+                  </span>
+                </label>
+
+                {form.educationStatus && (
+                  <motion.label
+                    className="line-field education-institution-field"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <Building2 />
+                    <input
+                      required
+                      minLength="2"
+                      maxLength="190"
+                      value={form.educationInstitution}
+                      onChange={(e) =>
+                        setForm({ ...form, educationInstitution: e.target.value })
+                      }
+                      placeholder={
+                        form.educationStatus === "university"
+                          ? "Nom de votre université"
+                          : "Nom de votre école"
+                      }
+                    />
+                  </motion.label>
+                )}
               </>
             )}
             <label className="line-field">
@@ -3490,7 +3559,7 @@ function ClientDashboardPage() {
   }, []);
   useEffect(() => {
     api
-      .get("/products", { params: { offers: true, limit: 3 } })
+        .get("/products", { params: { offers: true, limit: 6 } })
       .then(({ data }) => setOffers(data))
       .catch(() => setOffers([]));
   }, []);
@@ -3595,39 +3664,135 @@ function ClientFavoritesPage() {
 }
 
 function ClientCartPage() {
-  const { cart, remove, updateQuantity } = useCart();
+  const {
+    cart,
+    remove,
+    updateQuantity,
+    priceNotice,
+    dismissPriceNotice,
+    refreshCart,
+  } = useCart();
+
+  useEffect(() => {
+    refreshCart().catch(() => {});
+  }, []);
 
   return (
     <DashboardLayout>
-      <ClientCartContent cart={cart} remove={remove} updateQuantity={updateQuantity} />
+      <ClientCartContent
+        cart={cart}
+        remove={remove}
+        updateQuantity={updateQuantity}
+        priceNotice={priceNotice}
+        onDismissPriceNotice={dismissPriceNotice}
+      />
     </DashboardLayout>
   );
 }
 
 function ClientCheckoutPage() {
   const { user } = useAuth();
-  const { cart, clear } = useCart();
+  const navigate = useNavigate();
+  const {
+    cart,
+    clear,
+    priceNotice,
+    refreshCart,
+    dismissPriceNotice,
+  } = useCart();
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [priceChanges, setPriceChanges] = useState([]);
+  const [pendingCheckout, setPendingCheckout] = useState(null);
 
-  const createOrder = async ({ address, city }) => {
+  useEffect(() => {
+    refreshCart()
+      .then(({ changes }) => {
+        if (changes.length) setPriceChanges(changes);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (priceNotice?.changes?.length) {
+      setPriceChanges(priceNotice.changes);
+    }
+  }, [priceNotice?.id]);
+
+  useEffect(() => {
+    if (!priceChanges.length) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [priceChanges.length]);
+
+  const submitOrder = async (checkoutForm, orderCart) => {
+    const { data } = await api.post("/orders", {
+      deliveryAddress: `${checkoutForm.address}, ${checkoutForm.city}`,
+      items: orderCart.map((item) => ({
+        productId: item.id,
+        quantity: item.quantity,
+      })),
+    });
+    setResult(data);
+    setPendingCheckout(null);
+    setPriceChanges([]);
+    dismissPriceNotice();
+  };
+
+  const createOrder = async (checkoutForm) => {
     setProcessing(true);
     setError("");
     try {
-      const { data } = await api.post("/orders", {
-        deliveryAddress: `${address}, ${city}`,
-        items: cart.map((item) => ({
-          productId: item.id,
-          quantity: item.quantity,
-        })),
-      });
-      setResult(data);
+      const refreshed = await refreshCart({ notify: false });
+      if (refreshed.changes.length) {
+        setPendingCheckout(checkoutForm);
+        setPriceChanges(refreshed.changes);
+        return;
+      }
+
+      await submitOrder(checkoutForm, refreshed.cart);
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Impossible de créer la commande.");
     } finally {
       setProcessing(false);
     }
+  };
+
+  const confirmPriceChanges = async () => {
+    if (!pendingCheckout) {
+      setPriceChanges([]);
+      dismissPriceNotice();
+      return;
+    }
+
+    setProcessing(true);
+    setError("");
+    try {
+      const refreshed = await refreshCart({ notify: false });
+      if (refreshed.changes.length) {
+        setPriceChanges(refreshed.changes);
+        return;
+      }
+
+      await submitOrder(pendingCheckout, refreshed.cart);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Impossible de créer la commande.");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const cancelPriceConfirmation = () => {
+    setPendingCheckout(null);
+    setPriceChanges([]);
+    dismissPriceNotice();
+    navigate("/cart");
   };
 
   const submitPaymentProof = async (orderId, { file, note }) => {
@@ -3660,7 +3825,11 @@ function ClientCheckoutPage() {
         processing={processing}
         result={result}
         error={error}
+        priceChanges={priceChanges}
+        continueAfterPriceConfirmation={Boolean(pendingCheckout)}
         onSubmit={createOrder}
+        onConfirmPriceChanges={confirmPriceChanges}
+        onCancelPriceChanges={cancelPriceConfirmation}
         onSubmitPaymentProof={submitPaymentProof}
       />
     </DashboardLayout>
@@ -4480,7 +4649,16 @@ function PwaInstallPrompt() {
 export default function App() {
   return (
     <Providers>
-      <AppRoutes />
+      <React.Suspense
+        fallback={
+          <div className="auth-loading-screen">
+            <img src="/vinnht-logo.png" alt="VinnHT" />
+            <span>Chargement de votre espace...</span>
+          </div>
+        }
+      >
+        <AppRoutes />
+      </React.Suspense>
       <PwaInstallPrompt />
     </Providers>
   );
