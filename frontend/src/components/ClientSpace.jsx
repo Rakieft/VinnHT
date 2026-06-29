@@ -49,6 +49,17 @@ import "../styles/client-space.css";
 
 const imageSource = (url) =>
   url?.startsWith("/uploads") ? `${apiOrigin}${url}` : url;
+const clientActivityOptions = [
+  ["school", "Écolier / Écolière"],
+  ["university", "Étudiant / Étudiante"],
+  ["employee", "Employé / Employée"],
+  ["entrepreneur", "Entrepreneur / Commerçant"],
+  ["self_employed", "Travailleur indépendant"],
+  ["unemployed", "Sans activité actuellement"],
+  ["other", "Autre situation"],
+];
+const clientActivityLabel = (status) =>
+  clientActivityOptions.find(([value]) => value === status)?.[1] || "Autre situation";
 const orderImageSource = (url) => imageSource(url) || "/vinnht-logo.png";
 const useOrderImageFallback = (event) => {
   event.currentTarget.onerror = null;
@@ -685,6 +696,11 @@ export function ClientOrdersContent({
   proofProcessing = false,
   proofError = "",
   proofSuccess = "",
+  onConfirmReceipt,
+  onConfirmPickup,
+  receiptProcessing = false,
+  receiptMessage = "",
+  receiptError = "",
 }) {
   const [filter, setFilter] = useState("Toutes");
   const [query, setQuery] = useState("");
@@ -769,14 +785,27 @@ export function ClientOrdersContent({
         ))}
       </div>
       {selectedOrder && (
-        <ClientOrderDetail
-          order={selectedOrder}
-          onClose={onCloseDetails}
-          onSubmitPaymentProof={onSubmitPaymentProof}
-          proofProcessing={proofProcessing}
-          proofError={proofError}
-          proofSuccess={proofSuccess}
-        />
+        <div
+          className="client-order-detail-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) onCloseDetails?.();
+          }}
+        >
+          <ClientOrderDetail
+            order={selectedOrder}
+            onClose={onCloseDetails}
+            onSubmitPaymentProof={onSubmitPaymentProof}
+            proofProcessing={proofProcessing}
+            proofError={proofError}
+            proofSuccess={proofSuccess}
+            onConfirmReceipt={onConfirmReceipt}
+            onConfirmPickup={onConfirmPickup}
+            receiptProcessing={receiptProcessing}
+            receiptMessage={receiptMessage}
+            receiptError={receiptError}
+          />
+        </div>
       )}
     </ClientPageFrame>
   );
@@ -789,19 +818,37 @@ function ClientOrderDetail({
   proofProcessing = false,
   proofError = "",
   proofSuccess = "",
+  onConfirmReceipt,
+  onConfirmPickup,
+  receiptProcessing = false,
+  receiptMessage = "",
+  receiptError = "",
 }) {
   const [proofFile, setProofFile] = useState(null);
   const [proofNote, setProofNote] = useState("");
   const [showPaymentProof, setShowPaymentProof] = useState(false);
+  const [receiptToConfirm, setReceiptToConfirm] = useState(null);
+  const [receiptAcknowledged, setReceiptAcknowledged] = useState(false);
   const steps = ["confirmed", "processing", "shipped", "delivered"];
   const currentIndex = steps.indexOf(order.status);
   const paymentInstructions = order.paymentInstructions || [];
+  const pickupInstructions = paymentInstructions.filter(
+    (instruction) =>
+      (instruction.fulfillment_method || order.fulfillment_method) === "pickup",
+  );
   const hasRejectedPayment = paymentInstructions.some(
     (instruction) => instruction.seller_payment_status === "failed"
   );
   const proofAlreadySent = Boolean(order.payment_proof_url || order.payment_reference) && !hasRejectedPayment;
   const paymentPaid = order.payment_status === "paid";
   const canSendProof = !paymentPaid && onSubmitPaymentProof;
+  const displayStatus = orderStatusLabels[order.status] || order.status || "En attente";
+  const fulfillmentLabel = order.fulfillment_method === "mixed"
+    ? "Retrait et livraison"
+    : order.fulfillment_method === "delivery"
+      ? "Livraison"
+      : "Retrait en boutique";
+  const orderItems = Array.isArray(order.items) ? order.items : [];
   const deliveryPeople = Array.isArray(order.deliveryPeople) && order.deliveryPeople.length
     ? order.deliveryPeople
     : order.delivery_name
@@ -822,22 +869,54 @@ function ClientOrderDetail({
     onSubmitPaymentProof(order.id, { file: proofFile, note: proofNote });
   };
 
+  useEffect(() => {
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape" && !receiptToConfirm) onClose?.();
+    };
+
+    document.body.classList.add("client-order-modal-open");
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.classList.remove("client-order-modal-open");
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [onClose, receiptToConfirm]);
+
   return (
-    <section className="client-order-detail">
+    <section
+      className="client-order-detail"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="client-order-detail-title"
+    >
       <header className="client-order-detail-header">
         <div>
-          <span>Suivi détaillé</span>
-          <h2>{order.order_number}</h2>
-          <p>{order.delivery_address}</p>
+          <span>Détails de la commande</span>
+          <h2 id="client-order-detail-title">{order.order_number || `Commande #${order.id}`}</h2>
+          <p>Retrouvez ici uniquement les informations importantes.</p>
         </div>
         <div className="client-order-detail-actions">
-          <strong>{Number(order.total).toLocaleString("fr-HT")} HTG</strong>
           <button type="button" onClick={onClose} aria-label="Fermer les détails">
             <X />
             <span>Fermer</span>
           </button>
         </div>
       </header>
+      <div className="client-order-detail-overview">
+        <article>
+          <small>Statut actuel</small>
+          <strong>{displayStatus}</strong>
+        </article>
+        <article>
+          <small>Total payé</small>
+          <strong>{Number(order.total || 0).toLocaleString("fr-HT")} HTG</strong>
+        </article>
+        <article>
+          <small>Réception</small>
+          <strong>{fulfillmentLabel}</strong>
+        </article>
+      </div>
       <div className="client-order-progress detail-progress">
         {["Payée", "Préparation", "En livraison", "Livrée"].map((label, index) => (
           <div className={currentIndex >= index ? "done" : ""} key={label}>
@@ -849,14 +928,17 @@ function ClientOrderDetail({
       <section className="client-order-payment-panel">
         <header>
           <div>
-            <span>Paiement MonCash</span>
-            <h3>{paymentPaid ? "Paiement confirme" : hasRejectedPayment ? "Preuve a corriger" : proofAlreadySent ? "Preuve envoyee" : "Envoyer la preuve"}</h3>
+            <span>Paiement</span>
+            <h3>{paymentPaid ? "Paiement confirmé" : hasRejectedPayment ? "Preuve à corriger" : proofAlreadySent ? "Preuve envoyée" : "Envoyer la preuve"}</h3>
             <p>
-              Payez chaque vendeur sur son numero MonCash, puis envoyez une capture ou photo de la transaction.
+              Un seul paiement sur le compte MonCash VinnHT
+              {paymentInstructions[0]?.moncash_number
+                ? ` : ${paymentInstructions[0].moncash_number}`
+                : "."}
             </p>
           </div>
           <b className={paymentPaid ? "paid" : hasRejectedPayment ? "failed" : proofAlreadySent ? "pending" : "waiting"}>
-            {paymentPaid ? "Valide" : hasRejectedPayment ? "Preuve refusee" : proofAlreadySent ? "En verification vendeur" : "Action requise"}
+            {paymentPaid ? "Sécurisé" : hasRejectedPayment ? "Preuve refusée" : proofAlreadySent ? "Vérification VinnHT" : "Action requise"}
           </b>
         </header>
         <div className="client-order-moncash-grid">
@@ -864,14 +946,14 @@ function ClientOrderDetail({
             <article key={instruction.seller_id || instruction.seller_name}>
               <small>{instruction.seller_name}</small>
               <strong>{Number(instruction.amount || 0).toLocaleString("fr-HT")} HTG</strong>
-              <p>MonCash : {instruction.moncash_number || "A confirmer avec le vendeur"}</p>
+              <p>Part vendeur suivie par VinnHT</p>
               <span className={`client-seller-payment ${instruction.seller_payment_status || "pending"}`}>
                 {instruction.seller_payment_status === "paid"
-                  ? "Valide par le vendeur"
+                  ? "Fonds sécurisés par VinnHT"
                   : instruction.seller_payment_status === "failed"
-                    ? "Preuve refusee"
+                    ? "Preuve refusée par VinnHT"
                     : instruction.seller_payment_status === "proof_submitted"
-                      ? "Preuve recue"
+                      ? "Vérification administrative"
                       : "En attente"}
               </span>
               {instruction.payment_rejection_reason && (
@@ -962,6 +1044,55 @@ function ClientOrderDetail({
           ))}
         </section>
       )}
+      {pickupInstructions.length > 0 && (
+        <section className="client-pickup-trust">
+          <header>
+            <div>
+              <span>Retrait gratuit</span>
+              <h3>Récupérez vos articles auprès des boutiques</h3>
+              <p>Attendez que chaque boutique marque sa partie comme prête avant de vous déplacer.</p>
+            </div>
+            <Store />
+          </header>
+          <div className="client-pickup-grid">
+            {pickupInstructions.map((instruction) => (
+              <article key={instruction.seller_sale_id}>
+                <Store />
+                <div>
+                  <small>{instruction.seller_name}</small>
+                  <h3>{instruction.pickup_address || "Adresse non renseignée"}</h3>
+                  {instruction.opening_hours && <p>{instruction.opening_hours}</p>}
+                  <b>
+                    {instruction.pickup_client_confirmed_at
+                      ? "Retrait confirmé"
+                      : instruction.pickup_handed_over_at
+                        ? "Remise déclarée · confirmez votre retrait"
+                        : "En attente de remise par la boutique"}
+                  </b>
+                </div>
+                {instruction.pickup_handed_over_at &&
+                  !instruction.pickup_client_confirmed_at && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReceiptAcknowledged(false);
+                        setReceiptToConfirm({
+                          receipt_type: "pickup",
+                          seller_sale_id: instruction.seller_sale_id,
+                          seller_name: instruction.seller_name,
+                        });
+                      }}
+                    >
+                      <CheckCircle2 /> Confirmer le retrait
+                    </button>
+                  )}
+              </article>
+            ))}
+          </div>
+          {receiptMessage && <div className="client-payment-feedback success">{receiptMessage}</div>}
+          {receiptError && <div className="client-payment-feedback error">{receiptError}</div>}
+        </section>
+      )}
       {deliveryPeople.length > 0 && (
         <section className="client-delivery-trust">
           <header>
@@ -1005,27 +1136,124 @@ function ClientOrderDetail({
                         ? "Assigné"
                         : person.delivery_status === "picked_up"
                           ? "Colis récupéré"
-                          : person.delivery_status === "in_transit"
-                            ? "En route"
-                            : person.delivery_status === "delivered"
-                              ? "Livré"
-                              : person.delivery_status}
+                            : person.delivery_status === "in_transit"
+                              ? "En route"
+                              : person.delivery_status === "delivered"
+                                ? person.client_confirmed_at
+                                  ? "Réception confirmée"
+                                  : "Signé · à confirmer"
+                                : person.delivery_status}
                     </b>
                   )}
                 </div>
-                {person.delivery_phone && (
-                  <a href={`tel:${person.delivery_phone}`}>
-                    <Phone />
-                    Appeler
-                  </a>
-                )}
+                <div className="client-delivery-actions">
+                  {person.delivery_phone && (
+                    <a href={`tel:${person.delivery_phone}`}>
+                      <Phone />
+                      Appeler
+                    </a>
+                  )}
+                  {person.delivery_status === "delivered" && !person.client_confirmed_at && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReceiptAcknowledged(false);
+                        setReceiptToConfirm({ ...person, receipt_type: "delivery" });
+                      }}
+                    >
+                      <CheckCircle2 />
+                      Confirmer la réception
+                    </button>
+                  )}
+                  {person.client_confirmed_at && (
+                    <span className="client-receipt-confirmed">
+                      <ShieldCheck />
+                      Confirmé depuis votre compte
+                    </span>
+                  )}
+                </div>
               </article>
             ))}
           </div>
+          {receiptMessage && <div className="client-payment-feedback success">{receiptMessage}</div>}
+          {receiptError && <div className="client-payment-feedback error">{receiptError}</div>}
         </section>
       )}
-      <div className="order-detail-items">
-        {order.items.map((item) => (
+      {receiptToConfirm && (
+        <div className="client-receipt-modal-backdrop" role="presentation">
+          <section
+            className="client-receipt-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="client-receipt-title"
+          >
+            <span><ShieldCheck /></span>
+            <small>Paiement protégé VinnHT</small>
+            <h2 id="client-receipt-title">
+              {receiptToConfirm.receipt_type === "pickup"
+                ? "Confirmez-vous avoir récupéré votre commande ?"
+                : "Confirmez-vous avoir reçu cette livraison ?"}
+            </h2>
+            <p>
+              {receiptToConfirm.receipt_type === "pickup"
+                ? `La boutique ${receiptToConfirm.seller_name || "VinnHT"} indique vous avoir remis les articles. Confirmez uniquement si vous les avez réellement récupérés.`
+                : "La signature a été enregistrée par le livreur. Cette seconde validation depuis votre compte confirme que le colis vous a bien été remis."}
+            </p>
+            <label>
+              <input
+                type="checkbox"
+                checked={receiptAcknowledged}
+                onChange={(event) => setReceiptAcknowledged(event.target.checked)}
+              />
+              {receiptToConfirm.receipt_type === "pickup"
+                ? "Je confirme avoir récupéré mes articles auprès de la boutique."
+                : "Je confirme avoir signé et reçu ma commande en main propre."}
+            </label>
+            <strong>
+              Après cette confirmation, la vente pourra être finalisée pour le vendeur.
+            </strong>
+            <div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setReceiptToConfirm(null)}
+                disabled={receiptProcessing}
+              >
+                Pas maintenant
+              </button>
+              <button
+                type="button"
+                disabled={!receiptAcknowledged || receiptProcessing}
+                onClick={async () => {
+                  const confirmed = receiptToConfirm.receipt_type === "pickup"
+                    ? await onConfirmPickup?.(
+                        order.id,
+                        receiptToConfirm.seller_sale_id,
+                      )
+                    : await onConfirmReceipt?.(
+                        order.id,
+                        receiptToConfirm.assignment_id,
+                      );
+                  if (confirmed) setReceiptToConfirm(null);
+                }}
+              >
+                <CheckCircle2 />
+                {receiptProcessing ? "Confirmation..." : "Oui, je confirme"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      <section className="client-order-items-section">
+        <header>
+          <div>
+            <span>Articles</span>
+            <h3>{orderItems.length} produit(s) dans cette commande</h3>
+          </div>
+          <Package />
+        </header>
+        <div className="order-detail-items">
+        {orderItems.map((item) => (
           <article key={item.id}>
             <img
               src={orderImageSource(item.image_url || products[0]?.image_url)}
@@ -1040,7 +1268,8 @@ function ClientOrderDetail({
             <strong>{Number(item.subtotal).toLocaleString("fr-HT")} HTG</strong>
           </article>
         ))}
-      </div>
+        </div>
+      </section>
     </section>
   );
 }
@@ -1109,13 +1338,12 @@ export function ClientCartContent({
     (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
     0,
   );
-  const delivery = displayCart.length ? 650 : 0;
 
   return (
     <ClientPageFrame
-      eyebrow="Pret a commander"
+      eyebrow="Prêt à commander"
       title="Mon panier"
-      text="Vos articles sont organises par boutique pour une commande plus claire."
+      text="Vos articles sont organisés par boutique pour une commande plus claire."
     >
       {priceNotice?.changes?.length > 0 && (
         <section className="client-price-update-alert" role="status">
@@ -1199,23 +1427,35 @@ export function ClientCartContent({
           )}
         </div>
         <aside className="client-cart-summary">
-          <span>Resume de commande</span>
+          <span>Résumé de commande</span>
           <h3>Votre total</h3>
+          <section className="cart-reception-preview" aria-label="Options de réception disponibles">
+            <div>
+              <Store />
+              <span>
+                <b>Retrait</b>
+                <small>Gratuit en boutique</small>
+              </span>
+            </div>
+            <div>
+              <Truck />
+              <span>
+                <b>Livraison</b>
+                <small>500 HTG par boutique</small>
+              </span>
+            </div>
+          </section>
           <div>
             <small>Sous-total</small>
             <b>{subtotal.toLocaleString("fr-HT")} HTG</b>
           </div>
-          <div>
-            <small>Livraison estimee</small>
-            <b>{delivery.toLocaleString("fr-HT")} HTG</b>
-          </div>
           <div className="summary-total">
             <small>Total</small>
-            <strong>{(subtotal + delivery).toLocaleString("fr-HT")} HTG</strong>
+            <strong>{subtotal.toLocaleString("fr-HT")} HTG</strong>
           </div>
           {displayCart.length ? (
             <Link to="/checkout">
-              Passer au paiement
+              Choisir la réception
               <ArrowRight size={17} />
             </Link>
           ) : (
@@ -1225,7 +1465,7 @@ export function ClientCartContent({
           )}
           <p>
             <ShieldCheck size={14} />
-            Paiement securise et suivi VinnHT
+            Le choix se fait séparément pour chaque boutique à l’étape suivante.
           </p>
         </aside>
       </div>
@@ -1238,6 +1478,7 @@ export function ClientCheckoutContent({
   user,
   processing,
   result,
+  paymentAccount,
   error,
   priceChanges = [],
   continueAfterPriceConfirmation = false,
@@ -1247,6 +1488,7 @@ export function ClientCheckoutContent({
   onSubmitPaymentProof,
 }) {
   const [form, setForm] = useState({
+    fulfillmentChoices: {},
     address: "",
     city: "Port-au-Prince",
     phone: user?.phone || "",
@@ -1261,25 +1503,87 @@ export function ClientCheckoutContent({
     const rows = new Map();
     for (const item of cart) {
       const seller = item.seller_name || "Boutique VinnHT";
-      const current = rows.get(seller) || {
+      const sellerKey = String(item.seller_id || seller);
+      const current = rows.get(sellerKey) || {
+        seller_id: item.seller_id,
         seller_name: seller,
         moncash_number: item.seller_moncash || "",
+        pickup_address: item.seller_pickup_address || "",
+        delivery_zones: item.seller_delivery_zones || "",
+        opening_hours: item.seller_opening_hours || "",
+        has_delivery_driver: Boolean(Number(item.seller_has_delivery_driver || 0)),
         amount: 0,
       };
       current.amount += Number(item.price || 0) * Number(item.quantity || 0);
       if (!current.moncash_number && item.seller_moncash) current.moncash_number = item.seller_moncash;
-      rows.set(seller, current);
+      rows.set(sellerKey, current);
     }
     return [...rows.values()];
   }, [cart]);
+  const getSellerMethod = (seller) =>
+    form.fulfillmentChoices[String(seller.seller_id)] || "pickup";
+  const pickupSellers = sellerInstructions.filter(
+    (seller) => getSellerMethod(seller) === "pickup",
+  );
+  const deliverySellers = sellerInstructions.filter(
+    (seller) => getSellerMethod(seller) === "delivery",
+  );
+  const hasPickup = pickupSellers.length > 0;
+  const hasDelivery = deliverySellers.length > 0;
+  const deliveryFee = deliverySellers.length * 500;
+  const orderTotal = total + deliveryFee;
+  const fulfillmentChoicesValid =
+    sellerInstructions.length > 0 &&
+    sellerInstructions.every((seller) =>
+      getSellerMethod(seller) === "pickup"
+        ? Boolean(seller.pickup_address)
+        : Boolean(seller.delivery_zones && seller.has_delivery_driver),
+    );
+
+  useEffect(() => {
+    setForm((current) => {
+      const choices = { ...current.fulfillmentChoices };
+      let changed = false;
+
+      for (const seller of sellerInstructions) {
+        const key = String(seller.seller_id);
+        if (!choices[key]) {
+          choices[key] = seller.pickup_address
+            ? "pickup"
+            : seller.delivery_zones && seller.has_delivery_driver
+              ? "delivery"
+              : "pickup";
+          changed = true;
+        } else if (
+          choices[key] === "delivery" &&
+          (!seller.delivery_zones || !seller.has_delivery_driver)
+        ) {
+          choices[key] = "pickup";
+          changed = true;
+        }
+      }
+
+      return changed ? { ...current, fulfillmentChoices: choices } : current;
+    });
+  }, [sellerInstructions]);
+
+  const selectSellerMethod = (sellerId, method) => {
+    setForm((current) => ({
+      ...current,
+      fulfillmentChoices: {
+        ...current.fulfillmentChoices,
+        [String(sellerId)]: method,
+      },
+    }));
+  };
 
   if (result) {
     const proofSent = Boolean(result.proofUrl || result.reference);
     return (
       <ClientPageFrame
         eyebrow="Commande creee"
-        title="Payer directement le vendeur"
-        text="Payez chaque boutique sur son MonCash personnel, puis envoyez une preuve pour confirmer la commande."
+        title="Payer VinnHT en toute sécurité"
+        text="Effectuez un seul paiement sur le compte MonCash VinnHT, puis envoyez votre preuve."
       >
         <section className="checkout-result-card">
           <span>
@@ -1289,22 +1593,33 @@ export function ClientCheckoutContent({
             <small>Numero de commande</small>
             <h2>{result.orderNumber}</h2>
             <p>Total : {Number(result.total).toLocaleString("fr-HT")} HTG</p>
+            <b className="checkout-fulfillment-result">
+              {result.fulfillmentMethod === "mixed"
+                ? `Retrait et livraison · ${Number(result.deliveryFee || 0).toLocaleString("fr-HT")} HTG de livraison`
+                : result.fulfillmentMethod === "delivery"
+                  ? `Livraison boutique · ${Number(result.deliveryFee || 0).toLocaleString("fr-HT")} HTG`
+                  : "Retrait gratuit auprès de la boutique"}
+            </b>
           </div>
-          <div className="direct-payment-list">
-            {(result.paymentInstructions || []).map((instruction) => (
-              <article key={instruction.seller_id || instruction.seller_name}>
-                <small>{instruction.seller_name}</small>
-                <b>{Number(instruction.amount).toLocaleString("fr-HT")} HTG</b>
-                <span>MonCash : {instruction.moncash_number || "A confirmer avec le vendeur"}</span>
-              </article>
-            ))}
+          <div className="checkout-protected-account">
+            <ShieldCheck />
+            <div>
+              <small>Compte MonCash protégé</small>
+              <strong>{result.paymentAccount?.accountName || "VinnHT"}</strong>
+              <b>
+                {result.paymentAccount?.moncashNumber ||
+                  paymentAccount?.moncashNumber ||
+                  "Numéro en cours de configuration"}
+              </b>
+            </div>
+            <span>{Number(result.total).toLocaleString("fr-HT")} HTG</span>
           </div>
           {proofSent && (
             <div className="payment-proof-success">
               <CheckCircle2 />
               <span>
                 <b>Preuve envoyee</b>
-                Elle est conservee avec la commande. Le vendeur ou l'equipe VinnHT pourra verifier le paiement avant preparation.
+                L’administration VinnHT vérifiera le paiement avant d’autoriser la préparation.
               </span>
             </div>
           )}
@@ -1352,7 +1667,7 @@ export function ClientCheckoutContent({
     <ClientPageFrame
       eyebrow="Paiement securise"
       title="Finaliser la commande"
-      text="Verifiez votre adresse et les numeros MonCash des boutiques avant de creer la commande."
+      text="Vérifiez la réception choisie et le montant qui sera payé sur le compte VinnHT."
     >
       {priceChanges.length > 0 && (
         <div className="checkout-price-modal-backdrop" role="presentation">
@@ -1400,38 +1715,132 @@ export function ClientCheckoutContent({
         </div>
       )}
       {error && <div className="client-api-error">{error}</div>}
+      <section className="checkout-fulfillment-choice">
+        <header>
+          <span>Étape 1 · Réception</span>
+          <h2>Comment voulez-vous recevoir vos articles ?</h2>
+          <p>Faites un choix pour chaque boutique. Vous pouvez combiner retrait et livraison.</p>
+        </header>
+        <div className="checkout-selection-summary" role="status">
+          <span className="pickup">
+            <Store />
+            <b>{pickupSellers.length}</b>
+            retrait{pickupSellers.length > 1 ? "s" : ""}
+          </span>
+          <span className="delivery">
+            <Truck />
+            <b>{deliverySellers.length}</b>
+            livraison{deliverySellers.length > 1 ? "s" : ""}
+          </span>
+          <strong>
+            Frais : {deliveryFee.toLocaleString("fr-HT")} HTG
+          </strong>
+        </div>
+        <div className="checkout-shop-fulfillment-list">
+          {sellerInstructions.map((seller) => {
+            const selectedMethod = getSellerMethod(seller);
+            return (
+              <article className="checkout-shop-fulfillment" key={seller.seller_id}>
+                <header>
+                  <span><Store /></span>
+                  <div>
+                    <b>{seller.seller_name}</b>
+                    <small>{seller.amount.toLocaleString("fr-HT")} HTG d’articles</small>
+                  </div>
+                  <em className={`checkout-shop-choice-status ${selectedMethod}`}>
+                    {selectedMethod === "delivery" ? "Livraison · +500 HTG" : "Retrait · Gratuit"}
+                  </em>
+                </header>
+                <div>
+                  <button
+                    type="button"
+                    className={`pickup-option ${selectedMethod === "pickup" ? "active" : ""}`}
+                    disabled={!seller.pickup_address}
+                    onClick={() => selectSellerMethod(seller.seller_id, "pickup")}
+                  >
+                    <Store />
+                    <span>
+                      <b>Retrait</b>
+                      <small>
+                        {seller.pickup_address ? "Gratuit en boutique" : "Adresse indisponible"}
+                      </small>
+                    </span>
+                    {selectedMethod === "pickup" && <CheckCircle2 />}
+                  </button>
+                  <button
+                    type="button"
+                    className={`delivery-option ${selectedMethod === "delivery" ? "active" : ""}`}
+                    disabled={!seller.delivery_zones || !seller.has_delivery_driver}
+                    onClick={() => selectSellerMethod(seller.seller_id, "delivery")}
+                  >
+                    <Truck />
+                    <span>
+                      <b>Livraison</b>
+                      <small>
+                        {!seller.delivery_zones
+                          ? "Zone indisponible"
+                          : !seller.has_delivery_driver
+                            ? "Aucun livreur"
+                            : "+ 500 HTG"}
+                      </small>
+                    </span>
+                    {selectedMethod === "delivery" && <CheckCircle2 />}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
       <form
         className="client-checkout-layout"
         onSubmit={(event) => {
           event.preventDefault();
-          onSubmit(form);
+          onSubmit({
+            ...form,
+            fulfillmentChoices: Object.fromEntries(
+              sellerInstructions.map((seller) => [
+                String(seller.seller_id),
+                getSellerMethod(seller),
+              ]),
+            ),
+          });
         }}
       >
         <section className="checkout-address-card">
-          <div>
-            <span>Livraison</span>
-            <h2>Adresse de reception</h2>
+          <div className="checkout-step-heading">
+            <span>Étape 2 · Vos informations</span>
+            <h2>{hasDelivery ? "Où devons-nous livrer ?" : "Comment pouvons-nous vous joindre ?"}</h2>
+            <p>
+              {hasDelivery
+                ? "Indiquez une seule adresse pour tous les articles livrés."
+                : "Vérifiez votre téléphone avant de confirmer les retraits."}
+            </p>
           </div>
+          {hasDelivery && (
+            <div className="checkout-delivery-address-fields">
+              <label>
+                Adresse complète
+                <input
+                  required
+                  minLength="8"
+                  value={form.address}
+                  onChange={(event) => setForm({ ...form, address: event.target.value })}
+                  placeholder="Rue, numéro, quartier"
+                />
+              </label>
+              <label>
+                Ville
+                <input
+                  required
+                  value={form.city}
+                  onChange={(event) => setForm({ ...form, city: event.target.value })}
+                />
+              </label>
+            </div>
+          )}
           <label>
-            Adresse complete
-            <input
-              required
-              minLength="8"
-              value={form.address}
-              onChange={(event) => setForm({ ...form, address: event.target.value })}
-              placeholder="Rue, numero, quartier"
-            />
-          </label>
-          <label>
-            Ville
-            <input
-              required
-              value={form.city}
-              onChange={(event) => setForm({ ...form, city: event.target.value })}
-            />
-          </label>
-          <label>
-            Telephone
+            Téléphone
             <input
               required
               value={form.phone}
@@ -1439,27 +1848,40 @@ export function ClientCheckoutContent({
               placeholder="+509..."
             />
           </label>
-          <div className="checkout-payment-method">
-            <CreditCard />
-            <span>
-              <b>Paiement direct vendeur</b>
-              Le vendeur recoit son argent sur son MonCash personnel.
-            </span>
-            <ShieldCheck />
-          </div>
-          <div className="checkout-seller-moncash">
-            <span>Numeros MonCash a payer</span>
-            {sellerInstructions.map((instruction) => (
-              <article key={instruction.seller_name}>
-                <strong>{instruction.seller_name}</strong>
-                <b>{instruction.moncash_number || "A confirmer avec le vendeur"}</b>
-                <small>{instruction.amount.toLocaleString("fr-HT")} HTG</small>
-              </article>
-            ))}
+          <div className="checkout-reception-plan">
+            <header>
+              <b>Votre choix par boutique</b>
+              <small>Tout est regroupé ici.</small>
+            </header>
+            {sellerInstructions.map((instruction) => {
+              const method = getSellerMethod(instruction);
+              return (
+                <article
+                  className={method}
+                  key={instruction.seller_id || instruction.seller_name}
+                >
+                  <span>{method === "delivery" ? <Truck /> : <Store />}</span>
+                  <div>
+                    <b>{instruction.seller_name}</b>
+                    <strong>
+                      {method === "delivery" ? "Livraison · 500 HTG" : "Retrait gratuit"}
+                    </strong>
+                    <small>
+                      {method === "delivery"
+                        ? `Zone : ${instruction.delivery_zones || "non renseignée"}`
+                        : instruction.pickup_address || "Adresse de retrait non renseignée"}
+                    </small>
+                    {method === "pickup" && instruction.opening_hours && (
+                      <small>{instruction.opening_hours}</small>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
         <aside className="client-cart-summary checkout-summary">
-          <span>Resume</span>
+          <span>Étape 3 · Résumé</span>
           <h3>{cart.length} article(s)</h3>
           {cart.map((item) => (
             <div key={item.id}>
@@ -1469,12 +1891,35 @@ export function ClientCheckoutContent({
               <b>{(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString("fr-HT")} HTG</b>
             </div>
           ))}
+          {hasDelivery && (
+            <div>
+              <small>Livraison ({deliverySellers.length} boutique(s) × 500 HTG)</small>
+              <b>{deliveryFee.toLocaleString("fr-HT")} HTG</b>
+            </div>
+          )}
           <div className="summary-total">
             <small>Total</small>
-            <strong>{total.toLocaleString("fr-HT")} HTG</strong>
+            <strong>{orderTotal.toLocaleString("fr-HT")} HTG</strong>
           </div>
-          <button disabled={processing || !cart.length} type="submit">
-            {processing ? "Creation en cours..." : "Creer la commande"}
+          <section className="checkout-summary-payment">
+            <ShieldCheck />
+            <span>
+              <small>Paiement protégé</small>
+              <b>{paymentAccount?.accountName || "VinnHT"}</b>
+              <strong>
+                {paymentAccount?.moncashNumber || "Numéro MonCash à configurer"}
+              </strong>
+            </span>
+          </section>
+          <button
+            disabled={
+              processing ||
+              !cart.length ||
+              !fulfillmentChoicesValid
+            }
+            type="submit"
+          >
+            {processing ? "Création en cours..." : "Confirmer la commande"}
             <ArrowRight />
           </button>
         </aside>
@@ -1618,6 +2063,9 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
   const [form, setForm] = useState({
     name: user?.name || "",
     phone: user?.phone || "",
+    activityStatus: user?.activity_status || "other",
+    activityOrganization: user?.activity_organization || "",
+    activityDetails: user?.activity_details || "",
   });
   const [message, setMessage] = useState("");
 
@@ -1626,6 +2074,9 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
     const data = new FormData();
     data.append("name", form.name);
     data.append("phone", form.phone);
+    data.append("activityStatus", form.activityStatus);
+    data.append("activityOrganization", form.activityOrganization);
+    data.append("activityDetails", form.activityDetails);
     try {
       const { data: response } = await api.patch("/auth/profile", data);
       updateUser?.(response.user);
@@ -1651,7 +2102,7 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
           />
           <h2>{user?.name || "Client VinnHT"}</h2>
           <p>{user?.email || "client@vinnht.ht"}</p>
-          <b>Client verifie</b>
+          <b>{clientActivityLabel(user?.activity_status)}</b>
         </aside>
         <form className="client-profile-form" onSubmit={save}>
           <header>
@@ -1680,6 +2131,50 @@ export function ClientProfileContent({ api, user, updateUser, onLogout }) {
                 onChange={(event) => setForm({ ...form, phone: event.target.value })}
               />
             </label>
+            <label>
+              Situation actuelle
+              <select
+                value={form.activityStatus}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    activityStatus: event.target.value,
+                    activityOrganization: "",
+                    activityDetails: "",
+                  })
+                }
+              >
+                {clientActivityOptions.map(([value, label]) => (
+                  <option value={value} key={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            {["school", "university", "employee", "entrepreneur"].includes(
+              form.activityStatus,
+            ) && (
+              <label>
+                Établissement ou entreprise
+                <input
+                  required
+                  value={form.activityOrganization}
+                  onChange={(event) =>
+                    setForm({ ...form, activityOrganization: event.target.value })
+                  }
+                />
+              </label>
+            )}
+            {["self_employed", "other"].includes(form.activityStatus) && (
+              <label>
+                Précision
+                <input
+                  required
+                  value={form.activityDetails}
+                  onChange={(event) =>
+                    setForm({ ...form, activityDetails: event.target.value })
+                  }
+                />
+              </label>
+            )}
             <label>
               Ville
               <input defaultValue="Port-au-Prince" />

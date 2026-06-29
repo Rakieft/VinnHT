@@ -109,13 +109,16 @@ try {
 
     await connection.query(
       `INSERT INTO seller_profiles
-        (seller_id,shop_name,category,description,whatsapp,pickup_address,opening_hours,delivery_zones,status)
-       VALUES (?,?,?,?,?,?,?,?,'active')
+        (seller_id,shop_name,category,description,whatsapp,moncash_number,
+         moncash_account_name,pickup_address,opening_hours,delivery_zones,status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,'active')
        ON DUPLICATE KEY UPDATE
         shop_name=VALUES(shop_name),
         category=NULL,
         description=VALUES(description),
         whatsapp=VALUES(whatsapp),
+        moncash_number=VALUES(moncash_number),
+        moncash_account_name=VALUES(moncash_account_name),
         pickup_address=VALUES(pickup_address),
         opening_hours=VALUES(opening_hours),
         delivery_zones=VALUES(delivery_zones),
@@ -126,6 +129,8 @@ try {
         null,
         seller.description,
         seller.phone,
+        seller.phone,
+        seller.name,
         seller.pickupAddress,
         "Lundi-Samedi, 8h-18h",
         seller.pickupAddress,

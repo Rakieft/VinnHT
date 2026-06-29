@@ -1509,6 +1509,14 @@ main {
   gap: 20px;
 }
 
+.shop-public-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
 .shop-public-heading button {
   flex: 0 0 auto;
   display: inline-flex;
@@ -1534,6 +1542,31 @@ main {
   transform: translateY(-2px);
   border-color: rgba(255, 255, 255, 0.48);
   background: rgba(255, 255, 255, 0.2);
+}
+
+.shop-public-heading .shop-follow-button {
+  border-color: rgba(245, 158, 11, 0.48);
+  color: #0f172a;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  box-shadow: 0 14px 34px rgba(245, 158, 11, 0.24);
+}
+
+.shop-public-heading .shop-follow-button:hover {
+  border-color: #fcd34d;
+  background: linear-gradient(135deg, #fcd34d, #f59e0b);
+}
+
+.shop-public-heading .shop-follow-button.following {
+  border-color: rgba(134, 239, 172, 0.5);
+  color: #ffffff;
+  background: rgba(34, 197, 94, 0.22);
+  box-shadow: 0 14px 34px rgba(22, 163, 74, 0.18);
+}
+
+.shop-public-heading button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+  transform: none;
 }
 
 .shop-public-heading button svg {
@@ -1623,13 +1656,106 @@ main {
 }
 
 @media (max-width: 720px) {
+  .shop-public-hero {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 16px;
+    margin: 12px;
+    padding: 22px 18px 20px;
+    overflow: hidden;
+    border-radius: 28px;
+    background:
+      radial-gradient(
+        circle at 92% 8%,
+        rgba(245, 158, 11, 0.32),
+        transparent 32%
+      ),
+      radial-gradient(
+        circle at 4% 96%,
+        rgba(37, 99, 235, 0.5),
+        transparent 38%
+      ),
+      linear-gradient(145deg, #0f172a, #1e3a8a 66%, #1d4ed8);
+    box-shadow: 0 22px 55px rgba(15, 23, 42, 0.2);
+  }
+
+  .shop-public-logo {
+    width: 84px;
+    height: 84px;
+    border-width: 4px;
+    box-shadow:
+      0 14px 34px rgba(15, 23, 42, 0.28),
+      0 0 0 6px rgba(255, 255, 255, 0.08);
+  }
+
+  .shop-public-logo svg {
+    width: 36px;
+    height: 36px;
+  }
+
+  .shop-public-content {
+    width: 100%;
+  }
+
+  .shop-public-content > .badge {
+    padding: 7px 10px;
+    font-size: 10px;
+    letter-spacing: 0.7px;
+  }
+
   .shop-public-heading {
     align-items: flex-start;
     flex-direction: column;
+    gap: 14px;
+  }
+
+  .shop-public-hero h1 {
+    margin: 8px 0 0;
+    font-size: clamp(30px, 9vw, 38px);
+    line-height: 1.04;
+    letter-spacing: -1.1px;
   }
 
   .shop-public-heading button {
+    width: 100%;
+    min-width: 0;
     min-height: 42px;
+    padding: 0 12px;
+  }
+
+  .shop-public-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+
+  .shop-public-hero p {
+    margin: 14px 0 0;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .shop-public-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .shop-public-metrics span {
+    justify-content: center;
+    min-width: 0;
+    min-height: 42px;
+    padding: 8px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    text-align: center;
+    line-height: 1.25;
+  }
+
+  .shop-public-metrics span:last-child {
+    grid-column: 1 / -1;
   }
 }
 
@@ -6362,5 +6488,294 @@ th {
 
   .footer-bottom {
     flex-direction: column !important;
+  }
+}
+.legal-hero {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(120px, 14vw, 170px) 6% 80px;
+  color: #ffffff;
+  background:
+    radial-gradient(circle at 82% 12%, rgba(245, 158, 11, 0.28), transparent 28%),
+    linear-gradient(135deg, #0f172a, #1e3a8a 62%, #2563eb);
+}
+
+.legal-hero > div {
+  width: min(860px, 100%);
+}
+
+.legal-hero span,
+.legal-hero small {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 850;
+}
+
+.legal-hero span {
+  color: #fbbf24;
+}
+
+.legal-hero h1 {
+  max-width: 760px;
+  margin: 16px 0 12px;
+  font-size: clamp(2.3rem, 6vw, 5rem);
+  letter-spacing: -0.06em;
+  line-height: 0.98;
+}
+
+.legal-hero p {
+  max-width: 680px;
+  color: #dbeafe;
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.7;
+}
+
+.legal-hero small {
+  margin-top: 12px;
+  color: #cbd5e1;
+}
+
+.legal-introduction {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  align-items: center;
+  gap: 32px;
+}
+
+.legal-introduction > div:first-child > span {
+  color: #2563eb;
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.legal-introduction h2 {
+  max-width: 720px;
+  margin: 10px 0;
+  color: #0f172a;
+  font-size: clamp(1.8rem, 4vw, 3.3rem);
+  letter-spacing: -0.055em;
+  line-height: 1.05;
+}
+
+.legal-introduction p {
+  max-width: 720px;
+  margin: 0;
+  color: #64748b;
+  line-height: 1.72;
+}
+
+.legal-principles {
+  display: grid;
+  gap: 10px;
+}
+
+.legal-principles article {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 15px;
+  border: 1px solid #dbeafe;
+  border-radius: 19px;
+  background: linear-gradient(145deg, #ffffff, #eff6ff);
+}
+
+.legal-principles article > svg {
+  width: 24px;
+  color: #2563eb;
+}
+
+.legal-principles article span {
+  display: grid;
+  gap: 2px;
+}
+
+.legal-principles small {
+  color: #64748b;
+}
+
+.legal-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  align-items: start;
+  gap: 28px;
+}
+
+.legal-layout aside {
+  position: sticky;
+  top: 110px;
+  padding: 25px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 26px;
+  background: linear-gradient(145deg, #ffffff, #eff6ff);
+  box-shadow: 0 22px 55px rgba(15, 23, 42, 0.09);
+}
+
+.legal-layout aside nav {
+  display: grid;
+  gap: 3px;
+  max-height: 48vh;
+  margin: 15px 0;
+  padding-right: 5px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.legal-layout aside nav a {
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.legal-layout aside nav a:hover {
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.legal-layout aside > svg {
+  width: 42px;
+  height: 42px;
+  color: #2563eb;
+}
+
+.legal-layout aside h2 {
+  margin: 14px 0 8px;
+  color: #0f172a;
+}
+
+.legal-layout aside p,
+.legal-sections p {
+  color: #64748b;
+  line-height: 1.72;
+}
+
+.legal-layout aside a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  color: #2563eb;
+  font-weight: 900;
+}
+
+.legal-sections {
+  display: grid;
+  gap: 14px;
+}
+
+.legal-sections article {
+  scroll-margin-top: 110px;
+  padding: 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 14px 38px rgba(15, 23, 42, 0.055);
+}
+
+.legal-sections h2,
+.legal-sections p {
+  margin: 0;
+}
+
+.legal-sections article p + p {
+  margin-top: 11px;
+}
+
+.legal-sections h2 {
+  margin-bottom: 8px;
+  color: #0f172a;
+  font-size: 1.15rem;
+}
+
+.legal-sections ul {
+  display: grid;
+  gap: 8px;
+  margin: 15px 0 0;
+  padding-left: 22px;
+  color: #475569;
+  line-height: 1.55;
+}
+
+.legal-loading {
+  padding: 14px 18px;
+  border-radius: 16px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-weight: 850;
+}
+
+.legal-regulatory-note {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  padding: 21px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 22px;
+  background: linear-gradient(145deg, #eff6ff, #ffffff);
+}
+
+.legal-regulatory-note > svg {
+  width: 30px;
+  height: 30px;
+  color: #2563eb;
+}
+
+.legal-regulatory-note h3,
+.legal-regulatory-note p {
+  margin: 0;
+}
+
+.legal-regulatory-note h3 {
+  margin-bottom: 5px;
+  color: #0f172a;
+}
+
+.legal-regulatory-note p {
+  color: #64748b;
+  line-height: 1.65;
+}
+
+.legal-notice {
+  padding: 18px 20px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 19px;
+  color: #92400e;
+  background: #fffbeb;
+  font-weight: 750;
+  line-height: 1.55;
+}
+
+@media (max-width: 760px) {
+  .legal-hero {
+    padding: 100px 18px 55px;
+  }
+
+  .legal-layout {
+    grid-template-columns: 1fr;
+    padding-inline: 14px;
+  }
+
+  .legal-introduction {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding-inline: 18px;
+  }
+
+  .legal-layout aside {
+    position: static;
+  }
+
+  .legal-layout aside nav {
+    max-height: 250px;
+  }
+
+  .legal-sections article {
+    padding: 19px;
+    border-radius: 20px;
   }
 }

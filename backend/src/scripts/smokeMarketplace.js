@@ -15,7 +15,9 @@ const apiOrigin = `http://localhost:${port}/api`;
 const password = "VinnHTSmoke2026!";
 let server;
 let database;
-let paymentProofPath;
+let serverError = "";
+let serverOutput = "";
+const paymentProofPaths = [];
 
 const rootConnectionOptions = {
   host: process.env.DB_HOST || "localhost",
@@ -26,7 +28,7 @@ const rootConnectionOptions = {
 };
 
 const waitForApi = async () => {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
       const response = await fetch(`${apiOrigin}/health`);
       if (response.ok) return;
@@ -35,10 +37,20 @@ const waitForApi = async () => {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error("Le serveur de simulation n'a pas démarré.");
+  const diagnostics = [serverError.trim(), serverOutput.trim()]
+    .filter(Boolean)
+    .join("\n");
+  throw new Error(
+    `Le serveur de simulation n'a pas démarré.${
+      diagnostics ? `\n${diagnostics}` : ""
+    }`,
+  );
 };
 
-const request = async (route, { method = "GET", cookie, body } = {}) => {
+const request = async (
+  route,
+  { method = "GET", cookie, body, expectedStatus = null } = {},
+) => {
   const headers = {};
   let payload = body;
 
@@ -56,6 +68,11 @@ const request = async (route, { method = "GET", cookie, body } = {}) => {
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
 
+  if (expectedStatus !== null) {
+    assert.equal(response.status, expectedStatus);
+    return { data, cookie: response.headers.get("set-cookie")?.split(";")[0] };
+  }
+
   if (!response.ok) {
     throw new Error(`${method} ${route}: ${response.status} ${data?.message || text}`);
   }
@@ -69,7 +86,16 @@ const request = async (route, { method = "GET", cookie, body } = {}) => {
 const register = async ({ name, email, phone }) =>
   request("/auth/register", {
     method: "POST",
-    body: { name, email, phone, password },
+    body: {
+      name,
+      email,
+      phone,
+      password,
+      activityStatus: "other",
+      activityDetails: "Compte de simulation VinnHT",
+      termsAccepted: true,
+      termsVersion: "2026-06-28-v5",
+    },
   });
 
 const login = async (email) =>
@@ -110,12 +136,19 @@ const startTemporaryServer = async () => {
       FRONTEND_URL: "http://localhost:3000",
       IMAGE_STORAGE: "local",
       COMMISSION_RATE: "0",
+      PAYMENT_MODEL: "protected_vinnht",
+      VINNHT_MONCASH_NUMBER: "37000000",
+      VINNHT_MONCASH_ACCOUNT_NAME: "VinnHT Smoke",
       JWT_SECRET: "vinnht-smoke-secret-only-for-local-validation",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  let serverError = "";
+  serverError = "";
+  serverOutput = "";
+  server.stdout.on("data", (chunk) => {
+    serverOutput += chunk.toString();
+  });
   server.stderr.on("data", (chunk) => {
     serverError += chunk.toString();
   });
@@ -132,12 +165,17 @@ const runFlow = async () => {
   const adminEmail = `smoke.admin.${suffix}@vinnht.test`;
   const managerEmail = `smoke.manager.${suffix}@vinnht.test`;
   const sellerEmail = `smoke.seller.${suffix}@vinnht.test`;
+  const secondSellerEmail = `smoke.seller.second.${suffix}@vinnht.test`;
   const buyerEmail = `smoke.buyer.${suffix}@vinnht.test`;
   const driverEmail = `smoke.driver.${suffix}@vinnht.test`;
+  const secondDriverEmail = `smoke.driver.second.${suffix}@vinnht.test`;
   const managerHash = await bcrypt.hash(password, 12);
 
   const anonymousSession = await request("/auth/me");
   assert.equal(anonymousSession.data.user, null);
+  const legalTerms = await request("/legal/terms");
+  assert.equal(legalTerms.data.version, "2026-06-28-v5");
+  assert(legalTerms.data.sections.length >= 20);
 
   const [managerResult] = await database.query(
     `INSERT INTO users (name,email,password_hash,role,status)
@@ -165,9 +203,11 @@ const runFlow = async () => {
   });
   const sellerRequest = new FormData();
   sellerRequest.append("businessName", "Boutique Smoke VinnHT");
+  sellerRequest.append("moncashNumber", "37000001");
+  sellerRequest.append("moncashAccountName", "Vendeur Smoke");
   sellerRequest.append("description", "Boutique temporaire pour la validation finale.");
   sellerRequest.append("termsAccepted", "true");
-  sellerRequest.append("termsVersion", "2026-06-24-v2");
+  sellerRequest.append("termsVersion", "2026-06-28-v5");
   await request("/seller/requests", {
     method: "POST",
     cookie: sellerRegistration.cookie,
@@ -188,11 +228,41 @@ const runFlow = async () => {
   const seller = await login(sellerEmail);
   assert(seller.data.user.roles.includes("seller"));
 
+  const [secondSellerResult] = await database.query(
+    `INSERT INTO users (name,email,phone,password_hash,role,status)
+     VALUES (?,?,?,?,'seller','active')`,
+    ["Deuxième vendeur Smoke", secondSellerEmail, "37000004", managerHash],
+  );
+  await database.query(
+    "INSERT INTO user_roles (user_id,role) VALUES (?,'client'),(?,'seller')",
+    [secondSellerResult.insertId, secondSellerResult.insertId],
+  );
+  await database.query(
+    `INSERT INTO seller_profiles
+      (seller_id,shop_name,description,whatsapp,moncash_number,moncash_account_name,
+       pickup_address,opening_hours,delivery_zones,status)
+     VALUES (?,?,?,?,?,?,?,?,?,'active')`,
+    [
+      secondSellerResult.insertId,
+      "Boutique Livraison Smoke",
+      "Deuxième boutique temporaire pour valider une commande mixte.",
+      "37000004",
+      "37000004",
+      "Deuxième vendeur Smoke",
+      "Pétion-Ville, Ouest",
+      "Lun-Sam 9h-17h",
+      "Ouest",
+    ],
+  );
+  const secondSeller = await login(secondSellerEmail);
+
   const shopForm = new FormData();
   shopForm.append("shopName", "Boutique Smoke VinnHT");
   shopForm.append("category", "Électronique");
   shopForm.append("description", "Validation automatique du parcours VinnHT.");
   shopForm.append("whatsapp", "37000001");
+  shopForm.append("moncashNumber", "37000001");
+  shopForm.append("moncashAccountName", "Vendeur Smoke");
   shopForm.append("pickupAddress", "Delmas 33, Port-au-Prince");
   shopForm.append("openingHours", "Lun-Sam 8h-18h");
   shopForm.append("deliveryZones", "Ouest");
@@ -225,6 +295,23 @@ const runFlow = async () => {
       imageUrl: "https://images.unsplash.com/photo-1523275335684-37898b6baf30",
     },
   });
+  const secondProduct = await request("/products", {
+    method: "POST",
+    cookie: secondSeller.cookie,
+    body: {
+      name: "Produit Livraison Smoke",
+      categoryId: category.id,
+      description: "Produit temporaire de la deuxième boutique.",
+      price: 1800,
+      stock: 4,
+      attributes: {
+        condition: "Neuf",
+      },
+      department: "Ouest",
+      city: "Pétion-Ville",
+      imageUrl: "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
+    },
+  });
 
   await request("/seller/delivery-drivers", {
     method: "POST",
@@ -246,12 +333,74 @@ const runFlow = async () => {
     "UPDATE users SET profile_image_url='/uploads/profiles/smoke-driver.png' WHERE id=?",
     [driverUser.id],
   );
-
   const buyer = await register({
     name: "Client Smoke",
     email: buyerEmail,
     phone: "37000003",
   });
+  assert.equal(buyer.data.user.activity_status, "other");
+  const [[buyerTermsAcceptance]] = await database.query(
+    `SELECT uta.terms_version,uta.accepted_at,uta.terms_snapshot
+     FROM user_terms_acceptances uta
+     JOIN users u ON u.id=uta.user_id
+     WHERE u.email=?`,
+    [buyerEmail],
+  );
+  assert.equal(buyerTermsAcceptance.terms_version, "2026-06-28-v5");
+  assert(buyerTermsAcceptance.accepted_at);
+  assert(buyerTermsAcceptance.terms_snapshot);
+  const followed = await request(`/shops/${seller.data.user.id}/follow`, {
+    method: "POST",
+    cookie: buyer.cookie,
+  });
+  assert.equal(followed.data.following, true);
+  assert.equal(followed.data.followerCount, 1);
+  const followState = await request(`/shops/${seller.data.user.id}/follow`, {
+    cookie: buyer.cookie,
+  });
+  assert.equal(followState.data.following, true);
+
+  const followedProduct = await request("/products", {
+    method: "POST",
+    cookie: seller.cookie,
+    body: {
+      name: "Nouveauté boutique suivie Smoke",
+      categoryId: category.id,
+      description: "Produit temporaire pour valider les notifications d’abonnement.",
+      price: 2100,
+      stock: 3,
+      attributes: { condition: "Neuf" },
+      department: "Ouest",
+      city: "Delmas",
+      imageUrl: "https://images.unsplash.com/photo-1523275335684-37898b6baf30",
+    },
+  });
+  await request(`/seller/products/${followedProduct.data.id}`, {
+    method: "PATCH",
+    cookie: seller.cookie,
+    body: {
+      isFeatured: true,
+      promotionalPrice: 1700,
+      offerEndsAt: new Date(Date.now() + 86_400_000).toISOString(),
+    },
+  });
+  const followerNotifications = await request("/notifications?role=client", {
+    cookie: buyer.cookie,
+  });
+  assert(
+    followerNotifications.data.some(
+      (notification) =>
+        notification.type === "shop.new_product" &&
+        Number(notification.entity_id) === Number(followedProduct.data.id),
+    ),
+  );
+  assert(
+    followerNotifications.data.some(
+      (notification) =>
+        notification.type === "shop.special_offer" &&
+        Number(notification.entity_id) === Number(followedProduct.data.id),
+    ),
+  );
   const supportConversation = await request("/messages/support", {
     method: "POST",
     cookie: buyer.cookie,
@@ -318,11 +467,18 @@ const runFlow = async () => {
     cookie: buyer.cookie,
     body: {
       items: [{ productId: createdProduct.data.id, quantity: 2 }],
+      fulfillmentMethod: "delivery",
       deliveryAddress: "Pétion-Ville, rue de la validation numéro 10",
     },
   });
-  assert.equal(order.data.total, 5000);
+  assert.equal(order.data.total, 5500);
+  assert.equal(order.data.deliveryFee, 500);
+  assert.equal(order.data.fulfillmentMethod, "delivery");
   assert.equal(order.data.paymentInstructions.length, 1);
+  assert.equal(order.data.paymentAccount.moncashNumber, "37000000");
+  assert.equal(order.data.paymentInstructions[0].moncash_number, "37000000");
+  assert.equal(Number(order.data.paymentInstructions[0].delivery_fee), 500);
+  assert.equal(Number(order.data.paymentInstructions[0].amount), 5500);
   const cartAfterOrder = await request("/cart", { cookie: buyer.cookie });
   assert.equal(cartAfterOrder.data.length, 0);
 
@@ -333,12 +489,12 @@ const runFlow = async () => {
   const proofForm = new FormData();
   proofForm.append("paymentProof", new Blob([png], { type: "image/png" }), "preuve.png");
   proofForm.append("note", "Preuve de simulation VinnHT");
-  const proof = await request(`/payments/${order.data.id}/direct-proof`, {
+  const proof = await request(`/payments/${order.data.id}/proof`, {
     method: "PATCH",
     cookie: buyer.cookie,
     body: proofForm,
   });
-  paymentProofPath = proof.data.proofUrl;
+  paymentProofPaths.push(proof.data.proofUrl);
 
   const sellerOrders = await request("/seller/orders", { cookie: seller.cookie });
   const sale = sellerOrders.data.find(
@@ -346,10 +502,21 @@ const runFlow = async () => {
   );
   assert(sale, "La vente vendeur n'a pas été créée.");
 
-  await request(`/seller/sales/${sale.sale_id}/payment/validate`, {
+  await request(`/admin/payments/${order.data.id}/validate`, {
     method: "PATCH",
+    cookie: admin.cookie,
+  });
+  const sellerNotifications = await request("/notifications?role=seller", {
     cookie: seller.cookie,
   });
+  assert(
+    sellerNotifications.data.some(
+      (notification) =>
+        notification.type === "order.paid" &&
+        Number(notification.entity_id) === Number(order.data.id),
+    ),
+    "Le vendeur n'a pas reçu la notification de commande payée.",
+  );
   await request(`/seller/sales/${sale.sale_id}/status`, {
     method: "PATCH",
     cookie: seller.cookie,
@@ -398,11 +565,41 @@ const runFlow = async () => {
   const orderDetail = await request(`/orders/${order.data.id}`, {
     cookie: buyer.cookie,
   });
-  assert.equal(orderDetail.data.status, "delivered");
+  assert.equal(orderDetail.data.status, "shipped");
   assert.equal(orderDetail.data.payment_status, "paid");
   assert.equal(orderDetail.data.deliveryPeople.length, 1);
   assert.equal(orderDetail.data.deliveryPeople[0].delivery_name, "Livreur Smoke");
   assert(orderDetail.data.deliveryPeople[0].delivery_profile_image_url);
+  assert.equal(orderDetail.data.deliveryPeople[0].client_confirmed_at, null);
+
+  await request(
+    `/orders/${order.data.id}/deliveries/${mission.id}/confirm-receipt`,
+    {
+      method: "PATCH",
+      cookie: buyer.cookie,
+      body: { signatureAcknowledged: true },
+    },
+  );
+
+  const confirmedOrderDetail = await request(`/orders/${order.data.id}`, {
+    cookie: buyer.cookie,
+  });
+  assert.equal(confirmedOrderDetail.data.status, "delivered");
+  assert(confirmedOrderDetail.data.deliveryPeople[0].client_confirmed_at);
+
+  const payoutsAfterDelivery = await request("/admin/payouts", {
+    cookie: admin.cookie,
+  });
+  const deliveryPayout = payoutsAfterDelivery.data.find(
+    (payout) => Number(payout.order_id) === Number(order.data.id),
+  );
+  assert(deliveryPayout);
+  assert.equal(deliveryPayout.status, "processing");
+  await request(`/admin/payouts/${deliveryPayout.id}/paid`, {
+    method: "PATCH",
+    cookie: admin.cookie,
+    body: { reference: "MONCASH-SMOKE-DELIVERY" },
+  });
 
   const [[productAfterOrder]] = await database.query(
     "SELECT stock FROM products WHERE id=?",
@@ -410,20 +607,187 @@ const runFlow = async () => {
   );
   assert.equal(productAfterOrder.stock, 3);
 
+  await request(`/cart/${createdProduct.data.id}`, {
+    method: "PUT",
+    cookie: buyer.cookie,
+    body: { quantity: 1 },
+  });
+  const pickupOrder = await request("/orders", {
+    method: "POST",
+    cookie: buyer.cookie,
+    body: {
+      items: [{ productId: createdProduct.data.id, quantity: 1 }],
+      fulfillmentMethod: "pickup",
+    },
+  });
+  assert.equal(pickupOrder.data.total, 2500);
+  assert.equal(pickupOrder.data.deliveryFee, 0);
+  assert.equal(pickupOrder.data.fulfillmentMethod, "pickup");
+  assert.equal(
+    pickupOrder.data.paymentInstructions[0].pickup_address,
+    "Delmas 33, Port-au-Prince",
+  );
+
+  const pickupProofForm = new FormData();
+  pickupProofForm.append(
+    "paymentProof",
+    new Blob([png], { type: "image/png" }),
+    "preuve-retrait.png",
+  );
+  pickupProofForm.append("note", "Paiement du retrait VinnHT");
+  const pickupProof = await request(
+    `/payments/${pickupOrder.data.id}/proof`,
+    {
+      method: "PATCH",
+      cookie: buyer.cookie,
+      body: pickupProofForm,
+    },
+  );
+  paymentProofPaths.push(pickupProof.data.proofUrl);
+
+  const pickupSellerOrders = await request("/seller/orders", { cookie: seller.cookie });
+  const pickupSale = pickupSellerOrders.data.find(
+    (item) => Number(item.order_id) === Number(pickupOrder.data.id),
+  );
+  assert(pickupSale);
+  assert.equal(pickupSale.fulfillment_method, "pickup");
+  await request(`/admin/payments/${pickupOrder.data.id}/validate`, {
+    method: "PATCH",
+    cookie: admin.cookie,
+  });
+  await request(`/seller/sales/${pickupSale.sale_id}/status`, {
+    method: "PATCH",
+    cookie: seller.cookie,
+    body: { status: "preparing" },
+  });
+  await request(`/seller/sales/${pickupSale.sale_id}/status`, {
+    method: "PATCH",
+    cookie: seller.cookie,
+    body: { status: "ready" },
+  });
+  await request(`/seller/sales/${pickupSale.sale_id}/pickup/handover`, {
+    method: "PATCH",
+    cookie: seller.cookie,
+  });
+
+  const pickupDetailBeforeConfirmation = await request(
+    `/orders/${pickupOrder.data.id}`,
+    { cookie: buyer.cookie },
+  );
+  assert(pickupDetailBeforeConfirmation.data.paymentInstructions[0].pickup_handed_over_at);
+  assert.equal(
+    pickupDetailBeforeConfirmation.data.paymentInstructions[0].pickup_client_confirmed_at,
+    null,
+  );
+  await request(
+    `/orders/${pickupOrder.data.id}/pickups/${pickupSale.sale_id}/confirm-receipt`,
+    {
+      method: "PATCH",
+      cookie: buyer.cookie,
+      body: { receiptAcknowledged: true },
+    },
+  );
+  const confirmedPickupOrder = await request(`/orders/${pickupOrder.data.id}`, {
+    cookie: buyer.cookie,
+  });
+  assert.equal(confirmedPickupOrder.data.status, "delivered");
+  assert(confirmedPickupOrder.data.paymentInstructions[0].pickup_client_confirmed_at);
+  const payoutsAfterPickup = await request("/admin/payouts", {
+    cookie: admin.cookie,
+  });
+  const pickupPayout = payoutsAfterPickup.data.find(
+    (payout) => Number(payout.order_id) === Number(pickupOrder.data.id),
+  );
+  assert(pickupPayout);
+  assert.equal(pickupPayout.status, "processing");
+
+  await request(`/cart/${createdProduct.data.id}`, {
+    method: "PUT",
+    cookie: buyer.cookie,
+    body: { quantity: 1 },
+  });
+  await request(`/cart/${secondProduct.data.id}`, {
+    method: "PUT",
+    cookie: buyer.cookie,
+    body: { quantity: 1 },
+  });
+  const blockedDelivery = await request("/orders", {
+    method: "POST",
+    cookie: buyer.cookie,
+    expectedStatus: 409,
+    body: {
+      items: [{ productId: secondProduct.data.id, quantity: 1 }],
+      fulfillmentChoices: [
+        { sellerId: secondSeller.data.user.id, method: "delivery" },
+      ],
+      deliveryAddress: "Delmas 75, Port-au-Prince, Ouest",
+    },
+  });
+  assert.match(blockedDelivery.data.message, /aucun livreur actif/i);
+
+  await request("/seller/delivery-drivers", {
+    method: "POST",
+    cookie: secondSeller.cookie,
+    body: {
+      name: "Deuxième livreur Smoke",
+      email: secondDriverEmail,
+      phone: "37000005",
+      password,
+      zones: "Ouest",
+      vehicleType: "Moto",
+    },
+  });
+
+  const mixedOrder = await request("/orders", {
+    method: "POST",
+    cookie: buyer.cookie,
+    body: {
+      items: [
+        { productId: createdProduct.data.id, quantity: 1 },
+        { productId: secondProduct.data.id, quantity: 1 },
+      ],
+      fulfillmentChoices: [
+        { sellerId: seller.data.user.id, method: "pickup" },
+        { sellerId: secondSeller.data.user.id, method: "delivery" },
+      ],
+      deliveryAddress: "Delmas 75, Port-au-Prince, Ouest",
+    },
+  });
+  assert.equal(mixedOrder.data.fulfillmentMethod, "mixed");
+  assert.equal(mixedOrder.data.deliveryFee, 500);
+  assert.equal(mixedOrder.data.total, 4800);
+  assert.equal(mixedOrder.data.paymentInstructions.length, 2);
+  const mixedPickupInstruction = mixedOrder.data.paymentInstructions.find(
+    (instruction) => instruction.fulfillment_method === "pickup",
+  );
+  const mixedDeliveryInstruction = mixedOrder.data.paymentInstructions.find(
+    (instruction) => instruction.fulfillment_method === "delivery",
+  );
+  assert(mixedPickupInstruction);
+  assert(mixedDeliveryInstruction);
+  assert.equal(Number(mixedPickupInstruction.delivery_fee), 0);
+  assert.equal(Number(mixedDeliveryInstruction.delivery_fee), 500);
+  assert.equal(mixedDeliveryInstruction.delivery_address, "Delmas 75, Port-au-Prince, Ouest");
+
   const report = await request("/admin/reports?range=7d", {
     cookie: manager.cookie,
   });
-  assert.equal(Number(report.data.stats.orders), 1);
+  assert.equal(Number(report.data.stats.orders), 3);
 
   console.log("✓ Demande vendeur approuvée");
   console.log("✓ Détection de session anonyme sans erreur 401");
   console.log("✓ Boutique et produit créés");
+  console.log("✓ Suivi boutique et alertes nouveaux produits/offres validés");
   console.log("✓ Panier, commande et stock validés");
   console.log("✓ Message support client reçu et notifié côté admin");
   console.log("✓ Téléphone et identité du formulaire Contact visibles côté admin");
-  console.log("✓ Preuve MonCash validée par le vendeur");
+  console.log("✓ Preuve MonCash validée uniquement par l’admin VinnHT");
   console.log("✓ Préparation et assignation au livreur validées");
   console.log("✓ Signature et livraison finale validées");
+  console.log("✓ Retrait gratuit et double confirmation validés");
+  console.log("✓ Fonds vendeur bloqués, libérés puis versés après réception");
+  console.log("✓ Retrait et livraison combinés dans une même commande");
+  console.log("✓ Livraison bloquée sans livreur propre à la boutique");
   console.log("✓ Photo du livreur visible côté client");
   console.log("✓ Rapport manager mis à jour");
 };
@@ -433,12 +797,16 @@ try {
   await startTemporaryServer();
   await runFlow();
   console.log("\nSimulation marketplace VinnHT réussie.");
+} catch (error) {
+  if (serverError) console.error(serverError);
+  throw error;
 } finally {
   if (server && !server.killed) {
     server.kill();
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
-  if (paymentProofPath?.startsWith("/uploads/")) {
+  for (const paymentProofPath of paymentProofPaths) {
+    if (!paymentProofPath?.startsWith("/uploads/")) continue;
     await fs
       .unlink(path.join(backendDirectory, paymentProofPath.replace(/^\//, "")))
       .catch(() => {});

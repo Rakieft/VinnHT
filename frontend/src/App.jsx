@@ -11,9 +11,10 @@ import {
   CircleUserRound,
   Clock3,
   CheckCircle2,
+  CreditCard,
   Download,
+  FileSignature,
   Flame,
-  GraduationCap,
   Headphones,
   Heart,
   LayoutDashboard,
@@ -26,6 +27,7 @@ import {
   Package,
   Phone,
   Search,
+  Scale,
   Send,
   Share2,
   Settings,
@@ -76,6 +78,8 @@ import "./styles/auth-search.css";
 import "./styles/brand-auth-fixes.css";
 import "./styles/dashboard-navigation.css";
 
+const USER_TERMS_VERSION = "2026-06-28-v5";
+
 const lazyNamed = (loader, exportName) =>
   React.lazy(() => loader().then((module) => ({ default: module[exportName] })));
 
@@ -114,6 +118,7 @@ const loadAdminFlow = () => import("./components/AdminFlow.jsx");
 const AdminCategoriesContent = lazyNamed(loadAdminFlow, "AdminCategoriesContent");
 const AdminContactRequestsContent = lazyNamed(loadAdminFlow, "AdminContactRequestsContent");
 const AdminDashboardContent = lazyNamed(loadAdminFlow, "AdminDashboardContent");
+const AdminPaymentsContent = lazyNamed(loadAdminFlow, "AdminPaymentsContent");
 const AdminProfileContent = lazyNamed(loadAdminFlow, "AdminProfileContent");
 const AdminProductsContent = lazyNamed(loadAdminFlow, "AdminProductsContent");
 const AdminResourceContent = lazyNamed(loadAdminFlow, "AdminResourceContent");
@@ -809,10 +814,11 @@ function Footer() {
 
       <div>
         <h4>Confiance</h4>
-        <span>Paiement direct vendeur</span>
+        <span>Paiement protégé VinnHT</span>
         <span>Preuve MonCash suivie</span>
         <span>Livraison assignée</span>
         <span>Support local VinnHT</span>
+        <Link to="/terms">Conditions d’utilisation</Link>
       </div>
 
       <div className="footer-bottom">
@@ -1217,7 +1223,7 @@ function Contact() {
     ],
     [
       "Comment fonctionne le paiement ",
-      "Au lancement, le client paie directement le vendeur sur son MonCash personnel puis envoie une preuve dans VinnHT.",
+      "Le client paie le compte MonCash VinnHT. Les fonds restent protégés jusqu’à la confirmation de réception.",
       "payment",
     ],
     [
@@ -1753,6 +1759,161 @@ function About() {
           </Button>
         </div>
       </AnimatedSection>
+    </PublicLayout>
+  );
+}
+
+function Terms() {
+  const fallbackSections = [
+    [
+      "1. Objet et acceptation",
+      "VinnHT est une marketplace qui met en relation des clients, des vendeurs et des livreurs en Haïti. En créant un compte, vous confirmez avoir lu et accepté la version des présentes conditions affichée au moment de l’inscription.",
+    ],
+    [
+      "2. Compte et sécurité",
+      "Vous devez fournir des informations exactes, protéger votre mot de passe et signaler rapidement toute utilisation non autorisée. VinnHT peut demander une vérification supplémentaire pour protéger la communauté.",
+    ],
+    [
+      "3. Produits et boutiques",
+      "Les vendeurs restent responsables de la légalité, de l’authenticité, de la qualité, du prix, du stock et de la description de leurs produits. Les contenus trompeurs, dangereux, contrefaits ou interdits peuvent être retirés sans préavis.",
+    ],
+    [
+      "4. Commandes et prix",
+      "Le client doit vérifier le produit, la quantité, le département, les frais et le montant total avant de commander. Une commande peut être annulée lorsqu’un article est indisponible, frauduleux ou impossible à livrer.",
+    ],
+    [
+      "5. Paiement protégé VinnHT",
+      "Cette protection s’applique uniquement aux commandes qui affichent clairement la mention Paiement protégé VinnHT. Pour ces commandes, le paiement est reçu par le canal professionnel indiqué par VinnHT et le vendeur ne peut pas disposer des fonds avant la confirmation de réception prévue par le parcours de livraison.",
+    ],
+    [
+      "6. Paiement central VinnHT",
+      "Le client paie uniquement le compte MonCash VinnHT affiché au checkout. Le vendeur ne reçoit pas les fonds avant la confirmation de réception et ne peut pas valider lui-même la preuve.",
+    ],
+    [
+      "7. Livraison et double confirmation",
+      "À la remise du colis, le destinataire signe devant le livreur. Cette signature ne finalise pas seule la vente. Le client doit ensuite se connecter à son compte VinnHT et confirmer qu’il a signé et reçu la livraison.",
+    ],
+    [
+      "8. Réclamations et remboursements",
+      "Le client doit signaler rapidement un colis manquant, endommagé, non conforme ou une livraison contestée. VinnHT peut bloquer la finalisation, demander des preuves et appliquer les règles de remboursement communiquées pour la commande.",
+    ],
+    [
+      "9. Comportements interdits",
+      "La fraude, l’usurpation d’identité, les fausses preuves, la manipulation des avis, le harcèlement et les tentatives de contourner les protections de VinnHT sont interdits.",
+    ],
+    [
+      "10. Données personnelles",
+      "VinnHT utilise les informations nécessaires à la création du compte, aux commandes, aux messages, aux paiements, à la livraison, à la prévention de la fraude et au support. Les données ne doivent pas être réutilisées par les vendeurs ou livreurs à d’autres fins.",
+    ],
+    [
+      "11. Suspension",
+      "VinnHT peut limiter, suspendre ou fermer un compte en cas de fraude présumée, danger pour les utilisateurs, violation des conditions ou obligation légale. L’utilisateur peut contacter le support pour demander un examen de la décision.",
+    ],
+    [
+      "12. Évolution des conditions",
+      "Une nouvelle acceptation pourra être demandée lorsqu’une modification importante affecte les paiements, les responsabilités ou les données personnelles. La version applicable est enregistrée avec la date d’acceptation.",
+    ],
+  ].map(([title, text], index) => ({
+    id: `section-${index + 1}`,
+    title,
+    paragraphs: [text],
+  }));
+  const [termsDocument, setTermsDocument] = useState(null);
+  const [termsLoading, setTermsLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .get("/legal/terms")
+      .then(({ data }) => setTermsDocument(data))
+      .catch(() => setTermsDocument(null))
+      .finally(() => setTermsLoading(false));
+  }, []);
+
+  const sections = termsDocument?.sections || fallbackSections;
+  const effectiveDate = termsDocument?.effectiveDate
+    ? new Date(`${termsDocument.effectiveDate}T00:00:00`).toLocaleDateString("fr-HT", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : "28 juin 2026";
+
+  return (
+    <PublicLayout>
+      <section className="legal-hero">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+          <span><ShieldCheck /> Confiance et sécurité</span>
+          <h1>Conditions d’utilisation de VinnHT</h1>
+          <p>
+            Un cadre clair pour acheter, vendre, payer, livrer et résoudre les difficultés
+            sur une marketplace conçue pour les réalités d’Haïti.
+          </p>
+          <small>
+            Version {termsDocument?.version || USER_TERMS_VERSION} · Applicable à partir du {effectiveDate}
+          </small>
+        </motion.div>
+      </section>
+      <section className="legal-introduction section">
+        <div>
+          <span>Document contractuel VinnHT</span>
+          <h2>Bienvenue. Commençons par les règles essentielles.</h2>
+          <p>
+            {termsDocument?.introduction ||
+              "Ces conditions encadrent l’accès à VinnHT et l’utilisation de ses services en Haïti."}
+          </p>
+        </div>
+        <div className="legal-principles">
+          <article><ShieldCheck /><span><b>Paiement clair</b><small>Protection indiquée avant de payer</small></span></article>
+          <article><FileSignature /><span><b>Double confirmation</b><small>Signature puis validation du client</small></span></article>
+          <article><Scale /><span><b>Règles haïtiennes</b><small>Différends traités en Haïti</small></span></article>
+        </div>
+      </section>
+      <section className="legal-layout section">
+        <aside>
+          <ShieldCheck />
+          <h2>Sommaire</h2>
+          <p>Choisissez une section pour accéder directement à la règle concernée.</p>
+          <nav>
+            {sections.map((section) => (
+              <a href={`#${section.id}`} key={section.id}>{section.title}</a>
+            ))}
+          </nav>
+          <Link to="/contact">Contacter le support <ArrowRight /></Link>
+        </aside>
+        <div className="legal-sections">
+          {termsLoading && <div className="legal-loading">Chargement de la version officielle...</div>}
+          {sections.map((section) => (
+            <article id={section.id} key={section.id}>
+              <h2>{section.title}</h2>
+              {(section.paragraphs || []).map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+              {section.bullets?.length > 0 && (
+                <ul>
+                  {section.bullets.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              )}
+            </article>
+          ))}
+          <div className="legal-regulatory-note">
+            <ShieldCheck />
+            <div>
+              <h3>Cadre local pris en compte</h3>
+              <p>
+                Les paiements électroniques doivent être exécutés avec un fournisseur autorisé
+                et dans le respect des exigences applicables de la Banque de la République
+                d’Haïti. La protection de la qualité et du consommateur relève notamment des
+                attributions du Ministère du Commerce et de l’Industrie.
+              </p>
+            </div>
+          </div>
+          <div className="legal-notice">
+            Version de préparation : l’identité légale complète de l’exploitant, son CIF, sa
+            patente, son adresse officielle et le contrat marchand MonCash doivent être ajoutés,
+            puis le document doit être validé par un juriste haïtien avant l’ouverture commerciale.
+          </div>
+        </div>
+      </section>
     </PublicLayout>
   );
 }
@@ -2384,6 +2545,7 @@ function ProductDetails() {
 }
 
 function ShopDetails() {
+  const { user } = useAuth();
   const { sellerId: shopParam } = useParams();
   const navigate = useNavigate();
   const sellerId = shopSellerIdFromParam(shopParam);
@@ -2393,6 +2555,15 @@ function ShopDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [shareFeedback, setShareFeedback] = useState("");
+  const [following, setFollowing] = useState(false);
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [followFeedback, setFollowFeedback] = useState("");
+  const canFollow = Boolean(
+    user &&
+    Number(user.id) !== Number(sellerId) &&
+    (user.role === "client" || user.roles?.includes("client")),
+  );
 
   useEffect(() => {
     if (!sellerId) {
@@ -2412,6 +2583,7 @@ function ShopDetails() {
       const loadedShop = shopResponse.data;
 
       setShop(loadedShop);
+      setFollowerCount(Number(loadedShop.follower_count || 0));
       setProducts(productsResponse.data);
       setReviews(reviewsResponse.data);
       const canonicalPath = shopPublicPath(loadedShop);
@@ -2431,6 +2603,46 @@ function ShopDetails() {
       setLoading(false);
     });
   }, [navigate, sellerId]);
+
+  useEffect(() => {
+    if (!canFollow) {
+      setFollowing(false);
+      return;
+    }
+
+    api
+      .get(`/shops/${sellerId}/follow`)
+      .then(({ data }) => {
+        setFollowing(Boolean(data.following));
+        setFollowerCount(Number(data.followerCount || 0));
+      })
+      .catch(() => setFollowing(false));
+  }, [canFollow, sellerId, user?.id]);
+
+  const toggleFollow = async () => {
+    if (!user) {
+      navigate("/login");
+      return;
+    }
+    if (!canFollow || followBusy) return;
+
+    setFollowBusy(true);
+    setFollowFeedback("");
+    try {
+      const { data } = following
+        ? await api.delete(`/shops/${sellerId}/follow`)
+        : await api.post(`/shops/${sellerId}/follow`);
+      setFollowing(Boolean(data.following));
+      setFollowerCount(Number(data.followerCount || 0));
+    } catch (requestError) {
+      setFollowFeedback(
+        requestError.response?.data?.message || "Action indisponible",
+      );
+      window.setTimeout(() => setFollowFeedback(""), 2400);
+    } finally {
+      setFollowBusy(false);
+    }
+  };
 
   const shareShop = async () => {
     if (!shop) return;
@@ -2503,16 +2715,38 @@ function ShopDetails() {
           <Badge tone="gold">Boutique vérifiée</Badge>
           <div className="shop-public-heading">
             <h1>{shop.shop_name || "Boutique VinnHT"}</h1>
-            <button type="button" onClick={shareShop}>
-              <Share2 />
-              <span>{shareFeedback || "Partager la boutique"}</span>
-            </button>
+            <div className="shop-public-actions">
+              {(!user || canFollow) && (
+                <button
+                  type="button"
+                  className={`shop-follow-button ${following ? "following" : ""}`}
+                  onClick={toggleFollow}
+                  disabled={followBusy}
+                  aria-pressed={following}
+                >
+                  {following ? <CheckCircle2 /> : <Bell />}
+                  <span>
+                    {followBusy
+                      ? "Patientez..."
+                      : followFeedback || (following ? "Boutique suivie" : "Suivre")}
+                  </span>
+                </button>
+              )}
+              <button type="button" onClick={shareShop}>
+                <Share2 />
+                <span>{shareFeedback || "Partager"}</span>
+              </button>
+            </div>
           </div>
           <p>
             {shop.description || "Découvrez tous les produits disponibles dans cette boutique."}
           </p>
           <div className="shop-public-metrics">
             <span>{products.length} produit(s) en ligne</span>
+            <span>
+              <Bell />
+              {followerCount} abonné{followerCount > 1 ? "s" : ""}
+            </span>
             <span>
               <Star />
               {Number(shop.review_count) > 0
@@ -2584,8 +2818,9 @@ function AuthPage({ register = false }) {
     name: "",
     phone: "",
     email: "",
-    educationStatus: "",
-    educationInstitution: "",
+    activityStatus: "",
+    activityOrganization: "",
+    activityDetails: "",
     password: "",
     confirmPassword: "",
     acceptedTerms: false,
@@ -2596,7 +2831,7 @@ function AuthPage({ register = false }) {
   const navigate = useNavigate();
 
   const passwordChecks = {
-    length: form.password.length >= 8,
+    length: form.password.length >= 10,
     uppercase: /[A-Z]/.test(form.password),
     number: /\d/.test(form.password),
   };
@@ -2625,11 +2860,12 @@ function AuthPage({ register = false }) {
             name: form.name,
             phone: form.phone,
             email: form.email,
-            educationStatus: form.educationStatus || null,
-            educationInstitution: form.educationStatus
-              ? form.educationInstitution
-              : null,
+            activityStatus: form.activityStatus,
+            activityOrganization: form.activityOrganization || null,
+            activityDetails: form.activityDetails || null,
             password: form.password,
+            termsAccepted: form.acceptedTerms,
+            termsVersion: USER_TERMS_VERSION,
           }
         : {
             email: form.email,
@@ -2712,30 +2948,37 @@ function AuthPage({ register = false }) {
                 </label>
 
                 <label className="education-select-field">
-                  <GraduationCap />
+                  <BriefcaseBusiness />
                   <span>
-                    <small>Statut scolaire ou universitaire</small>
+                    <small>Votre situation actuelle</small>
                     <select
-                      value={form.educationStatus}
+                      required
+                      value={form.activityStatus}
                       onChange={(e) => {
-                        const educationStatus = e.target.value;
+                        const activityStatus = e.target.value;
                         setForm({
                           ...form,
-                          educationStatus,
-                          educationInstitution: educationStatus
-                            ? form.educationInstitution
-                            : "",
+                          activityStatus,
+                          activityOrganization: "",
+                          activityDetails: "",
                         });
                       }}
                     >
-                      <option value="">Facultatif - ne pas préciser</option>
+                      <option value="">Sélectionnez votre statut</option>
                       <option value="school">Écolier / Écolière</option>
                       <option value="university">Étudiant / Étudiante</option>
+                      <option value="employee">Employé / Employée</option>
+                      <option value="entrepreneur">Entrepreneur / Commerçant</option>
+                      <option value="self_employed">Travailleur indépendant</option>
+                      <option value="unemployed">Sans activité actuellement</option>
+                      <option value="other">Autre situation</option>
                     </select>
                   </span>
                 </label>
 
-                {form.educationStatus && (
+                {["school", "university", "employee", "entrepreneur"].includes(
+                  form.activityStatus,
+                ) && (
                   <motion.label
                     className="line-field education-institution-field"
                     initial={{ opacity: 0, y: -6 }}
@@ -2746,14 +2989,40 @@ function AuthPage({ register = false }) {
                       required
                       minLength="2"
                       maxLength="190"
-                      value={form.educationInstitution}
+                      value={form.activityOrganization}
                       onChange={(e) =>
-                        setForm({ ...form, educationInstitution: e.target.value })
+                        setForm({ ...form, activityOrganization: e.target.value })
                       }
                       placeholder={
-                        form.educationStatus === "university"
+                        form.activityStatus === "university"
                           ? "Nom de votre université"
-                          : "Nom de votre école"
+                          : form.activityStatus === "school"
+                            ? "Nom de votre école"
+                            : form.activityStatus === "employee"
+                              ? "Nom de votre employeur"
+                              : "Nom de votre entreprise ou commerce"
+                      }
+                    />
+                  </motion.label>
+                )}
+
+                {["self_employed", "other"].includes(form.activityStatus) && (
+                  <motion.label
+                    className="line-field education-institution-field"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <BriefcaseBusiness />
+                    <input
+                      required
+                      minLength="2"
+                      maxLength="190"
+                      value={form.activityDetails}
+                      onChange={(e) => setForm({ ...form, activityDetails: e.target.value })}
+                      placeholder={
+                        form.activityStatus === "self_employed"
+                          ? "Précisez votre activité professionnelle"
+                          : "Précisez votre situation"
                       }
                     />
                   </motion.label>
@@ -2774,7 +3043,7 @@ function AuthPage({ register = false }) {
               <LockKeyhole />
               <input
                 type="password"
-                minLength="8"
+                minLength={register ? 10 : 1}
                 required
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -2794,7 +3063,7 @@ function AuthPage({ register = false }) {
                   <ShieldCheck />
                   <input
                     type="password"
-                    minLength="8"
+                    minLength="10"
                     required
                     value={form.confirmPassword}
                     onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
@@ -2809,7 +3078,8 @@ function AuthPage({ register = false }) {
                     onChange={(e) => setForm({ ...form, acceptedTerms: e.target.checked })}
                   />
                   <span>
-                    J’accepte les conditions d’utilisation et la politique de confidentialité.
+                    J’accepte les <Link to="/terms" target="_blank">conditions d’utilisation</Link>
+                    {" "}et la politique de confidentialité.
                   </span>
                 </label>
               </>
@@ -2873,10 +3143,6 @@ function Cart() {
               <span>Sous-total</span>
               <b>{total.toLocaleString("fr-HT")} HTG</b>
             </div>
-            <div>
-              <span>Livraison</span>
-              <b>À calculer</b>
-            </div>
             <hr />
             <div>
               <span>Total</span>
@@ -2931,6 +3197,7 @@ const menus = {
     ["Vendeurs", "/admin/users", Users],
     ["Catégories", "/admin/categories", ShoppingBasket],
     ["Produits", "/admin/products", ShoppingBag],
+    ["Paiements", "/admin/payments", CreditCard],
     ["Profil", "/admin/profile", CircleUserRound],
     ["Support", "/admin/contact-requests", MessageCircle],
     ["Paramètres", "/admin/settings", Settings],
@@ -3595,6 +3862,9 @@ function ClientOrdersPage() {
   const [proofProcessing, setProofProcessing] = useState(false);
   const [proofError, setProofError] = useState("");
   const [proofSuccess, setProofSuccess] = useState("");
+  const [receiptProcessing, setReceiptProcessing] = useState(false);
+  const [receiptMessage, setReceiptMessage] = useState("");
+  const [receiptError, setReceiptError] = useState("");
 
   useEffect(() => {
     api
@@ -3618,7 +3888,7 @@ function ClientOrdersPage() {
       const formData = new FormData();
       formData.append("paymentProof", file);
       if (note) formData.append("note", note);
-      const { data } = await api.patch(`/payments/${orderId}/direct-proof`, formData);
+      const { data } = await api.patch(`/payments/${orderId}/proof`, formData);
       await selectOrder(orderId);
       const { data: refreshedOrders } = await api.get("/orders/mine");
       setOrders(refreshedOrders);
@@ -3627,6 +3897,54 @@ function ClientOrdersPage() {
       setProofError(requestError.response?.data?.message || "Impossible d'envoyer la preuve de paiement.");
     } finally {
       setProofProcessing(false);
+    }
+  };
+
+  const confirmOrderReceipt = async (orderId, assignmentId) => {
+    setReceiptProcessing(true);
+    setReceiptMessage("");
+    setReceiptError("");
+    try {
+      const { data } = await api.patch(
+        `/orders/${orderId}/deliveries/${assignmentId}/confirm-receipt`,
+        { signatureAcknowledged: true },
+      );
+      await selectOrder(orderId);
+      const { data: refreshedOrders } = await api.get("/orders/mine");
+      setOrders(refreshedOrders);
+      setReceiptMessage(data.message);
+      return true;
+    } catch (requestError) {
+      setReceiptError(
+        requestError.response?.data?.message || "Impossible de confirmer la réception.",
+      );
+      return false;
+    } finally {
+      setReceiptProcessing(false);
+    }
+  };
+
+  const confirmPickupReceipt = async (orderId, saleId) => {
+    setReceiptProcessing(true);
+    setReceiptMessage("");
+    setReceiptError("");
+    try {
+      const { data } = await api.patch(
+        `/orders/${orderId}/pickups/${saleId}/confirm-receipt`,
+        { receiptAcknowledged: true },
+      );
+      await selectOrder(orderId);
+      const { data: refreshedOrders } = await api.get("/orders/mine");
+      setOrders(refreshedOrders);
+      setReceiptMessage(data.message);
+      return true;
+    } catch (requestError) {
+      setReceiptError(
+        requestError.response?.data?.message || "Impossible de confirmer le retrait.",
+      );
+      return false;
+    } finally {
+      setReceiptProcessing(false);
     }
   };
 
@@ -3642,6 +3960,11 @@ function ClientOrdersPage() {
         proofProcessing={proofProcessing}
         proofError={proofError}
         proofSuccess={proofSuccess}
+        onConfirmReceipt={confirmOrderReceipt}
+        onConfirmPickup={confirmPickupReceipt}
+        receiptProcessing={receiptProcessing}
+        receiptMessage={receiptMessage}
+        receiptError={receiptError}
       />
     </DashboardLayout>
   );
@@ -3705,6 +4028,7 @@ function ClientCheckoutPage() {
   const [error, setError] = useState("");
   const [priceChanges, setPriceChanges] = useState([]);
   const [pendingCheckout, setPendingCheckout] = useState(null);
+  const [paymentAccount, setPaymentAccount] = useState(null);
 
   useEffect(() => {
     refreshCart()
@@ -3712,6 +4036,10 @@ function ClientCheckoutPage() {
         if (changes.length) setPriceChanges(changes);
       })
       .catch(() => {});
+    api
+      .get("/payments/config")
+      .then(({ data }) => setPaymentAccount(data))
+      .catch(() => setPaymentAccount(null));
   }, []);
 
   useEffect(() => {
@@ -3732,8 +4060,20 @@ function ClientCheckoutPage() {
   }, [priceChanges.length]);
 
   const submitOrder = async (checkoutForm, orderCart) => {
+    const fulfillmentChoices = Object.entries(
+      checkoutForm.fulfillmentChoices || {},
+    ).map(([sellerId, method]) => ({
+      sellerId: Number(sellerId),
+      method,
+    }));
+    const includesDelivery = fulfillmentChoices.some(
+      (choice) => choice.method === "delivery",
+    );
     const { data } = await api.post("/orders", {
-      deliveryAddress: `${checkoutForm.address}, ${checkoutForm.city}`,
+      fulfillmentChoices,
+      deliveryAddress: includesDelivery
+        ? `${checkoutForm.address}, ${checkoutForm.city}`
+        : null,
       items: orderCart.map((item) => ({
         productId: item.id,
         quantity: item.quantity,
@@ -3824,6 +4164,7 @@ function ClientCheckoutPage() {
         user={user}
         processing={processing}
         result={result}
+        paymentAccount={paymentAccount}
         error={error}
         priceChanges={priceChanges}
         continueAfterPriceConfirmation={Boolean(pendingCheckout)}
@@ -4102,6 +4443,14 @@ function AdminContactRequestsPage() {
   );
 }
 
+function AdminPaymentsPage() {
+  return (
+    <DashboardLayout>
+      <AdminPaymentsContent api={api} />
+    </DashboardLayout>
+  );
+}
+
 function AdminProfilePage() {
   const { user, updateUser, logout } = useAuth();
   return (
@@ -4188,6 +4537,7 @@ function AppRoutes() {
       <Route path="/login" element={<AuthPage />} />
       <Route path="/register" element={<AuthPage register />} />
       <Route path="/about" element={<About />} />
+      <Route path="/terms" element={<Terms />} />
       <Route path="/contact" element={<Contact />} />
       <Route path="/become-seller" element={<BecomeSeller />} />
       <Route
@@ -4474,7 +4824,7 @@ function AppRoutes() {
         path="/admin/payments"
         element={
           <Protected roles={["admin"]}>
-            <Navigate to="/admin#weekly-report" replace />
+            <AdminPaymentsPage />
           </Protected>
         }
       />

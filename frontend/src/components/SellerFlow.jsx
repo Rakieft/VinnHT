@@ -47,18 +47,29 @@ const imageSource = (url) => (url?.startsWith("/uploads") ? `${apiOrigin}${url}`
 
 const sellerPaymentLabels = {
   pending: "Paiement attendu",
-  proof_submitted: "Preuve recue",
-  paid: "Paiement valide",
-  failed: "Preuve refusee",
+  proof_submitted: "Vérification VinnHT",
+  paid: "Sécurisé par VinnHT",
+  failed: "Preuve refusée par VinnHT",
 };
 
 const sellerNextActionLabel = (order) => {
   if (!order?.payment_proof_url) return "Attendre la preuve";
   if (order.seller_payment_status === "failed") return "Attendre une nouvelle preuve";
-  if (order.seller_payment_status !== "paid") return "Valider le paiement";
+  if (order.seller_payment_status !== "paid") return "Attendre la validation VinnHT";
   if (order.seller_status === "confirmed") return "Commencer la preparation";
   if (order.seller_status === "preparing") return "Marquer prete";
   if (order.seller_status === "ready") {
+    if (order.fulfillment_method === "pickup") {
+      return order.pickup_handed_over_at
+        ? "Attendre la confirmation client"
+        : "Remettre la commande au client";
+    }
+    if (
+      order.seller_delivery_status === "delivered" ||
+      order.delivery_status === "delivered"
+    ) {
+      return "Attendre la confirmation client";
+    }
     return order.seller_delivery_user_id ? "Suivre la livraison" : "Assigner un livreur";
   }
   if (order.seller_status === "completed") return "Commande finalisee";
@@ -74,7 +85,7 @@ const sellerNextActionDescription = (order) => {
     return "Le client doit envoyer une nouvelle preuve avant toute preparation.";
   }
   if (order.seller_payment_status !== "paid") {
-    return "Verifiez la reference et la preuve, puis confirmez uniquement le paiement recu.";
+    return "L’administration VinnHT vérifie la preuve sur le compte MonCash central.";
   }
   if (order.seller_status === "confirmed") {
     return "Le paiement est valide. Vous pouvez maintenant commencer la preparation des articles.";
@@ -82,13 +93,24 @@ const sellerNextActionDescription = (order) => {
   if (order.seller_status === "preparing") {
     return "Terminez l'emballage, puis indiquez que la commande est prete pour la livraison.";
   }
+  if (order.seller_status === "ready" && order.fulfillment_method === "pickup") {
+    return order.pickup_handed_over_at
+      ? "La remise en boutique est enregistrée. La confirmation du client est encore attendue."
+      : "Le client viendra à l’adresse de récupération. Confirmez la remise uniquement lorsqu’il possède réellement ses articles.";
+  }
+  if (
+    order.seller_status === "ready" &&
+    (order.seller_delivery_status === "delivered" || order.delivery_status === "delivered")
+  ) {
+    return "La signature est enregistrée. La vente reste active jusqu’à la confirmation du client depuis son compte.";
+  }
   if (order.seller_status === "ready" && !order.seller_delivery_user_id) {
     return "Choisissez maintenant un livreur rattache a votre boutique.";
   }
   if (order.seller_status === "ready" && order.seller_delivery_user_id) {
     return "La mission est transmise au livreur. Suivez son avancement jusqu'a la signature du client.";
   }
-  if (order.seller_status === "completed" || order.delivery_status === "delivered") {
+  if (order.seller_status === "completed") {
     return "La reception a ete confirmee. Cette commande est maintenant classee parmi les commandes livrees.";
   }
   if (order.seller_status === "cancelled") {
@@ -97,8 +119,7 @@ const sellerNextActionDescription = (order) => {
   return "Consultez les informations de la commande avant de poursuivre.";
 };
 
-const isDeliveredSellerOrder = (order) =>
-  order?.seller_status === "completed" || order?.delivery_status === "delivered";
+const isDeliveredSellerOrder = (order) => order?.seller_status === "completed";
 
 const sellerWorkflowClass = (done, active) => (done ? "done" : active ? "active" : "locked");
 
@@ -1099,8 +1120,6 @@ export function SellerOrdersContent({ api }) {
   const [showDriverForm, setShowDriverForm] = useState(false);
   const [selected, setSelected] = useState(null);
   const [assigningDriverId, setAssigningDriverId] = useState("");
-  const [showPaymentProof, setShowPaymentProof] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
   const [driverForm, setDriverForm] = useState({
     name: "",
     email: "",
@@ -1176,47 +1195,6 @@ export function SellerOrdersContent({ api }) {
     load();
   };
 
-  const validatePayment = async (saleId) => {
-    const { data } = await api.patch(`/seller/sales/${saleId}/payment/validate`);
-    setMessage(data.message);
-    setSelected((current) =>
-      current?.sale_id === saleId
-        ? {
-            ...current,
-            seller_payment_status: data.sellerPaymentStatus,
-            payment_status: data.paymentStatus,
-            seller_status: current.seller_status === "pending" ? "confirmed" : current.seller_status,
-            payment_validated_at: new Date().toISOString(),
-            payment_rejection_reason: null,
-            payment_rejected_at: null,
-          }
-        : current
-    );
-    load();
-  };
-
-  const rejectPayment = async (saleId) => {
-    const reason = rejectReason.trim();
-    if (reason.length < 8) {
-      setMessage("Expliquez le motif du refus en au moins 8 caracteres.");
-      return;
-    }
-    const { data } = await api.patch(`/seller/sales/${saleId}/payment/reject`, { reason });
-    setMessage(data.message);
-    setSelected((current) =>
-      current?.sale_id === saleId
-        ? {
-            ...current,
-            seller_payment_status: data.sellerPaymentStatus,
-            payment_rejection_reason: data.rejectionReason,
-            payment_rejected_at: new Date().toISOString(),
-          }
-        : current
-    );
-    setRejectReason("");
-    load();
-  };
-
   const assignDriver = async () => {
     if (!selected || !assigningDriverId) return;
     const { data } = await api.patch(`/seller/sales/${selected.sale_id}/assign-driver`, {
@@ -1234,6 +1212,19 @@ export function SellerOrdersContent({ api }) {
     load();
   };
 
+  const confirmPickupHandover = async () => {
+    if (!selected) return;
+    const { data } = await api.patch(
+      `/seller/sales/${selected.sale_id}/pickup/handover`,
+    );
+    setMessage(data.message);
+    setSelected((current) => ({
+      ...current,
+      pickup_handed_over_at: data.pickupHandedOverAt,
+    }));
+    load();
+  };
+
   const visible = orders.filter((order) => {
     const delivered = isDeliveredSellerOrder(order);
 
@@ -1243,11 +1234,9 @@ export function SellerOrdersContent({ api }) {
     return !delivered && order.seller_status === filter;
   });
   const selectedPaymentStatus = selected?.seller_payment_status || "pending";
+  const selectedClientConfirmedAt =
+    selected?.seller_delivery_client_confirmed_at || selected?.delivery_client_confirmed_at;
   const selectedPaymentIsValid = selectedPaymentStatus === "paid";
-  const selectedCanValidatePayment = Boolean(
-    selected?.payment_proof_url && selectedPaymentStatus === "proof_submitted"
-  );
-  const selectedCanRejectPayment = selectedCanValidatePayment;
 
   return (
     <SellerPageHeader
@@ -1363,7 +1352,9 @@ export function SellerOrdersContent({ api }) {
               <strong>{sellerNextActionLabel(order)}</strong>
             </div>
             <footer>
-              <strong>{money(order.gross_amount)}</strong>
+              <strong>
+                {money(Number(order.gross_amount || 0) + Number(order.delivery_fee || 0))}
+              </strong>
               <button onClick={() => setSelected(order)}>
                 <Eye /> {sellerNextActionLabel(order)}
               </button>
@@ -1427,16 +1418,33 @@ export function SellerOrdersContent({ api }) {
                 selectedPaymentIsValid && selected.seller_status === "confirmed",
               ],
               [
-                "Livreur",
-                selected.seller_delivery_name || "A assigner",
-                Boolean(selected.seller_delivery_user_id),
-                selectedPaymentIsValid && selected.seller_status === "ready" && !selected.seller_delivery_user_id,
+                selected.fulfillment_method === "pickup" ? "Retrait boutique" : "Livreur",
+                selected.fulfillment_method === "pickup"
+                  ? selected.pickup_handed_over_at
+                    ? "Commande remise"
+                    : "Client attendu"
+                  : selected.seller_delivery_name || "A assigner",
+                selected.fulfillment_method === "pickup"
+                  ? Boolean(selected.pickup_handed_over_at)
+                  : Boolean(selected.seller_delivery_user_id),
+                selectedPaymentIsValid &&
+                  selected.seller_status === "ready" &&
+                  (selected.fulfillment_method === "pickup"
+                    ? !selected.pickup_handed_over_at
+                    : !selected.seller_delivery_user_id),
               ],
               [
-                "Livraison",
-                selected.seller_delivery_status || selected.delivery_status || "En attente",
-                selected.seller_status === "completed" || selected.delivery_status === "delivered",
-                selected.seller_delivery_user_id && selected.seller_status === "ready",
+                selected.fulfillment_method === "pickup" ? "Confirmation client" : "Livraison",
+                selected.fulfillment_method === "pickup"
+                  ? selected.pickup_client_confirmed_at
+                    ? "Retrait confirmé"
+                    : "En attente"
+                  : selected.seller_delivery_status || selected.delivery_status || "En attente",
+                selected.seller_status === "completed" ||
+                  (selected.fulfillment_method !== "pickup" && selected.delivery_status === "delivered"),
+                selected.fulfillment_method === "pickup"
+                  ? Boolean(selected.pickup_handed_over_at && !selected.pickup_client_confirmed_at)
+                  : Boolean(selected.seller_delivery_user_id && selected.seller_status === "ready"),
               ],
             ].map(([title, note, done, active]) => (
               <article className={sellerWorkflowClass(done, active)} key={title}>
@@ -1475,73 +1483,45 @@ export function SellerOrdersContent({ api }) {
               selected.delivery_status === "delivered") && (
               <article className="seller-delivery-confirmed">
                 <small>Preuve de reception</small>
-                <strong>Commande finalisee</strong>
+                <strong>
+                  {selectedClientConfirmedAt
+                    ? "Réception confirmée par le client"
+                    : "Signature enregistrée · confirmation requise"}
+                </strong>
                 <span>
                   Signee par {selected.seller_delivery_signer_name || selected.delivery_signer_name || "le client"}
                   {selected.seller_delivery_confirmed_at || selected.delivery_confirmed_at
                      ? ` le ${shortDate(selected.seller_delivery_confirmed_at || selected.delivery_confirmed_at)}`
                     : ""}
                 </span>
+                {!selectedClientConfirmedAt && (
+                  <span>La vente reste en attente jusqu’à la confirmation depuis le compte client.</span>
+                )}
               </article>
             )}
           </div>
           {selected.payment_proof_url && (
             <section className="seller-payment-proof-card">
               <div>
-                <small>Preuve MonCash recue</small>
+                <small>Paiement protégé VinnHT</small>
                 <strong>{sellerPaymentLabels[selectedPaymentStatus] || selectedPaymentStatus}</strong>
                 <p>
-                  Reference : {selected.payment_reference || "Non renseignee"}
-                  {selected.payment_submitted_at ? ` - ${shortDate(selected.payment_submitted_at)}` : ""}
+                  Le client paie VinnHT. Seule l’administration vérifie la transaction et autorise
+                  ensuite la préparation.
                 </p>
-                {selected.payment_proof_note && <p>Note client : {selected.payment_proof_note}</p>}
               </div>
-              <button type="button" className="seller-proof-toggle" onClick={() => setShowPaymentProof((current) => !current)}>
-                <Eye /> {showPaymentProof ? "Masquer la preuve" : "Voir la preuve"}
-              </button>
-              {showPaymentProof && (
-                <div className="seller-payment-proof-preview">
-                  <img src={imageSource(selected.payment_proof_url)} alt="Preuve de paiement MonCash" />
-                </div>
-              )}
               {selected.payment_rejection_reason && (
                 <div className="seller-payment-rejection-note">
                   <AlertTriangle />
                   <span>
-                    <b>Preuve refusee</b>
+                    <b>Preuve refusée par VinnHT</b>
                     {selected.payment_rejection_reason}
                   </span>
                 </div>
               )}
-              {selectedCanValidatePayment && (
-                <button type="button" onClick={() => validatePayment(selected.sale_id)}>
-                  <CheckCircle2 /> Valider le paiement
-                </button>
-              )}
-              {selectedCanRejectPayment && (
-                <div className="seller-payment-reject-box">
-                  <label>
-                    Motif si la preuve est incorrecte
-                    <textarea
-                      rows="3"
-                      value={rejectReason}
-                      onChange={(event) => setRejectReason(event.target.value)}
-                      placeholder="Ex. montant incomplet, numero MonCash incorrect, capture illisible..."
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="reject"
-                    onClick={() => rejectPayment(selected.sale_id)}
-                    disabled={rejectReason.trim().length < 8}
-                  >
-                    <X /> Refuser la preuve
-                  </button>
-                </div>
-              )}
               {selectedPaymentIsValid && (
                 <span className="seller-payment-validated">
-                  <ShieldCheck /> Paiement valide par votre boutique
+                  <ShieldCheck /> Paiement reçu et sécurisé par VinnHT
                 </span>
               )}
             </section>
@@ -1561,7 +1541,9 @@ export function SellerOrdersContent({ api }) {
                 <small>Action vendeur</small>
                 <strong>{sellerNextActionLabel(selected)}</strong>
                 <p>
-                  Suivez l'ordre : paiement valide, preparation, commande prete, puis assignation au livreur.
+                  {selected.fulfillment_method === "pickup"
+                    ? "Suivez l’ordre : paiement validé, préparation, puis remise au client à l’adresse de récupération."
+                    : "Suivez l'ordre : paiement valide, preparation, commande prete, puis assignation au livreur."}
                 </p>
               </div>
               {["confirmed", "preparing"].includes(selected.seller_status) && (
@@ -1577,18 +1559,24 @@ export function SellerOrdersContent({ api }) {
                   <CheckCircle2 />
                   {selected.seller_status === "confirmed"
                     ? "Commencer la preparation"
-                    : "Marquer prete pour livraison"}
+                    : selected.fulfillment_method === "pickup"
+                      ? "Marquer prête pour le retrait"
+                      : "Marquer prete pour livraison"}
                 </button>
               )}
             </section>
           )}
-          {selectedPaymentIsValid && selected.seller_status === "ready" && (
+          {selectedPaymentIsValid &&
+            selected.seller_status === "ready" &&
+            selected.fulfillment_method === "delivery" && (
             <section className="seller-driver-assignment">
               <div>
                 <small>Assigner la livraison</small>
                 <strong>Choisir un livreur de votre boutique</strong>
                 <p>
-                  Le livreur verra cette mission dans son espace livreur et devra faire signer le client.
+                  VinnHT fournit le suivi mais n’est pas le transporteur. Votre boutique et le
+                  livreur choisi restent responsables de la remise matérielle au client. Le client
+                  paie 500 HTG de livraison à votre boutique pour cette vente.
                 </p>
               </div>
               <select
@@ -1613,6 +1601,33 @@ export function SellerOrdersContent({ api }) {
               )}
             </section>
           )}
+          {selectedPaymentIsValid &&
+            selected.seller_status === "ready" &&
+            selected.fulfillment_method === "pickup" && (
+              <section className="seller-driver-assignment seller-pickup-handover">
+                <div>
+                  <small>Retrait en boutique</small>
+                  <strong>
+                    {selected.pickup_handed_over_at
+                      ? "Confirmation du client attendue"
+                      : "Remettre la commande au client"}
+                  </strong>
+                  <p>
+                    Adresse communiquée au client : {selected.delivery_address || "adresse de la boutique"}.
+                    Aucun frais de livraison n’est ajouté.
+                  </p>
+                </div>
+                {selected.pickup_handed_over_at ? (
+                  <span className="seller-payment-validated">
+                    <ShieldCheck /> Remise enregistrée depuis votre boutique
+                  </span>
+                ) : (
+                  <button type="button" onClick={confirmPickupHandover}>
+                    <CheckCircle2 /> Confirmer la remise au client
+                  </button>
+                )}
+              </section>
+            )}
           {["confirmed", "preparing"].includes(selected.seller_status) &&
             selectedPaymentIsValid && (
               <footer>
@@ -1641,31 +1656,40 @@ export function SellerSalesContent({ api }) {
       gross: result.gross + Number(sale.gross_amount),
       commission: result.commission + Number(sale.commission_amount),
       net: result.net + Number(sale.net_amount),
+      held:
+        result.held +
+        (sale.payout_status === "pending" ? Number(sale.payout_amount || 0) : 0),
+      ready:
+        result.ready +
+        (sale.payout_status === "processing" ? Number(sale.payout_amount || 0) : 0),
+      paid:
+        result.paid +
+        (sale.payout_status === "paid" ? Number(sale.payout_amount || 0) : 0),
     }),
-    { gross: 0, commission: 0, net: 0 }
+    { gross: 0, commission: 0, net: 0, held: 0, ready: 0, paid: 0 }
   );
 
   return (
     <SellerPageHeader
       eyebrow="Finances boutique"
       title="Ventes & revenus"
-      text="Suivez vos ventes, commissions et revenus dans un seul espace."
+      text="Suivez les fonds protégés par VinnHT, libérés après réception puis transférés sur votre MonCash."
     >
       <section className="seller-payout-banner">
         <span>
           <Wallet />
         </span>
         <div>
-          <small>Revenu net estime</small>
-          <h2>{money(totals.net)}</h2>
-          <p>Montant cumule apres deduction des commissions VinnHT.</p>
+          <small>Disponible au versement</small>
+          <h2>{money(totals.ready)}</h2>
+          <p>Fonds libérés par la confirmation de réception du client.</p>
         </div>
       </section>
       <section className="seller-metric-grid">
         {[
-          [DollarSign, "Ventes brutes", totals.gross],
-          [ShieldCheck, "Commission VinnHT", totals.commission],
-          [Wallet, "Revenu net", totals.net],
+          [ShieldCheck, "Fonds bloqués", totals.held],
+          [Wallet, "À verser", totals.ready],
+          [DollarSign, "Déjà versé", totals.paid],
         ].map(([Icon, label, value]) => (
           <article key={label}>
             <span>
@@ -1683,7 +1707,7 @@ export function SellerSalesContent({ api }) {
           ["Brut", "gross_amount", money],
           ["Commission", "commission_amount", money],
           ["Net vendeur", "net_amount", money],
-          ["Statut", "status", null, true],
+          ["Versement", "payout_status", null, true],
         ]}
       />
     </SellerPageHeader>
@@ -1751,6 +1775,8 @@ export function SellerShopContent({ api }) {
         category: data.category || "",
         description: data.description || "",
         whatsapp: data.whatsapp || "",
+        moncashNumber: data.moncash_number || "",
+        moncashAccountName: data.moncash_account_name || "",
         pickupAddress: data.pickup_address || "",
         openingHours: data.opening_hours || "",
         deliveryZones: data.delivery_zones || "",
@@ -1955,6 +1981,26 @@ export function SellerShopContent({ api }) {
               placeholder="Ex. +509 37 00 12 34"
               value={shop.whatsapp}
               onChange={(event) => setShop({ ...shop, whatsapp: event.target.value })}
+            />
+          </label>
+          <label>
+            Numéro MonCash
+            <input
+              required
+              minLength="8"
+              placeholder="Ex. +509 37 00 12 34"
+              value={shop.moncashNumber}
+              onChange={(event) => setShop({ ...shop, moncashNumber: event.target.value })}
+            />
+          </label>
+          <label>
+            Titulaire du compte MonCash
+            <input
+              required
+              minLength="2"
+              placeholder="Nom complet affiché dans MonCash"
+              value={shop.moncashAccountName}
+              onChange={(event) => setShop({ ...shop, moncashAccountName: event.target.value })}
             />
           </label>
           <label>
@@ -2433,6 +2479,8 @@ const requestFieldLabels = {
   shopName: "Nom de la boutique",
   shopDescription: "Description de la boutique",
   pickupAddress: "Adresse de recuperation",
+  moncashNumber: "Numéro MonCash",
+  moncashAccountName: "Titulaire du compte MonCash",
 };
 
 const parseRequestDetails = (description) => {
@@ -2489,7 +2537,13 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
   const details = parseRequestDetails(request.description);
   const identityFields = ["fullName", "birthDate", "primaryPhone", "secondaryPhone", "email", "fullAddress", "city", "department"];
   const activityFields = ["activityStatus", "institutionName", "activityDetails"];
-  const shopFields = ["shopName", "shopDescription", "pickupAddress"];
+  const shopFields = [
+    "shopName",
+    "shopDescription",
+    "pickupAddress",
+    "moncashNumber",
+    "moncashAccountName",
+  ];
   const completenessFields = [...identityFields.filter((field) => field !== "secondaryPhone"), ...activityFields.slice(0, 2), ...shopFields];
   const completed = completenessFields.filter((field) => details[field]).length;
   const completeness = Math.round((completed / completenessFields.length) * 100);
@@ -2564,6 +2618,15 @@ export function SupervisorRequestDetailContent({ api, requestId }) {
               ["Situation actuelle precisee", Boolean(details.activityStatus && details.institutionName)],
               ["Projet commercial decrit", Boolean(details.shopDescription)],
               ["Adresse de recuperation", Boolean(details.pickupAddress)],
+              [
+                "Compte MonCash vérifié",
+                Boolean(
+                  request.moncash_number &&
+                  request.moncash_account_name &&
+                  details.moncashNumber &&
+                  details.moncashAccountName
+                ),
+              ],
               [
                 request.terms_accepted_at
                   ? `Conditions ${request.terms_version} acceptees le ${new Date(request.terms_accepted_at).toLocaleDateString("fr-HT")}`

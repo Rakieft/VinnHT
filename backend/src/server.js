@@ -9,6 +9,10 @@ import https from "node:https";
 import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import pool from "./config/database.js";
+import {
+  USER_TERMS_DOCUMENT,
+  USER_TERMS_VERSION,
+} from "./config/userTerms.js";
 import { authenticate, optionalAuthenticate } from "./middleware/authMiddleware.js";
 import { authorize } from "./middleware/roleMiddleware.js";
 import {
@@ -86,7 +90,22 @@ const validate = (req, res, next) => {
 const asyncRoute = (handler) => (req, res, next) =>
   Promise.resolve(handler(req, res, next)).catch(next);
 
-const SELLER_TERMS_VERSION = "2026-06-24-v2";
+const SELLER_TERMS_VERSION = "2026-06-28-v5";
+const DELIVERY_FEE_PER_SELLER = Number(
+  process.env.DELIVERY_FEE_PER_SELLER || 500,
+);
+const PAYMENT_MODEL = process.env.PAYMENT_MODEL || "protected_vinnht";
+const VINNHT_MONCASH_NUMBER = String(process.env.VINNHT_MONCASH_NUMBER || "").trim();
+const VINNHT_MONCASH_ACCOUNT_NAME =
+  String(process.env.VINNHT_MONCASH_ACCOUNT_NAME || "VinnHT").trim() || "VinnHT";
+
+if (
+  process.env.NODE_ENV === "production" &&
+  PAYMENT_MODEL === "protected_vinnht" &&
+  !VINNHT_MONCASH_NUMBER
+) {
+  throw new Error("VINNHT_MONCASH_NUMBER doit être configuré en production.");
+}
 const SELLER_TERMS = [
   "Je certifie que toutes les informations fournies sont exactes et à jour.",
   "J’accepte que VinnHT vérifie mon profil avant l’approbation de mon espace vendeur.",
@@ -95,7 +114,9 @@ const SELLER_TERMS = [
   "Je m’engage à vendre uniquement des produits légaux, authentiques et conformes aux règles de VinnHT.",
   "Je m’engage à publier des photos réelles, des prix exacts et des descriptions honnêtes.",
   "Je m’engage à maintenir mes stocks à jour et à préparer les commandes dans les délais annoncés.",
-  "Je comprends que les paiements sont envoyés directement sur mon compte MonCash et que je dois vérifier chaque preuve avant de préparer une commande.",
+  "Je comprends que VinnHT fournit des outils de suivi mais n’est pas le transporteur : ma boutique et le livreur choisi restent responsables de l’exécution matérielle de la livraison.",
+  "Je comprends que le retrait en boutique est gratuit et que le choix Livraison ajoute 500 HTG à ma vente pour le service de mon livreur.",
+  "Je comprends que les clients paient le compte MonCash VinnHT, que seule l’administration valide la preuve et que mes fonds restent bloqués jusqu’à la confirmation de réception.",
   "Je m’engage à protéger les informations des clients et à les utiliser uniquement pour traiter leurs commandes.",
   "Je comprends que VinnHT peut refuser, suspendre ou désactiver mon espace vendeur en cas de fraude, fausses informations, produits interdits ou mauvais comportement.",
   "Je comprends que VinnHT peut demander des informations supplémentaires pour confirmer mon profil ou ma boutique.",
@@ -211,6 +232,8 @@ const sanitizeProductAttributes = (rawAttributes, categorySlug) => {
 
 const dateOnly = (value) => new Date(`${value}T12:00:00`);
 const sqlDate = (date) => date.toISOString().slice(0, 10);
+const sqlDateTime = (value) =>
+  new Date(value).toISOString().slice(0, 19).replace("T", " ");
 const reportPeriod = (endingValue) => {
   const ending = endingValue ? dateOnly(endingValue) : new Date();
   if (Number.isNaN(ending.getTime())) throw new Error("Date de rapport invalide.");
@@ -257,13 +280,12 @@ const prepareWeeklyPayoutBatch = async (sundayValue = new Date()) => {
     if (batch.status === "prepared") {
       await connection.query(
         `INSERT INTO payout_batch_items (batch_id,seller_id,amount,sale_count)
-         SELECT ?,ss.seller_id,SUM(ss.net_amount),COUNT(*)
-         FROM seller_sales ss
-         JOIN payments pay ON pay.order_id=ss.order_id AND pay.status='paid'
-         WHERE ss.status='completed'
-           AND COALESCE(pay.paid_at,pay.created_at)>=?
-           AND COALESCE(pay.paid_at,pay.created_at)<DATE_ADD(?,INTERVAL 1 DAY)
-         GROUP BY ss.seller_id
+         SELECT ?,po.seller_id,SUM(po.amount),COUNT(*)
+         FROM payouts po
+         WHERE po.status='processing'
+           AND po.released_at>=?
+           AND po.released_at<DATE_ADD(?,INTERVAL 1 DAY)
+         GROUP BY po.seller_id
          ON DUPLICATE KEY UPDATE amount=VALUES(amount),sale_count=VALUES(sale_count)`,
         [batch.id, period.start, period.end],
       );
@@ -612,6 +634,9 @@ const safeUserWithRoles = async (user) => ({
   education_status: user.education_status || null,
   education_institution: user.education_institution || null,
   education_verified_at: user.education_verified_at || null,
+  activity_status: user.activity_status || "other",
+  activity_organization: user.activity_organization || null,
+  activity_details: user.activity_details || null,
   profile_image_url: user.profile_image_url,
   role: user.role,
   roles: await getUserRoles(user.id, user.role),
@@ -655,6 +680,7 @@ const notifyUser = async (
         return "orderUpdates";
       }
       if (type.startsWith("promotion.") || type.startsWith("offer.")) return "promotions";
+      if (type.startsWith("shop.")) return "promotions";
     }
     if (role === "seller") {
       if (
@@ -689,7 +715,9 @@ const notifyUser = async (
     return null;
   })();
 
-  if (notificationPreference) {
+  const criticalNotification = type === "order.paid";
+
+  if (notificationPreference && !criticalNotification) {
     const [[row]] = await executor.query(
       `SELECT preferences
        FROM user_preferences
@@ -711,6 +739,34 @@ const notifyUser = async (
   );
   return true;
 };
+
+const notifyShopFollowers = async (
+  executor,
+  sellerId,
+  type,
+  title,
+  message,
+  link,
+  productId,
+) => {
+  const [result] = await executor.query(
+    `INSERT INTO notifications
+      (user_id,role,type,title,message,link,entity_type,entity_id)
+     SELECT sf.client_id,'client',?,?,?,?,'product',?
+     FROM shop_followers sf
+     JOIN users follower ON follower.id=sf.client_id AND follower.status='active'
+     LEFT JOIN user_preferences up
+       ON up.user_id=sf.client_id AND up.preference_group='client'
+     WHERE sf.seller_id=?
+       AND COALESCE(
+         JSON_UNQUOTE(JSON_EXTRACT(up.preferences,'$.promotions')),
+         'true'
+       )<>'false'`,
+    [type, title, message, link, productId, sellerId],
+  );
+  return Number(result.affectedRows || 0);
+};
+
 const logOrderEvent = async (
   executor,
   { orderId, sellerSaleId = null, actorId = null, actorRole = null, type, title, message = null, metadata = null },
@@ -815,6 +871,10 @@ app.get(
   }),
 );
 
+app.get("/api/legal/terms", (_req, res) => {
+  res.json(USER_TERMS_DOCUMENT);
+});
+
 app.post(
   "/api/auth/register",
   authRateLimiter,
@@ -832,15 +892,31 @@ app.post(
       .trim()
       .isLength({ min: 8, max: 30 })
       .withMessage("Le numéro de téléphone est invalide."),
-    body("educationStatus")
-      .optional({ checkFalsy: true })
-      .isIn(["school", "university"])
-      .withMessage("Le statut scolaire sélectionné est invalide."),
-    body("educationInstitution")
-      .if((value, { req }) => ["school", "university"].includes(req.body.educationStatus))
+    body("activityStatus")
+      .isIn([
+        "school",
+        "university",
+        "employee",
+        "entrepreneur",
+        "self_employed",
+        "unemployed",
+        "other",
+      ])
+      .withMessage("Sélectionnez votre statut d’activité."),
+    body("activityOrganization")
+      .if((value, { req }) =>
+        ["school", "university", "employee", "entrepreneur"].includes(
+          req.body.activityStatus,
+        ),
+      )
       .trim()
       .isLength({ min: 2, max: 190 })
-      .withMessage("Indiquez le nom de votre école ou université."),
+      .withMessage("Indiquez le nom de l’établissement ou de l’entreprise."),
+    body("activityDetails")
+      .if((value, { req }) => ["self_employed", "other"].includes(req.body.activityStatus))
+      .trim()
+      .isLength({ min: 2, max: 190 })
+      .withMessage("Précisez votre activité ou votre statut."),
     body("password")
       .isLength({ min: 10, max: 128 })
       .matches(/[a-z]/)
@@ -849,6 +925,12 @@ app.post(
       .withMessage(
         "Le mot de passe doit contenir au moins 10 caractères, une majuscule, une minuscule et un chiffre.",
       ),
+    body("termsAccepted")
+      .custom((value) => value === true)
+      .withMessage("Vous devez accepter les conditions d’utilisation."),
+    body("termsVersion")
+      .equals(USER_TERMS_VERSION)
+      .withMessage("La version des conditions doit être actualisée."),
   ],
   validate,
   asyncRoute(async (req, res) => {
@@ -857,9 +939,16 @@ app.post(
       email,
       phone,
       password,
-      educationStatus,
-      educationInstitution,
+      activityStatus,
+      activityOrganization,
+      activityDetails,
     } = req.body;
+    const educationStatus = ["school", "university"].includes(activityStatus)
+      ? activityStatus
+      : null;
+    const educationInstitution = educationStatus
+      ? activityOrganization.trim()
+      : null;
     const [[existing]] = await pool.query(
       "SELECT id FROM users WHERE email = ?",
       [email],
@@ -869,29 +958,61 @@ app.post(
         .status(409)
         .json({ message: "Cette adresse email est déjà utilisée." });
     const hash = await bcrypt.hash(password, 12);
-    const [result] = await pool.query(
-      `INSERT INTO users
-        (name,email,phone,education_status,education_institution,password_hash)
-       VALUES (?,?,?,?,?,?)`,
-      [
-        name,
-        email,
-        phone || null,
-        educationStatus || null,
-        educationStatus ? educationInstitution.trim() : null,
-        hash,
-      ],
-    );
-    await pool.query("INSERT IGNORE INTO user_roles (user_id,role) VALUES (?,'client')", [
-      result.insertId,
-    ]);
+    const connection = await pool.getConnection();
+    let userId;
+    try {
+      await connection.beginTransaction();
+      const [result] = await connection.query(
+        `INSERT INTO users
+          (name,email,phone,activity_status,activity_organization,activity_details,
+           education_status,education_institution,password_hash)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        [
+          name,
+          email,
+          phone || null,
+          activityStatus,
+          activityOrganization?.trim() || null,
+          activityDetails?.trim() || null,
+          educationStatus,
+          educationInstitution,
+          hash,
+        ],
+      );
+      userId = result.insertId;
+      await connection.query(
+        "INSERT INTO user_roles (user_id,role) VALUES (?,'client')",
+        [userId],
+      );
+      await connection.query(
+        `INSERT INTO user_terms_acceptances
+          (user_id,terms_version,acceptance_ip,user_agent,terms_snapshot)
+         VALUES (?,?,?,?,?)`,
+        [
+          userId,
+          USER_TERMS_VERSION,
+          req.ip || null,
+          String(req.get("user-agent") || "").slice(0, 500) || null,
+          JSON.stringify(USER_TERMS_DOCUMENT),
+        ],
+      );
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
     const user = {
-      id: result.insertId,
+      id: userId,
       name,
       email,
       phone: phone || null,
-      education_status: educationStatus || null,
-      education_institution: educationStatus ? educationInstitution.trim() : null,
+      activity_status: activityStatus,
+      activity_organization: activityOrganization?.trim() || null,
+      activity_details: activityDetails?.trim() || null,
+      education_status: educationStatus,
+      education_institution: educationInstitution,
       education_verified_at: null,
       role: "client",
       roles: ["client"],
@@ -934,7 +1055,8 @@ app.get(
       return res.json({ user: null });
     }
     const [[user]] = await pool.query(
-      `SELECT id,name,email,phone,education_status,education_institution,education_verified_at,
+      `SELECT id,name,email,phone,activity_status,activity_organization,activity_details,
+        education_status,education_institution,education_verified_at,
         profile_image_url,role,status,created_at
        FROM users WHERE id = ?`,
       [req.user.id],
@@ -997,20 +1119,67 @@ app.patch(
   [
     body("name").optional().trim().isLength({ min: 2, max: 120 }),
     body("phone").optional({ checkFalsy: true }).trim().isLength({ min: 8, max: 30 }),
+    body("activityStatus")
+      .optional()
+      .isIn([
+        "school",
+        "university",
+        "employee",
+        "entrepreneur",
+        "self_employed",
+        "unemployed",
+        "other",
+      ]),
+    body("activityOrganization")
+      .if((value, { req }) =>
+        ["school", "university", "employee", "entrepreneur"].includes(
+          req.body.activityStatus,
+        ),
+      )
+      .trim()
+      .isLength({ min: 2, max: 190 }),
+    body("activityDetails")
+      .if((value, { req }) => ["self_employed", "other"].includes(req.body.activityStatus))
+      .trim()
+      .isLength({ min: 2, max: 190 }),
   ],
   validate,
   asyncRoute(async (req, res) => {
     const profileImageUrl = (await storeImage(req.file, "profiles")) || undefined;
+    const activityStatus = req.body.activityStatus || null;
+    const educationStatus = ["school", "university"].includes(activityStatus)
+      ? activityStatus
+      : null;
     await pool.query(
       `UPDATE users
        SET name=COALESCE(?,name),
            phone=COALESCE(?,phone),
+           activity_status=COALESCE(?,activity_status),
+           activity_organization=IF(? IS NULL,activity_organization,?),
+           activity_details=IF(? IS NULL,activity_details,?),
+           education_status=IF(? IS NULL,education_status,?),
+           education_institution=IF(? IS NULL,education_institution,?),
            profile_image_url=COALESCE(?,profile_image_url)
        WHERE id=?`,
-      [req.body.name || null, req.body.phone || null, profileImageUrl || null, req.user.id],
+      [
+        req.body.name || null,
+        req.body.phone || null,
+        activityStatus,
+        activityStatus,
+        req.body.activityOrganization?.trim() || null,
+        activityStatus,
+        req.body.activityDetails?.trim() || null,
+        activityStatus,
+        educationStatus,
+        activityStatus,
+        educationStatus ? req.body.activityOrganization?.trim() || null : null,
+        profileImageUrl || null,
+        req.user.id,
+      ],
     );
     const [[user]] = await pool.query(
-      `SELECT id,name,email,phone,education_status,education_institution,education_verified_at,
+      `SELECT id,name,email,phone,activity_status,activity_organization,activity_details,
+        education_status,education_institution,education_verified_at,
         profile_image_url,role,status,created_at
        FROM users WHERE id=?`,
       [req.user.id],
@@ -1025,7 +1194,10 @@ app.delete(
   asyncRoute(async (req, res) => {
     await pool.query("UPDATE users SET profile_image_url=NULL WHERE id=?", [req.user.id]);
     const [[user]] = await pool.query(
-      "SELECT id,name,email,phone,profile_image_url,role,status,created_at FROM users WHERE id=?",
+      `SELECT id,name,email,phone,activity_status,activity_organization,activity_details,
+        education_status,education_institution,education_verified_at,
+        profile_image_url,role,status,created_at
+       FROM users WHERE id=?`,
       [req.user.id],
     );
     res.json({ message: "Photo de profil supprimée.", user: await safeUserWithRoles(user) });
@@ -1057,6 +1229,21 @@ app.get(
       supportWhatsapp: process.env.SUPPORT_WHATSAPP || "",
       supportAddress: process.env.SUPPORT_ADDRESS || "Port-au-Prince, Haïti",
       supportHours: process.env.SUPPORT_HOURS || "Lundi au samedi, 8h00 à 18h00",
+    });
+  }),
+);
+app.get(
+  "/api/payments/config",
+  authenticate,
+  authorize("client"),
+  noStore,
+  asyncRoute(async (_req, res) => {
+    res.json({
+      model: PAYMENT_MODEL,
+      provider: process.env.PAYMENT_PROVIDER || "simulated",
+      moncashNumber: VINNHT_MONCASH_NUMBER,
+      accountName: VINNHT_MONCASH_ACCOUNT_NAME,
+      protectedPayment: PAYMENT_MODEL === "protected_vinnht",
     });
   }),
 );
@@ -1473,7 +1660,22 @@ app.get(
       [req.user.id],
     );
     const [rows] = await pool.query(
-      `SELECT p.*,p.price base_price,c.name category_name,COALESCE(sp.shop_name,u.name) seller_name,COALESCE(sp.whatsapp,u.phone) seller_moncash,ci.quantity,
+      `SELECT p.*,p.price base_price,c.name category_name,
+        COALESCE(sp.shop_name,u.name) seller_name,
+        COALESCE(sp.moncash_number,sp.whatsapp,u.phone) seller_moncash,
+        sp.moncash_account_name seller_moncash_account_name,
+        sp.pickup_address seller_pickup_address,
+        sp.delivery_zones seller_delivery_zones,
+        sp.opening_hours seller_opening_hours,
+        EXISTS(
+          SELECT 1
+          FROM seller_delivery_drivers sdd
+          JOIN users delivery_user ON delivery_user.id=sdd.delivery_user_id
+          WHERE sdd.seller_id=p.seller_id
+            AND sdd.status='active'
+            AND delivery_user.status='active'
+        ) seller_has_delivery_driver,
+        ci.quantity,
         ci.price_snapshot cart_price_snapshot,
         CASE
           WHEN p.is_featured=TRUE
@@ -1656,12 +1858,34 @@ app.get(
   }),
 );
 app.get(
+  "/api/shops/following/mine",
+  authenticate,
+  authorize("client"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const [shops] = await pool.query(
+      `SELECT sf.created_at followed_at,u.id seller_id,
+        COALESCE(sp.shop_name,u.name) shop_name,sp.shop_logo_url,sp.description,
+        (SELECT COUNT(*) FROM products p
+         WHERE p.seller_id=u.id AND p.status='active' AND p.stock>0) product_count
+       FROM shop_followers sf
+       JOIN users u ON u.id=sf.seller_id AND u.status='active'
+       LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
+       WHERE sf.client_id=?
+       ORDER BY sf.created_at DESC`,
+      [req.user.id],
+    );
+    res.json(shops);
+  }),
+);
+app.get(
   "/api/shops/:sellerId",
   asyncRoute(async (req, res) => {
     const [[shop]] = await pool.query(
       `SELECT u.id seller_id,u.name owner_name,u.profile_image_url,
         COALESCE(sp.shop_name,u.name) shop_name,sp.shop_logo_url,sp.category,sp.description,
         sp.whatsapp,sp.pickup_address,
+        (SELECT COUNT(*) FROM shop_followers sf WHERE sf.seller_id=u.id) follower_count,
         COALESCE((SELECT ROUND(AVG(sr.rating),1) FROM shop_reviews sr WHERE sr.seller_id=u.id),0) rating,
         (SELECT COUNT(*) FROM shop_reviews sr WHERE sr.seller_id=u.id) review_count
        FROM users u
@@ -1672,6 +1896,92 @@ app.get(
     );
     if (!shop) return res.status(404).json({ message: "Boutique introuvable." });
     res.json(shop);
+  }),
+);
+app.get(
+  "/api/shops/:sellerId/follow",
+  authenticate,
+  authorize("client"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const sellerId = Number(req.params.sellerId);
+    if (!Number.isInteger(sellerId) || sellerId < 1) {
+      return res.status(400).json({ message: "Boutique invalide." });
+    }
+    const [[state]] = await pool.query(
+      `SELECT
+        EXISTS(
+          SELECT 1 FROM shop_followers WHERE client_id=? AND seller_id=?
+        ) following,
+        (SELECT COUNT(*) FROM shop_followers WHERE seller_id=?) follower_count`,
+      [req.user.id, sellerId, sellerId],
+    );
+    res.json({
+      following: Boolean(state.following),
+      followerCount: Number(state.follower_count || 0),
+    });
+  }),
+);
+app.post(
+  "/api/shops/:sellerId/follow",
+  authenticate,
+  authorize("client"),
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const sellerId = Number(req.params.sellerId);
+    if (!Number.isInteger(sellerId) || sellerId < 1) {
+      return res.status(400).json({ message: "Boutique invalide." });
+    }
+    if (sellerId === Number(req.user.id)) {
+      return res.status(409).json({ message: "Vous ne pouvez pas suivre votre propre boutique." });
+    }
+    const [[shop]] = await pool.query(
+      `SELECT u.id
+       FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'
+       WHERE u.id=? AND u.status='active'`,
+      [sellerId],
+    );
+    if (!shop) return res.status(404).json({ message: "Boutique introuvable." });
+
+    await pool.query(
+      "INSERT IGNORE INTO shop_followers (client_id,seller_id) VALUES (?,?)",
+      [req.user.id, sellerId],
+    );
+    const [[count]] = await pool.query(
+      "SELECT COUNT(*) total FROM shop_followers WHERE seller_id=?",
+      [sellerId],
+    );
+    res.status(201).json({
+      message: "Vous suivez maintenant cette boutique.",
+      following: true,
+      followerCount: Number(count.total || 0),
+    });
+  }),
+);
+app.delete(
+  "/api/shops/:sellerId/follow",
+  authenticate,
+  authorize("client"),
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const sellerId = Number(req.params.sellerId);
+    if (!Number.isInteger(sellerId) || sellerId < 1) {
+      return res.status(400).json({ message: "Boutique invalide." });
+    }
+    await pool.query(
+      "DELETE FROM shop_followers WHERE client_id=? AND seller_id=?",
+      [req.user.id, sellerId],
+    );
+    const [[count]] = await pool.query(
+      "SELECT COUNT(*) total FROM shop_followers WHERE seller_id=?",
+      [sellerId],
+    );
+    res.json({
+      message: "Vous ne suivez plus cette boutique.",
+      following: false,
+      followerCount: Number(count.total || 0),
+    });
   }),
 );
 app.get(
@@ -1807,6 +2117,22 @@ app.post(
         [result.insertId, imageUrl, position],
       );
     }
+    const [[shop]] = await pool.query(
+      `SELECT COALESCE(sp.shop_name,u.name) shop_name
+       FROM users u
+       LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
+       WHERE u.id=?`,
+      [req.user.id],
+    );
+    await notifyShopFollowers(
+      pool,
+      req.user.id,
+      "shop.new_product",
+      `Nouveau produit chez ${shop?.shop_name || "une boutique suivie"}`,
+      `${name} vient d’être ajouté sur VinnHT.`,
+      `/products/${result.insertId}`,
+      result.insertId,
+    );
     res.status(201).json({ id: result.insertId, message: "Produit créé." });
   }),
 );
@@ -1830,6 +2156,8 @@ app.post(
   uploadSellerImages,
   [
     body("businessName").trim().isLength({ min: 2 }),
+    body("moncashNumber").trim().isLength({ min: 8, max: 30 }),
+    body("moncashAccountName").trim().isLength({ min: 2, max: 160 }),
     body("description").optional().trim().isLength({ max: 10000 }),
     body("termsAccepted").equals("true"),
     body("termsVersion").equals(SELLER_TERMS_VERSION),
@@ -1856,12 +2184,15 @@ app.post(
     }
     const [request] = await pool.query(
       `INSERT INTO seller_requests
-        (user_id,business_name,shop_logo_url,description,terms_version,
+        (user_id,business_name,moncash_number,moncash_account_name,
+         shop_logo_url,description,terms_version,
          terms_accepted_at,terms_acceptance_ip,terms_snapshot)
-       VALUES (?,?,?,?,?,NOW(),?,?)`,
+       VALUES (?,?,?,?,?,?,?,NOW(),?,?)`,
       [
         req.user.id,
         req.body.businessName,
+        req.body.moncashNumber,
+        req.body.moncashAccountName,
         shopLogoUrl,
         req.body.description || null,
         SELLER_TERMS_VERSION,
@@ -1961,6 +2292,8 @@ app.patch(
     body("shopName").trim().isLength({ min: 2, max: 160 }),
     body("category").optional({ checkFalsy: true }).trim().isLength({ max: 120 }),
     body("whatsapp").trim().isLength({ min: 8, max: 30 }),
+    body("moncashNumber").trim().isLength({ min: 8, max: 30 }),
+    body("moncashAccountName").trim().isLength({ min: 2, max: 160 }),
     body("status").optional().isIn(["active", "paused"]),
   ],
   validate,
@@ -1969,14 +2302,17 @@ app.patch(
     const shopLogoUrl = await storeImage(shopLogoFile, "shops");
     await pool.query(
       `INSERT INTO seller_profiles
-        (seller_id,shop_name,shop_logo_url,category,description,whatsapp,pickup_address,opening_hours,delivery_zones,status)
-       VALUES (?,?,?,?,?,?,?,?,?,?)
+        (seller_id,shop_name,shop_logo_url,category,description,whatsapp,
+         moncash_number,moncash_account_name,pickup_address,opening_hours,delivery_zones,status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE
         shop_name=VALUES(shop_name),
         shop_logo_url=COALESCE(VALUES(shop_logo_url),shop_logo_url),
         category=VALUES(category),
         description=VALUES(description),
         whatsapp=VALUES(whatsapp),
+        moncash_number=VALUES(moncash_number),
+        moncash_account_name=VALUES(moncash_account_name),
         pickup_address=VALUES(pickup_address),
         opening_hours=VALUES(opening_hours),
         delivery_zones=VALUES(delivery_zones),
@@ -1988,6 +2324,8 @@ app.patch(
         req.body.category || null,
         req.body.description || null,
         req.body.whatsapp || null,
+        req.body.moncashNumber,
+        req.body.moncashAccountName,
         req.body.pickupAddress || null,
         req.body.openingHours || null,
         req.body.deliveryZones || null,
@@ -2023,6 +2361,7 @@ app.get(
         ss.id sale_id,
         ss.order_id,
         ss.gross_amount,
+        ss.delivery_fee,
         ss.net_amount,
         ss.status seller_status,
         ss.payment_status seller_payment_status,
@@ -2033,29 +2372,43 @@ app.get(
         ss.payment_reference,
         ss.payment_submitted_at,
         ss.payment_validated_at,
+        ss.pickup_handed_over_at,
+        ss.pickup_client_confirmed_at,
         ss.created_at,
         o.order_number,
         o.status order_status,
-        o.delivery_address,
+        COALESCE(ss.delivery_address,o.delivery_address) delivery_address,
+        ss.fulfillment_method,
+        o.fulfillment_snapshot,
         d.status delivery_status,
         dp.signer_name delivery_signer_name,
         dp.confirmed_at delivery_confirmed_at,
+        drc_main.confirmed_at delivery_client_confirmed_at,
         sda.delivery_user_id seller_delivery_user_id,
         sda.status seller_delivery_status,
         sda.signer_name seller_delivery_signer_name,
         sda.confirmed_at seller_delivery_confirmed_at,
+        drc_seller.confirmed_at seller_delivery_client_confirmed_at,
         du.name seller_delivery_name,
         du.phone seller_delivery_phone,
         u.name client_name,
         u.phone client_phone,
-        p.status payment_status
+        p.status payment_status,
+        po.status payout_status,
+        po.amount payout_amount,
+        po.released_at payout_released_at,
+        po.paid_at payout_paid_at
       FROM seller_sales ss
       JOIN orders o ON o.id=ss.order_id
       JOIN users u ON u.id=o.client_id
       LEFT JOIN payments p ON p.order_id=o.id
+      LEFT JOIN payouts po ON po.seller_sale_id=ss.id
       LEFT JOIN deliveries d ON d.order_id=o.id
       LEFT JOIN delivery_proofs dp ON dp.delivery_id=d.id
+      LEFT JOIN delivery_receipt_confirmations drc_main ON drc_main.delivery_id=d.id
       LEFT JOIN seller_delivery_assignments sda ON sda.seller_sale_id=ss.id
+      LEFT JOIN delivery_receipt_confirmations drc_seller
+        ON drc_seller.seller_delivery_assignment_id=sda.id
       LEFT JOIN users du ON du.id=sda.delivery_user_id
       WHERE ss.seller_id=?
       ORDER BY ss.created_at DESC`,
@@ -2090,7 +2443,8 @@ app.patch(
     try {
       await connection.beginTransaction();
       const [[sale]] = await connection.query(
-        `SELECT ss.*,ss.payment_status seller_payment_status,p.status payment_status,o.client_id,o.order_number
+        `SELECT ss.*,ss.payment_status seller_payment_status,p.status payment_status,
+          o.client_id,o.order_number,ss.fulfillment_method
          FROM seller_sales ss
          JOIN orders o ON o.id=ss.order_id
          LEFT JOIN payments p ON p.order_id=ss.order_id
@@ -2148,21 +2502,25 @@ app.patch(
           "client",
           "order.ready",
           "Commande prête",
-          `Une partie de la commande ${sale.order_number} est prête pour la livraison.`,
+          sale.fulfillment_method === "pickup"
+            ? `Une partie de la commande ${sale.order_number} est prête à être récupérée en boutique.`
+            : `Une partie de la commande ${sale.order_number} est prête pour la livraison.`,
           "/my-orders",
           "order",
           sale.order_id,
         );
-        await notifyRole(
-          connection,
-          "manager",
-          "delivery.ready",
-          "Commande prête à assigner",
-          `La commande ${sale.order_number} peut être vérifiée pour livraison.`,
-          "/manager/deliveries",
-          "order",
-          sale.order_id,
-        );
+        if (sale.fulfillment_method === "delivery") {
+          await notifyRole(
+            connection,
+            "manager",
+            "delivery.ready",
+            "Commande prête à assigner",
+            `La commande ${sale.order_number} peut être vérifiée pour livraison.`,
+            "/manager/deliveries",
+            "order",
+            sale.order_id,
+          );
+        }
       }
       await connection.commit();
       res.json({
@@ -2170,8 +2528,79 @@ app.patch(
           req.body.status === "preparing"
             ? "Préparation commencée."
             : req.body.status === "ready"
-              ? "Commande prête pour la livraison."
+              ? sale.fulfillment_method === "pickup"
+                ? "Commande prête pour le retrait en boutique."
+                : "Commande prête pour la livraison."
               : "Vente annulée.",
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+app.patch(
+  "/api/seller/sales/:id/pickup/handover",
+  authenticate,
+  authorize("seller"),
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[sale]] = await connection.query(
+        `SELECT ss.id,ss.order_id,ss.status,ss.payment_status,
+          ss.pickup_handed_over_at,o.client_id,o.order_number,ss.fulfillment_method
+         FROM seller_sales ss
+         JOIN orders o ON o.id=ss.order_id
+         WHERE ss.id=? AND ss.seller_id=? FOR UPDATE`,
+        [req.params.id, req.user.id],
+      );
+      if (!sale) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Vente introuvable." });
+      }
+      if (sale.fulfillment_method !== "pickup") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Cette commande doit être livrée." });
+      }
+      if (sale.status !== "ready" || sale.payment_status !== "paid") {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "La commande doit être payée et prête avant sa remise au client.",
+        });
+      }
+      if (!sale.pickup_handed_over_at) {
+        await connection.query(
+          "UPDATE seller_sales SET pickup_handed_over_at=NOW() WHERE id=?",
+          [sale.id],
+        );
+        await logOrderEvent(connection, {
+          orderId: sale.order_id,
+          sellerSaleId: sale.id,
+          actorId: req.user.id,
+          actorRole: "seller",
+          type: "pickup.handed_over",
+          title: "Commande remise en boutique",
+          message: "Le vendeur indique avoir remis les articles au client.",
+        });
+        await notifyUser(
+          connection,
+          sale.client_id,
+          "client",
+          "pickup.handed_over",
+          "Confirmez votre retrait",
+          `La boutique indique vous avoir remis une partie de ${sale.order_number}. Confirmez la réception depuis votre compte.`,
+          "/my-orders",
+          "order",
+          sale.order_id,
+        );
+      }
+      await connection.commit();
+      res.json({
+        message: "Remise enregistrée. La confirmation du client est maintenant attendue.",
+        pickupHandedOverAt: sale.pickup_handed_over_at || new Date().toISOString(),
       });
     } catch (error) {
       await connection.rollback();
@@ -2187,10 +2616,13 @@ app.get(
   authorize("seller"),
   asyncRoute(async (req, res) => {
     const [rows] = await pool.query(
-      `SELECT ss.*,o.order_number,o.status order_status,p.status payment_status
+      `SELECT ss.*,o.order_number,o.status order_status,p.status payment_status,
+        po.status payout_status,po.amount payout_amount,po.released_at,
+        po.paid_at payout_paid_at,po.payment_reference payout_reference
        FROM seller_sales ss
        JOIN orders o ON o.id=ss.order_id
        LEFT JOIN payments p ON p.order_id=o.id
+       LEFT JOIN payouts po ON po.seller_sale_id=ss.id
        WHERE ss.seller_id=?
        ORDER BY ss.created_at DESC`,
       [req.user.id],
@@ -2217,7 +2649,16 @@ app.patch(
   validate,
   asyncRoute(async (req, res) => {
     const [[currentProduct]] = await pool.query(
-      `SELECT p.id,p.category_id,c.slug category_slug
+      `SELECT p.id,p.name,p.category_id,p.price,p.promotional_price,
+        p.is_featured,p.offer_ends_at,p.status,c.slug category_slug,
+        CASE
+          WHEN p.status='active'
+            AND p.is_featured=TRUE
+            AND p.promotional_price IS NOT NULL
+            AND p.promotional_price<p.price
+            AND (p.offer_ends_at IS NULL OR p.offer_ends_at>NOW())
+          THEN 1 ELSE 0
+        END was_special
        FROM products p
        JOIN categories c ON c.id=p.category_id
        WHERE p.id=? AND p.seller_id=?`,
@@ -2263,7 +2704,9 @@ app.patch(
         values.push(
           ["promotionalPrice", "offerEndsAt"].includes(input) && !req.body[input]
             ? null
-            : req.body[input],
+            : input === "offerEndsAt"
+              ? sqlDateTime(req.body[input])
+              : req.body[input],
         );
       }
     }
@@ -2286,6 +2729,41 @@ app.patch(
     );
     if (!result.affectedRows)
       return res.status(404).json({ message: "Produit introuvable." });
+    const [[updatedProduct]] = await pool.query(
+      `SELECT p.id,p.name,p.price,p.promotional_price,p.is_featured,p.offer_ends_at,p.status,
+        COALESCE(sp.shop_name,u.name) shop_name,
+        CASE
+          WHEN p.status='active'
+            AND p.is_featured=TRUE
+            AND p.promotional_price IS NOT NULL
+            AND p.promotional_price<p.price
+            AND (p.offer_ends_at IS NULL OR p.offer_ends_at>NOW())
+          THEN 1 ELSE 0
+        END is_special
+       FROM products p
+       JOIN users u ON u.id=p.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
+       WHERE p.id=? AND p.seller_id=?`,
+      [req.params.id, req.user.id],
+    );
+    const specialOfferChanged =
+      Boolean(updatedProduct?.is_special) &&
+      (
+        !Boolean(currentProduct.was_special) ||
+        req.body.promotionalPrice !== undefined ||
+        req.body.offerEndsAt !== undefined
+      );
+    if (specialOfferChanged) {
+      await notifyShopFollowers(
+        pool,
+        req.user.id,
+        "shop.special_offer",
+        `Nouvelle offre chez ${updatedProduct.shop_name}`,
+        `${updatedProduct.name} est maintenant proposé à ${Number(updatedProduct.promotional_price).toLocaleString("fr-HT")} HTG.`,
+        `/products/${updatedProduct.id}`,
+        updatedProduct.id,
+      );
+    }
     res.json({ message: "Produit mis à jour." });
   }),
 );
@@ -2377,7 +2855,9 @@ app.patch(
     try {
       await connection.beginTransaction();
       const [[sale]] = await connection.query(
-        `SELECT ss.id,ss.order_id,ss.seller_id,ss.status,ss.payment_status seller_payment_status,o.order_number,o.client_id,p.status payment_status
+        `SELECT ss.id,ss.order_id,ss.seller_id,ss.status,
+          ss.fulfillment_method,ss.payment_status seller_payment_status,
+          o.order_number,o.client_id,p.status payment_status
          FROM seller_sales ss
          JOIN orders o ON o.id=ss.order_id
          LEFT JOIN payments p ON p.order_id=ss.order_id
@@ -2391,6 +2871,12 @@ app.patch(
       if (sale.seller_payment_status !== "paid" || sale.status !== "ready") {
         await connection.rollback();
         return res.status(409).json({ message: "Cette vente doit etre payee et marquee prete avant assignation." });
+      }
+      if (sale.fulfillment_method !== "delivery") {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Cette partie de la commande doit être récupérée en boutique.",
+        });
       }
       const [[driver]] = await connection.query(
         `SELECT u.id,u.name
@@ -2432,27 +2918,66 @@ app.post(
     body("items").isArray({ min: 1 }),
     body("items.*.productId").isInt({ min: 1 }),
     body("items.*.quantity").isInt({ min: 1 }),
-    body("deliveryAddress").trim().isLength({ min: 8 }),
+    body("fulfillmentMethod").optional().isIn(["pickup", "delivery"]),
+    body("fulfillmentChoices")
+      .optional()
+      .custom(
+        (choices) =>
+          Array.isArray(choices) &&
+          choices.length > 0 &&
+          choices.every(
+            (choice) =>
+              Number.isInteger(Number(choice?.sellerId)) &&
+              Number(choice.sellerId) > 0 &&
+              ["pickup", "delivery"].includes(choice?.method),
+          ),
+      )
+      .withMessage("Les modes de réception par boutique sont invalides."),
+    body("deliveryAddress").optional({ checkFalsy: true }).trim().isLength({ min: 8 }),
   ],
   validate,
   asyncRoute(async (req, res) => {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      const fallbackFulfillmentMethod = req.body.fulfillmentMethod || null;
+      const requestedFulfillmentChoices = Array.isArray(req.body.fulfillmentChoices)
+        ? req.body.fulfillmentChoices
+        : [];
+      if (!fallbackFulfillmentMethod && requestedFulfillmentChoices.length === 0) {
+        throw Object.assign(new Error("Choisissez un mode de réception pour chaque boutique."), {
+          status: 422,
+        });
+      }
       const ids = req.body.items.map((item) => Number(item.productId));
       const [products] = await connection.query(
-        `SELECT id,seller_id,
+        `SELECT p.id,p.seller_id,
           CASE
-            WHEN is_featured=TRUE
-              AND promotional_price IS NOT NULL
-              AND promotional_price < price
-              AND (offer_ends_at IS NULL OR offer_ends_at > NOW())
-            THEN promotional_price
-            ELSE price
+            WHEN p.is_featured=TRUE
+              AND p.promotional_price IS NOT NULL
+              AND p.promotional_price < p.price
+              AND (p.offer_ends_at IS NULL OR p.offer_ends_at > NOW())
+            THEN p.promotional_price
+            ELSE p.price
           END price,
-          stock
-         FROM products
-         WHERE status='active' AND stock>0 AND id IN (${ids.map(() => "?").join(",")})
+          p.stock,
+          COALESCE(sp.shop_name,u.name) shop_name,
+          sp.pickup_address,
+          sp.delivery_zones,
+          sp.opening_hours,
+          EXISTS(
+            SELECT 1
+            FROM seller_delivery_drivers sdd
+            JOIN users delivery_user ON delivery_user.id=sdd.delivery_user_id
+            WHERE sdd.seller_id=p.seller_id
+              AND sdd.status='active'
+              AND delivery_user.status='active'
+          ) has_delivery_driver
+         FROM products p
+         JOIN users u ON u.id=p.seller_id
+         LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
+         WHERE p.status='active' AND p.stock>0
+           AND p.id IN (${ids.map(() => "?").join(",")})
          FOR UPDATE`,
         ids,
       );
@@ -2474,10 +2999,114 @@ app.post(
           (sellerTotals.get(product.seller_id) || 0) + subtotal,
         );
       }
+      const sellerFulfillment = [
+        ...new Map(
+          products.map((product) => [
+            Number(product.seller_id),
+            {
+              seller_id: Number(product.seller_id),
+              shop_name: product.shop_name,
+              pickup_address: product.pickup_address || null,
+              delivery_zones: product.delivery_zones || null,
+              opening_hours: product.opening_hours || null,
+              has_delivery_driver: Boolean(product.has_delivery_driver),
+            },
+          ]),
+        ).values(),
+      ];
+
+      const choiceBySeller = new Map();
+      for (const choice of requestedFulfillmentChoices) {
+        const sellerId = Number(choice.sellerId);
+        if (choiceBySeller.has(sellerId)) {
+          throw Object.assign(new Error("Une boutique possède plusieurs modes de réception."), {
+            status: 422,
+          });
+        }
+        choiceBySeller.set(sellerId, choice.method);
+      }
+
+      const cartSellerIds = new Set(sellerFulfillment.map((seller) => seller.seller_id));
+      const unknownSellerId = [...choiceBySeller.keys()].find(
+        (sellerId) => !cartSellerIds.has(sellerId),
+      );
+      if (unknownSellerId) {
+        throw Object.assign(new Error("Une boutique sélectionnée ne fait pas partie du panier."), {
+          status: 422,
+        });
+      }
+
+      for (const seller of sellerFulfillment) {
+        seller.fulfillment_method =
+          choiceBySeller.get(seller.seller_id) || fallbackFulfillmentMethod;
+        if (!seller.fulfillment_method) {
+          throw Object.assign(
+            new Error(`Choisissez le retrait ou la livraison pour ${seller.shop_name}.`),
+            { status: 422 },
+          );
+        }
+      }
+
+      const unavailableSeller = sellerFulfillment.find((seller) =>
+        seller.fulfillment_method === "pickup"
+          ? !seller.pickup_address
+          : !seller.delivery_zones || !seller.has_delivery_driver,
+      );
+      if (unavailableSeller) {
+        throw Object.assign(
+          new Error(
+            unavailableSeller.fulfillment_method === "pickup"
+              ? `${unavailableSeller.shop_name} n’a pas encore renseigné son adresse de récupération.`
+              : !unavailableSeller.delivery_zones
+                ? `${unavailableSeller.shop_name} n’a pas encore renseigné ses zones de livraison.`
+                : `${unavailableSeller.shop_name} n’a aucun livreur actif enregistré. Choisissez le retrait.`,
+          ),
+          { status: 409 },
+        );
+      }
+
+      const deliveryAddress = String(req.body.deliveryAddress || "").trim();
+      const deliveredSellers = sellerFulfillment.filter(
+        (seller) => seller.fulfillment_method === "delivery",
+      );
+      if (deliveredSellers.length > 0 && deliveryAddress.length < 8) {
+        throw Object.assign(
+          new Error("Renseignez une adresse complète pour les boutiques livrées."),
+          { status: 422 },
+        );
+      }
+
+      for (const seller of sellerFulfillment) {
+        seller.delivery_fee =
+          seller.fulfillment_method === "delivery" ? DELIVERY_FEE_PER_SELLER : 0;
+        seller.delivery_address =
+          seller.fulfillment_method === "delivery" ? deliveryAddress : null;
+      }
+
+      const fulfillmentMethods = new Set(
+        sellerFulfillment.map((seller) => seller.fulfillment_method),
+      );
+      const fulfillmentMethod =
+        fulfillmentMethods.size > 1 ? "mixed" : sellerFulfillment[0].fulfillment_method;
+      const deliveryFee = deliveredSellers.length * DELIVERY_FEE_PER_SELLER;
+      total += deliveryFee;
       const orderNumber = `VHT-${Date.now()}`;
       const [order] = await connection.query(
-        "INSERT INTO orders (client_id,order_number,total,delivery_address) VALUES (?,?,?,?)",
-        [req.user.id, orderNumber, total, req.body.deliveryAddress],
+        `INSERT INTO orders
+          (client_id,order_number,total,delivery_address,fulfillment_method,
+           delivery_fee,fulfillment_snapshot)
+         VALUES (?,?,?,?,?,?,?)`,
+        [
+          req.user.id,
+          orderNumber,
+          total,
+          deliveredSellers.length > 0
+            ? deliveryAddress
+            : sellerFulfillment.map((seller) => seller.pickup_address).join(" | "),
+          fulfillmentMethod,
+          deliveryFee,
+          JSON.stringify(sellerFulfillment),
+        ],
       );
       for (const item of req.body.items) {
         const product = byId.get(Number(item.productId));
@@ -2517,24 +3146,41 @@ app.post(
       }
       const commissionRate = Number(process.env.COMMISSION_RATE || 0.1);
       for (const [sellerId, gross] of sellerTotals) {
+        const sellerFulfillmentOption = sellerFulfillment.find(
+          (seller) => seller.seller_id === Number(sellerId),
+        );
         const commission = gross * commissionRate;
         const net = gross - commission;
         const [sale] = await connection.query(
-          "INSERT INTO seller_sales (order_id,seller_id,gross_amount,commission_amount,net_amount) VALUES (?,?,?,?,?)",
-          [order.insertId, sellerId, gross, commission, net],
+          `INSERT INTO seller_sales
+            (order_id,seller_id,gross_amount,delivery_fee,fulfillment_method,
+             delivery_address,commission_amount,net_amount)
+           VALUES (?,?,?,?,?,?,?,?)`,
+          [
+            order.insertId,
+            sellerId,
+            gross,
+            sellerFulfillmentOption.delivery_fee,
+            sellerFulfillmentOption.fulfillment_method,
+            sellerFulfillmentOption.delivery_address,
+            commission,
+            net,
+          ],
         );
         await connection.query(
           "INSERT INTO payouts (seller_sale_id,seller_id,amount) VALUES (?,?,?)",
-          [sale.insertId, sellerId, net],
+          [sale.insertId, sellerId, net + sellerFulfillmentOption.delivery_fee],
         );
       }
       await connection.query(
         "INSERT INTO payments (order_id,amount,provider) VALUES (?,?,?)",
-        [order.insertId, total, "direct_seller"],
+        [order.insertId, total, "vinnht_protected"],
       );
-      await connection.query("INSERT INTO deliveries (order_id) VALUES (?)", [
-        order.insertId,
-      ]);
+      if (fulfillmentMethod === "delivery") {
+        await connection.query("INSERT INTO deliveries (order_id) VALUES (?)", [
+          order.insertId,
+        ]);
+      }
       await connection.query("DELETE FROM cart_items WHERE user_id=?", [req.user.id]);
       await logOrderEvent(connection, {
         orderId: order.insertId,
@@ -2557,13 +3203,21 @@ app.post(
       );
       const [paymentInstructions] = await connection.query(
         `SELECT ss.seller_id,COALESCE(sp.shop_name,u.name) seller_name,
-          COALESCE(sp.whatsapp,u.phone) moncash_number,ss.gross_amount amount
+          ? moncash_number,
+          ss.gross_amount product_amount,
+          ss.delivery_fee,
+          ss.fulfillment_method,
+          ss.delivery_address,
+          (ss.gross_amount+ss.delivery_fee) amount,
+          sp.pickup_address,
+          sp.delivery_zones,
+          sp.opening_hours
          FROM seller_sales ss
          JOIN users u ON u.id=ss.seller_id
          LEFT JOIN seller_profiles sp ON sp.seller_id=ss.seller_id
          WHERE ss.order_id=?
          ORDER BY seller_name`,
-        [order.insertId],
+        [VINNHT_MONCASH_NUMBER, order.insertId],
       );
       await connection.commit();
       res
@@ -2572,7 +3226,18 @@ app.post(
           id: order.insertId,
           orderNumber,
           total,
+          fulfillmentMethod,
+          deliveryFee,
+          fulfillmentChoices: paymentInstructions.map((instruction) => ({
+            sellerId: instruction.seller_id,
+            sellerName: instruction.seller_name,
+            method: instruction.fulfillment_method,
+          })),
           paymentStatus: "pending",
+          paymentAccount: {
+            moncashNumber: VINNHT_MONCASH_NUMBER,
+            accountName: VINNHT_MONCASH_ACCOUNT_NAME,
+          },
           paymentInstructions,
         });
     } catch (error) {
@@ -2698,12 +3363,16 @@ app.get(
         d.delivery_user_id,
         d.status delivery_status,
         d.notes delivery_notes,
+        dp.confirmed_at delivery_signature_captured_at,
+        drc.confirmed_at delivery_client_confirmed_at,
         driver.name delivery_name,
         driver.phone delivery_phone,
         driver.profile_image_url delivery_profile_image_url
       FROM orders o
       LEFT JOIN payments p ON p.order_id=o.id
       LEFT JOIN deliveries d ON d.order_id=o.id
+      LEFT JOIN delivery_proofs dp ON dp.delivery_id=d.id
+      LEFT JOIN delivery_receipt_confirmations drc ON drc.delivery_id=d.id
       LEFT JOIN users driver ON driver.id=d.delivery_user_id
       WHERE o.id=? AND o.client_id=?`,
       [req.params.id, req.user.id],
@@ -2735,20 +3404,30 @@ app.get(
       [order.id],
     );
     const [paymentInstructions] = await pool.query(
-      `SELECT ss.seller_id,COALESCE(sp.shop_name,u.name) seller_name,
-        COALESCE(sp.whatsapp,u.phone) moncash_number,
-        ss.gross_amount amount,
+      `SELECT ss.id seller_sale_id,ss.seller_id,
+        COALESCE(sp.shop_name,u.name) seller_name,
+        ? moncash_number,
+        ss.gross_amount product_amount,
+        ss.delivery_fee,
+        ss.fulfillment_method,
+        ss.delivery_address,
+        (ss.gross_amount+ss.delivery_fee) amount,
         ss.payment_status seller_payment_status,
         ss.payment_proof_url,
         ss.payment_rejection_reason,
         ss.payment_rejected_at,
-        ss.payment_validated_at
+        ss.payment_validated_at,
+        ss.pickup_handed_over_at,
+        ss.pickup_client_confirmed_at,
+        sp.pickup_address,
+        sp.delivery_zones,
+        sp.opening_hours
        FROM seller_sales ss
        JOIN users u ON u.id=ss.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=ss.seller_id
        WHERE ss.order_id=?
        ORDER BY seller_name`,
-      [order.id],
+      [VINNHT_MONCASH_NUMBER, order.id],
     );
     const [events] = await pool.query(
       `SELECT oe.*,COALESCE(sp.shop_name,u.name) actor_name
@@ -2764,6 +3443,8 @@ app.get(
       `SELECT
         CONCAT('seller-',sda.id) assignment_id,
         sda.status delivery_status,
+        sda.confirmed_at signature_captured_at,
+        drc.confirmed_at client_confirmed_at,
         u.id delivery_user_id,
         u.name delivery_name,
         u.phone delivery_phone,
@@ -2773,6 +3454,8 @@ app.get(
        JOIN users u ON u.id=sda.delivery_user_id
        JOIN users seller ON seller.id=sda.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=sda.seller_id
+       LEFT JOIN delivery_receipt_confirmations drc
+         ON drc.seller_delivery_assignment_id=sda.id
        WHERE sda.order_id=?
        ORDER BY shop_name,u.name`,
       [order.id],
@@ -2792,6 +3475,8 @@ app.get(
         delivery_name: order.delivery_name,
         delivery_phone: order.delivery_phone,
         delivery_profile_image_url: order.delivery_profile_image_url,
+        signature_captured_at: order.delivery_signature_captured_at,
+        client_confirmed_at: order.delivery_client_confirmed_at,
         shop_name: null,
       });
     }
@@ -2807,7 +3492,299 @@ app.get(
 );
 
 app.patch(
-  "/api/payments/:orderId/direct-proof",
+  "/api/orders/:id/deliveries/:assignmentId/confirm-receipt",
+  authenticate,
+  authorize("client"),
+  [
+    body("signatureAcknowledged")
+      .custom((value) => value === true)
+      .withMessage("Vous devez confirmer avoir signé et reçu la commande."),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const orderId = Number(req.params.id);
+    const assignmentReference = String(req.params.assignmentId || "");
+
+    if (!Number.isInteger(orderId) || orderId < 1) {
+      return res.status(422).json({ message: "Commande invalide." });
+    }
+
+    const match = assignmentReference.match(/^(seller|main)-(\d+)$/);
+    if (!match) {
+      return res.status(422).json({ message: "Livraison invalide." });
+    }
+
+    const [, assignmentType, rawAssignmentId] = match;
+    const assignmentId = Number(rawAssignmentId);
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      const [[order]] = await connection.query(
+        `SELECT id,order_number,status
+         FROM orders
+         WHERE id=? AND client_id=? FOR UPDATE`,
+        [orderId, req.user.id],
+      );
+
+      if (!order) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Commande introuvable." });
+      }
+
+      if (order.status === "cancelled") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Cette commande est annulée." });
+      }
+
+      let sellerSaleId = null;
+      let sellerIds = [];
+      let newlyConfirmed = false;
+
+      if (assignmentType === "seller") {
+        const [[assignment]] = await connection.query(
+          `SELECT sda.id,sda.seller_sale_id,sda.seller_id,sda.status,
+            sda.signature_data,drc.confirmed_at client_confirmed_at
+           FROM seller_delivery_assignments sda
+           LEFT JOIN delivery_receipt_confirmations drc
+             ON drc.seller_delivery_assignment_id=sda.id
+           WHERE sda.id=? AND sda.order_id=? FOR UPDATE`,
+          [assignmentId, orderId],
+        );
+
+        if (!assignment) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Livraison boutique introuvable." });
+        }
+        if (assignment.status !== "delivered" || !assignment.signature_data) {
+          await connection.rollback();
+          return res.status(409).json({
+            message: "Le livreur doit d’abord enregistrer votre signature.",
+          });
+        }
+
+        sellerSaleId = assignment.seller_sale_id;
+        sellerIds = [assignment.seller_id];
+
+        if (!assignment.client_confirmed_at) {
+          await connection.query(
+            `INSERT INTO delivery_receipt_confirmations
+              (order_id,seller_delivery_assignment_id,client_id,signature_acknowledged)
+             VALUES (?,?,?,1)`,
+            [orderId, assignment.id, req.user.id],
+          );
+          newlyConfirmed = true;
+          await connection.query(
+            "UPDATE seller_sales SET status='completed' WHERE id=? AND status!='cancelled'",
+            [assignment.seller_sale_id],
+          );
+          await connection.query(
+            `UPDATE payouts
+             SET status='processing',released_at=NOW()
+             WHERE seller_sale_id=? AND status='pending'`,
+            [assignment.seller_sale_id],
+          );
+        }
+      } else {
+        const [[delivery]] = await connection.query(
+          `SELECT d.id,d.status,dp.signature_data,
+            drc.confirmed_at client_confirmed_at
+           FROM deliveries d
+           LEFT JOIN delivery_proofs dp ON dp.delivery_id=d.id
+           LEFT JOIN delivery_receipt_confirmations drc ON drc.delivery_id=d.id
+           WHERE d.id=? AND d.order_id=? FOR UPDATE`,
+          [assignmentId, orderId],
+        );
+
+        if (!delivery) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Livraison introuvable." });
+        }
+        if (delivery.status !== "delivered" || !delivery.signature_data) {
+          await connection.rollback();
+          return res.status(409).json({
+            message: "Le livreur doit d’abord enregistrer votre signature.",
+          });
+        }
+
+        const [sellers] = await connection.query(
+          "SELECT DISTINCT seller_id FROM seller_sales WHERE order_id=?",
+          [orderId],
+        );
+        sellerIds = sellers.map((seller) => seller.seller_id);
+
+        if (!delivery.client_confirmed_at) {
+          await connection.query(
+            `INSERT INTO delivery_receipt_confirmations
+              (order_id,delivery_id,client_id,signature_acknowledged)
+             VALUES (?,?,?,1)`,
+            [orderId, delivery.id, req.user.id],
+          );
+          newlyConfirmed = true;
+          await connection.query(
+            `UPDATE seller_sales
+             SET status='completed'
+             WHERE order_id=? AND status NOT IN ('completed','cancelled')`,
+            [orderId],
+          );
+          await connection.query(
+            `UPDATE payouts po
+             JOIN seller_sales ss ON ss.id=po.seller_sale_id
+             SET po.status='processing',po.released_at=NOW()
+             WHERE ss.order_id=? AND po.status='pending'`,
+            [orderId],
+          );
+        }
+      }
+
+      await connection.query(
+        `UPDATE orders o
+         SET o.status='delivered'
+         WHERE o.id=? AND NOT EXISTS (
+           SELECT 1 FROM seller_sales ss
+           WHERE ss.order_id=o.id AND ss.status NOT IN ('completed','cancelled')
+         )`,
+        [orderId],
+      );
+
+      if (newlyConfirmed) {
+        await logOrderEvent(connection, {
+          orderId,
+          sellerSaleId,
+          actorId: req.user.id,
+          actorRole: "client",
+          type: "delivery.receipt_confirmed",
+          title: "Réception confirmée par le client",
+          message: "Le client connecté confirme avoir signé et reçu sa livraison.",
+          metadata: { assignmentReference },
+        });
+
+        for (const sellerId of sellerIds) {
+          await notifyUser(
+            connection,
+            sellerId,
+            "seller",
+            "delivery.receipt_confirmed",
+            "Réception confirmée",
+            `Le client a confirmé depuis son compte la réception de ${order.order_number}.`,
+            "/seller/orders",
+            "order",
+            orderId,
+          );
+        }
+      }
+
+      await connection.commit();
+      res.json({
+        message: newlyConfirmed
+          ? "Merci. Votre réception est confirmée depuis votre compte VinnHT."
+          : "Cette réception avait déjà été confirmée depuis votre compte.",
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
+app.patch(
+  "/api/orders/:id/pickups/:saleId/confirm-receipt",
+  authenticate,
+  authorize("client"),
+  [
+    body("receiptAcknowledged")
+      .custom((value) => value === true)
+      .withMessage("Vous devez confirmer avoir récupéré la commande."),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[sale]] = await connection.query(
+        `SELECT ss.id,ss.order_id,ss.seller_id,ss.status,
+          ss.pickup_handed_over_at,ss.pickup_client_confirmed_at,
+          o.order_number,ss.fulfillment_method
+         FROM seller_sales ss
+         JOIN orders o ON o.id=ss.order_id
+         WHERE ss.id=? AND ss.order_id=? AND o.client_id=? FOR UPDATE`,
+        [req.params.saleId, req.params.id, req.user.id],
+      );
+      if (!sale) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Retrait introuvable." });
+      }
+      if (sale.fulfillment_method !== "pickup" || !sale.pickup_handed_over_at) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "La boutique doit d’abord confirmer la remise de la commande.",
+        });
+      }
+
+      const newlyConfirmed = !sale.pickup_client_confirmed_at;
+      if (newlyConfirmed) {
+        await connection.query(
+          `UPDATE seller_sales
+           SET pickup_client_confirmed_at=NOW(),pickup_confirmed_by=?,status='completed'
+           WHERE id=?`,
+          [req.user.id, sale.id],
+        );
+        await connection.query(
+          `UPDATE payouts
+           SET status='processing',released_at=NOW()
+           WHERE seller_sale_id=? AND status='pending'`,
+          [sale.id],
+        );
+        await connection.query(
+          `UPDATE orders o
+           SET o.status='delivered'
+           WHERE o.id=? AND NOT EXISTS (
+             SELECT 1 FROM seller_sales ss
+             WHERE ss.order_id=o.id AND ss.status NOT IN ('completed','cancelled')
+           )`,
+          [sale.order_id],
+        );
+        await logOrderEvent(connection, {
+          orderId: sale.order_id,
+          sellerSaleId: sale.id,
+          actorId: req.user.id,
+          actorRole: "client",
+          type: "pickup.receipt_confirmed",
+          title: "Retrait confirmé par le client",
+          message: "Le client confirme depuis son compte avoir récupéré ses articles.",
+        });
+        await notifyUser(
+          connection,
+          sale.seller_id,
+          "seller",
+          "pickup.receipt_confirmed",
+          "Retrait confirmé",
+          `Le client a confirmé le retrait de ${sale.order_number}.`,
+          "/seller/orders",
+          "seller_sale",
+          sale.id,
+        );
+      }
+      await connection.commit();
+      res.json({
+        message: newlyConfirmed
+          ? "Merci. Le retrait est confirmé depuis votre compte."
+          : "Ce retrait avait déjà été confirmé.",
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
+app.patch(
+  ["/api/payments/:orderId/proof", "/api/payments/:orderId/direct-proof"],
   authenticate,
   authorize("client"),
   uploadPaymentProof,
@@ -2837,10 +3814,11 @@ app.patch(
       }
 
       const proofUrl = await storeImage(req.file, "payments");
-      const reference = `DIRECT-${Date.now()}`;
+      const reference = `VHTPAY-${Date.now()}`;
       await connection.query(
         `UPDATE payments
-         SET provider='direct_seller',reference=?,proof_url=?,proof_note=?,proof_submitted_at=NOW(),status='pending'
+         SET provider='vinnht_protected',reference=?,proof_url=?,proof_note=?,
+             proof_submitted_at=NOW(),status='pending',rejection_reason=NULL,rejected_at=NULL
          WHERE order_id=?`,
         [reference, proofUrl, req.body.note || null, order.id],
       );
@@ -2881,14 +3859,24 @@ app.patch(
         "payment",
         order.id,
       );
+      await notifyRole(
+        connection,
+        "admin",
+        "payment.review_required",
+        "Paiement VinnHT à vérifier",
+        `Une preuve MonCash a été envoyée pour la commande ${order.order_number}.`,
+        "/admin/payments",
+        "payment",
+        order.id,
+      );
       for (const seller of sellers) {
         await notifyUser(
           connection,
           seller.seller_id,
           "seller",
           "payment.proof_received",
-          "Preuve MonCash recue",
-          `Un client a envoye une preuve pour la commande ${order.order_number}.`,
+          "Paiement en vérification",
+          `VinnHT vérifie le paiement protégé de la commande ${order.order_number}.`,
           "/seller/orders",
           "payment",
           order.id,
@@ -2897,7 +3885,7 @@ app.patch(
 
       await connection.commit();
       res.json({
-        message: "Preuve envoyee. Chaque vendeur doit maintenant verifier et valider sa part du paiement.",
+        message: "Preuve envoyée. Seule l’administration VinnHT peut maintenant valider le paiement.",
         orderId: order.id,
         orderNumber: order.order_number,
         paymentStatus: "pending",
@@ -2913,10 +3901,188 @@ app.patch(
   }),
 );
 app.patch(
+  "/api/admin/payments/:orderId/validate",
+  authenticate,
+  authorize("admin"),
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[payment]] = await connection.query(
+        `SELECT p.*,o.client_id,o.order_number
+         FROM payments p
+         JOIN orders o ON o.id=p.order_id
+         WHERE p.order_id=? FOR UPDATE`,
+        [req.params.orderId],
+      );
+      if (!payment) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Paiement introuvable." });
+      }
+      if (!payment.proof_url) {
+        await connection.rollback();
+        return res.status(409).json({ message: "Aucune preuve MonCash n’a été envoyée." });
+      }
+      if (payment.status === "paid") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Ce paiement est déjà validé." });
+      }
+
+      await connection.query(
+        `UPDATE payments
+         SET status='paid',paid_at=NOW(),validated_by=?,validated_at=NOW(),
+             rejection_reason=NULL,rejected_at=NULL
+         WHERE id=?`,
+        [req.user.id, payment.id],
+      );
+      await connection.query(
+        `UPDATE seller_sales
+         SET payment_status='paid',payment_rejection_reason=NULL,
+             payment_rejected_at=NULL,payment_validated_at=NOW(),payment_validated_by=?,
+             status=CASE WHEN status='pending' THEN 'confirmed' ELSE status END
+         WHERE order_id=?`,
+        [req.user.id, payment.order_id],
+      );
+      await connection.query(
+        "UPDATE orders SET status='confirmed' WHERE id=? AND status='pending'",
+        [payment.order_id],
+      );
+
+      await logOrderEvent(connection, {
+        orderId: payment.order_id,
+        actorId: req.user.id,
+        actorRole: "admin",
+        type: "payment.validated",
+        title: "Paiement protégé validé par VinnHT",
+        message: `L’administration confirme la réception du paiement de ${payment.order_number}.`,
+      });
+      await notifyUser(
+        connection,
+        payment.client_id,
+        "client",
+        "payment.paid",
+        "Paiement confirmé par VinnHT",
+        `Le paiement protégé de la commande ${payment.order_number} est confirmé. Les fonds restent bloqués jusqu’à la réception.`,
+        "/my-orders",
+        "payment",
+        payment.order_id,
+      );
+      const [sellers] = await connection.query(
+        "SELECT DISTINCT seller_id FROM seller_sales WHERE order_id=?",
+        [payment.order_id],
+      );
+      for (const seller of sellers) {
+        await notifyUser(
+          connection,
+          seller.seller_id,
+          "seller",
+          "order.paid",
+          "Nouvelle commande payée à préparer",
+          `Le paiement de ${payment.order_number} est validé par VinnHT. Ouvrez la commande et commencez sa préparation.`,
+          "/seller/orders",
+          "order",
+          payment.order_id,
+        );
+      }
+
+      await connection.commit();
+      res.json({
+        message: "Paiement validé. Les fonds vendeurs restent bloqués jusqu’à la réception.",
+        paymentStatus: "paid",
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+app.patch(
+  "/api/admin/payments/:orderId/reject",
+  authenticate,
+  authorize("admin"),
+  writeRateLimiter,
+  [body("reason").trim().isLength({ min: 8, max: 500 })],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[payment]] = await connection.query(
+        `SELECT p.*,o.client_id,o.order_number
+         FROM payments p
+         JOIN orders o ON o.id=p.order_id
+         WHERE p.order_id=? FOR UPDATE`,
+        [req.params.orderId],
+      );
+      if (!payment) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Paiement introuvable." });
+      }
+      if (!payment.proof_url) {
+        await connection.rollback();
+        return res.status(409).json({ message: "Aucune preuve MonCash n’a été envoyée." });
+      }
+      if (payment.status === "paid") {
+        await connection.rollback();
+        return res.status(409).json({ message: "Un paiement validé ne peut pas être refusé." });
+      }
+
+      await connection.query(
+        `UPDATE payments
+         SET status='failed',rejection_reason=?,rejected_at=NOW(),
+             validated_by=NULL,validated_at=NULL,paid_at=NULL
+         WHERE id=?`,
+        [req.body.reason, payment.id],
+      );
+      await connection.query(
+        `UPDATE seller_sales
+         SET payment_status='failed',payment_rejection_reason=?,payment_rejected_at=NOW(),
+             payment_validated_at=NULL,payment_validated_by=NULL
+         WHERE order_id=?`,
+        [req.body.reason, payment.order_id],
+      );
+      await logOrderEvent(connection, {
+        orderId: payment.order_id,
+        actorId: req.user.id,
+        actorRole: "admin",
+        type: "payment.rejected",
+        title: "Preuve de paiement refusée par VinnHT",
+        message: req.body.reason,
+      });
+      await notifyUser(
+        connection,
+        payment.client_id,
+        "client",
+        "payment.rejected",
+        "Preuve MonCash à corriger",
+        `VinnHT a refusé la preuve de ${payment.order_number}. Motif : ${req.body.reason}`,
+        "/my-orders",
+        "payment",
+        payment.order_id,
+      );
+      await connection.commit();
+      res.json({ message: "Preuve refusée. Le client peut en envoyer une nouvelle." });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+app.patch(
   "/api/seller/sales/:id/payment/validate",
   authenticate,
   authorize("seller"),
   asyncRoute(async (req, res) => {
+    if (PAYMENT_MODEL === "protected_vinnht") {
+      return res.status(403).json({
+        message: "Seule l’administration VinnHT peut valider un paiement protégé.",
+      });
+    }
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -3040,6 +4206,11 @@ app.patch(
   [body("reason").trim().isLength({ min: 8, max: 500 })],
   validate,
   asyncRoute(async (req, res) => {
+    if (PAYMENT_MODEL === "protected_vinnht") {
+      return res.status(403).json({
+        message: "Seule l’administration VinnHT peut refuser un paiement protégé.",
+      });
+    }
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -3647,18 +4818,12 @@ app.patch(
           [req.body.status, req.body.status, req.body.status, req.body.signerName || null, req.body.status, req.body.signatureData || null, req.body.notes || null, req.body.status, assignment.id],
         );
         if (req.body.status === "delivered") {
-          await connection.query("UPDATE seller_sales SET status='completed' WHERE id=?", [assignment.seller_sale_id]);
           await connection.query(
-            `UPDATE orders o
-             SET o.status='delivered'
-             WHERE o.id=? AND NOT EXISTS (
-               SELECT 1 FROM seller_sales ss
-               WHERE ss.order_id=o.id AND ss.status NOT IN ('completed','cancelled')
-             )`,
+            "UPDATE orders SET status='shipped' WHERE id=? AND status!='cancelled'",
             [assignment.order_id],
           );
-          await notifyUser(connection, assignment.seller_id, "seller", "delivery.seller_delivered", "Commande livree", `La livraison de ${assignment.order_number} est finalisee.`, "/seller/orders", "seller_sale", assignment.seller_sale_id);
-          await notifyUser(connection, assignment.client_id, "client", "delivery.seller_delivered", "Livraison confirmee", `Une partie de votre commande ${assignment.order_number} a ete livree.`, "/my-orders", "order", assignment.order_id);
+          await notifyUser(connection, assignment.seller_id, "seller", "delivery.signature_captured", "Signature enregistrée", `La livraison de ${assignment.order_number} a été signée. La confirmation du client est encore requise.`, "/seller/orders", "seller_sale", assignment.seller_sale_id);
+          await notifyUser(connection, assignment.client_id, "client", "delivery.signature_captured", "Confirmez votre réception", `Votre livraison ${assignment.order_number} a été signée. Confirmez maintenant la réception depuis votre compte.`, "/my-orders", "order", assignment.order_id);
         }
         await connection.commit();
         return res.json({ message: "Livraison boutique mise a jour." });
@@ -3718,11 +4883,8 @@ app.patch(
             req.body.notes || null,
           ],
         );
-        await connection.query("UPDATE orders SET status='delivered' WHERE id=?", [
-          delivery.order_id,
-        ]);
         await connection.query(
-          "UPDATE seller_sales SET status='completed' WHERE order_id=? AND status='ready'",
+          "UPDATE orders SET status='shipped' WHERE id=? AND status!='cancelled'",
           [delivery.order_id],
         );
         await notifyUser(
@@ -3730,8 +4892,8 @@ app.patch(
           delivery.client_id,
           "client",
           "delivery.delivered",
-          "Commande livrée",
-          `La commande ${delivery.order_number} a été livrée et signée.`,
+          "Confirmez votre réception",
+          `La commande ${delivery.order_number} a été signée. Confirmez maintenant sa réception depuis votre compte.`,
           "/my-orders",
           "order",
           delivery.order_id,
@@ -3745,9 +4907,9 @@ app.patch(
             connection,
             seller.seller_id,
             "seller",
-            "order.completed",
-            "Commande finalisée",
-            `La commande ${delivery.order_number} a été reçue par le client.`,
+            "delivery.signature_captured",
+            "Signature enregistrée",
+            `La commande ${delivery.order_number} a été signée. La confirmation du client est encore requise.`,
             "/seller/orders",
             "order",
             delivery.order_id,
@@ -3926,12 +5088,25 @@ app.patch(
     try {
       await connection.beginTransaction();
       const [[request]] = await connection.query(
-        "SELECT * FROM seller_requests WHERE id=? AND status='pending' FOR UPDATE",
+        `SELECT sr.*,u.name owner_name,u.phone owner_phone
+         FROM seller_requests sr
+         JOIN users u ON u.id=sr.user_id
+         WHERE sr.id=? AND sr.status='pending'
+         FOR UPDATE`,
         [req.params.id],
       );
       if (!request) {
         await connection.rollback();
         return res.status(404).json({ message: "Demande introuvable." });
+      }
+      if (
+        req.body.status === "approved" &&
+        (!request.moncash_number || !request.moncash_account_name)
+      ) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Le numéro MonCash et le nom du titulaire doivent être vérifiés avant l’approbation.",
+        });
       }
       await connection.query(
         "UPDATE seller_requests SET status=?,rejection_reason=?,reviewed_by=?,reviewed_at=NOW() WHERE id=?",
@@ -3944,6 +5119,37 @@ app.patch(
         await connection.query(
           "INSERT IGNORE INTO user_roles (user_id,role) VALUES (?,'client'),(?,'seller')",
           [request.user_id, request.user_id],
+        );
+        let requestDetails = {};
+        try {
+          requestDetails = JSON.parse(request.description || "{}");
+        } catch {
+          requestDetails = {};
+        }
+        await connection.query(
+          `INSERT INTO seller_profiles
+            (seller_id,shop_name,shop_logo_url,description,whatsapp,
+             moncash_number,moncash_account_name,pickup_address,status)
+           VALUES (?,?,?,?,?,?,?,?, 'active')
+           ON DUPLICATE KEY UPDATE
+            shop_name=VALUES(shop_name),
+            shop_logo_url=COALESCE(VALUES(shop_logo_url),shop_logo_url),
+            description=COALESCE(VALUES(description),description),
+            whatsapp=COALESCE(VALUES(whatsapp),whatsapp),
+            moncash_number=VALUES(moncash_number),
+            moncash_account_name=VALUES(moncash_account_name),
+            pickup_address=COALESCE(VALUES(pickup_address),pickup_address),
+            status='active'`,
+          [
+            request.user_id,
+            request.business_name,
+            request.shop_logo_url || null,
+            requestDetails.shopDescription || null,
+            requestDetails.primaryPhone || request.owner_phone || null,
+            request.moncash_number,
+            request.moncash_account_name,
+            requestDetails.pickupAddress || null,
+          ],
         );
       }
       await notifyUser(
@@ -4206,7 +5412,7 @@ app.get(
         (SELECT COUNT(*) FROM deliveries WHERE status IN ('unassigned','assigned','picked_up','in_transit')) active_deliveries,
         (SELECT COUNT(*) FROM deliveries WHERE status='unassigned') unassigned_deliveries,
         (SELECT COUNT(*) FROM deliveries WHERE status='failed') failed_deliveries,
-        (SELECT COUNT(*) FROM payments WHERE status='pending') pending_payments,
+        (SELECT COUNT(*) FROM payments WHERE status='pending' AND proof_url IS NOT NULL) pending_payments,
         (SELECT COUNT(*) FROM payments WHERE status='failed') failed_payments,
         (SELECT COUNT(*) FROM payouts WHERE status='pending') pending_payouts,
         (SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid') paid_volume,
@@ -4494,7 +5700,8 @@ app.get(
       `SELECT
          u.id,u.name owner_name,u.email,u.phone,u.status,u.created_at,
          COALESCE(sp.shop_name,u.name) shop_name,sp.shop_logo_url,sp.category,
-         sp.description,sp.whatsapp,sp.pickup_address,sp.opening_hours,sp.delivery_zones,
+         sp.description,sp.whatsapp,sp.moncash_number,sp.moncash_account_name,
+         sp.pickup_address,sp.opening_hours,sp.delivery_zones,
          (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id) product_count,
          (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id AND p.status='active') active_product_count,
          (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id AND p.status='active' AND p.stock=0) out_of_stock_count,
@@ -4558,7 +5765,8 @@ app.get(
       `SELECT
          u.id,u.name owner_name,u.email,u.phone,u.status,u.created_at,
          COALESCE(sp.shop_name,u.name) shop_name,sp.shop_logo_url,sp.category,
-         sp.description,sp.whatsapp,sp.pickup_address,sp.opening_hours,sp.delivery_zones,
+         sp.description,sp.whatsapp,sp.moncash_number,sp.moncash_account_name,
+         sp.pickup_address,sp.opening_hours,sp.delivery_zones,
          (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id) product_count,
          (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id AND p.status='active') active_product_count,
          (SELECT COUNT(DISTINCT ss.order_id) FROM seller_sales ss WHERE ss.seller_id=u.id AND ss.status!='cancelled') order_count,
@@ -5045,11 +6253,21 @@ app.get(
   noStore,
   asyncRoute(async (_req, res) => {
     const [rows] = await pool.query(
-      `SELECT p.*,o.order_number,u.name client_name
+      `SELECT p.*,o.order_number,o.status order_status,o.total,
+        u.name client_name,u.email client_email,u.phone client_phone,
+        (SELECT COUNT(*) FROM seller_sales ss WHERE ss.order_id=o.id) seller_count,
+        (SELECT GROUP_CONCAT(DISTINCT COALESCE(sp.shop_name,seller.name)
+          ORDER BY seller.name SEPARATOR ', ')
+         FROM seller_sales ss
+         JOIN users seller ON seller.id=ss.seller_id
+         LEFT JOIN seller_profiles sp ON sp.seller_id=ss.seller_id
+         WHERE ss.order_id=o.id) seller_names
        FROM payments p
        JOIN orders o ON o.id=p.order_id
        JOIN users u ON u.id=o.client_id
-       ORDER BY p.created_at DESC
+       ORDER BY
+         (p.proof_url IS NOT NULL AND p.status IN ('pending','failed')) DESC,
+         COALESCE(p.proof_submitted_at,p.created_at) DESC
        LIMIT 500`,
     );
     res.json(rows);
@@ -5064,9 +6282,11 @@ app.get(
     const [[stats]] = await pool.query(
       `SELECT
         (SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='paid') collected,
-        (SELECT COUNT(*) FROM payments WHERE status='pending') pending_count,
+        (SELECT COUNT(*) FROM payments WHERE status='pending' AND proof_url IS NOT NULL) pending_count,
         (SELECT COUNT(*) FROM payments WHERE status='failed') failed_count,
-        (SELECT COALESCE(SUM(amount),0) FROM payouts WHERE status='pending') seller_due`,
+        (SELECT COALESCE(SUM(amount),0) FROM payouts WHERE status='pending') held_amount,
+        (SELECT COALESCE(SUM(amount),0) FROM payouts WHERE status='processing') releasable_amount,
+        (SELECT COALESCE(SUM(amount),0) FROM payouts WHERE status='paid') seller_paid`,
     );
     const [batches] = await pool.query(
       `SELECT pb.*,COUNT(pbi.id) seller_count
@@ -5076,7 +6296,97 @@ app.get(
        ORDER BY pb.scheduled_for DESC
        LIMIT 20`,
     );
-    res.json({ stats, batches });
+    res.json({
+      stats,
+      batches,
+      paymentAccount: {
+        moncashNumber: VINNHT_MONCASH_NUMBER,
+        accountName: VINNHT_MONCASH_ACCOUNT_NAME,
+      },
+    });
+  }),
+);
+app.get(
+  "/api/admin/payouts",
+  authenticate,
+  authorize("admin"),
+  noStore,
+  asyncRoute(async (_req, res) => {
+    const [rows] = await pool.query(
+      `SELECT po.*,ss.order_id,ss.gross_amount,ss.delivery_fee,ss.net_amount,
+        ss.status sale_status,o.order_number,o.created_at order_created_at,
+        COALESCE(sp.shop_name,u.name) seller_name,
+        COALESCE(sp.moncash_number,sp.whatsapp,u.phone) seller_moncash,
+        sp.moncash_account_name seller_moncash_account_name
+       FROM payouts po
+       JOIN seller_sales ss ON ss.id=po.seller_sale_id
+       JOIN orders o ON o.id=ss.order_id
+       JOIN users u ON u.id=po.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=po.seller_id
+       ORDER BY FIELD(po.status,'processing','pending','failed','paid'),
+         COALESCE(po.released_at,po.created_at) DESC
+       LIMIT 500`,
+    );
+    res.json(rows);
+  }),
+);
+app.patch(
+  "/api/admin/payouts/:id/paid",
+  authenticate,
+  authorize("admin"),
+  writeRateLimiter,
+  [body("reference").trim().isLength({ min: 3, max: 120 })],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[payout]] = await connection.query(
+        `SELECT po.*,o.order_number
+         FROM payouts po
+         JOIN seller_sales ss ON ss.id=po.seller_sale_id
+         JOIN orders o ON o.id=ss.order_id
+         WHERE po.id=? FOR UPDATE`,
+        [req.params.id],
+      );
+      if (!payout) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Versement vendeur introuvable." });
+      }
+      if (payout.status !== "processing") {
+        await connection.rollback();
+        return res.status(409).json({
+          message:
+            payout.status === "paid"
+              ? "Ce versement est déjà marqué comme payé."
+              : "Les fonds ne sont pas encore libérés par la réception du client.",
+        });
+      }
+      await connection.query(
+        `UPDATE payouts
+         SET status='paid',paid_at=NOW(),payment_reference=?,paid_by=?
+         WHERE id=?`,
+        [req.body.reference, req.user.id, payout.id],
+      );
+      await notifyUser(
+        connection,
+        payout.seller_id,
+        "seller",
+        "payout.paid",
+        "Versement vendeur effectué",
+        `VinnHT a transféré ${Number(payout.amount).toLocaleString("fr-HT")} HTG pour ${payout.order_number}.`,
+        "/seller/sales",
+        "payout",
+        payout.id,
+      );
+      await connection.commit();
+      res.json({ message: "Versement marqué comme payé au vendeur." });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }),
 );
 app.get(
@@ -5136,6 +6446,19 @@ app.patch(
         "UPDATE payout_batch_items SET status='paid',paid_at=NOW() WHERE batch_id=?",
         [batch.id],
       );
+      await connection.query(
+        `UPDATE payouts
+         SET status='paid',paid_at=NOW(),paid_by=?,payment_reference=?
+         WHERE status='processing'
+           AND released_at>=?
+           AND released_at<DATE_ADD(?,INTERVAL 1 DAY)`,
+        [
+          req.user.id,
+          `BATCH-${batch.id}`,
+          batch.period_start,
+          batch.period_end,
+        ],
+      );
       const [items] = await connection.query(
         "SELECT seller_id,amount FROM payout_batch_items WHERE batch_id=?",
         [batch.id],
@@ -5162,24 +6485,6 @@ app.patch(
     } finally {
       connection.release();
     }
-  }),
-);
-app.get(
-  "/api/admin/payouts",
-  authenticate,
-  authorize("admin"),
-  noStore,
-  asyncRoute(async (_req, res) => {
-    const [rows] = await pool.query(
-      `SELECT po.*,u.name seller_name,o.order_number
-       FROM payouts po
-       JOIN users u ON u.id=po.seller_id
-       JOIN seller_sales ss ON ss.id=po.seller_sale_id
-       JOIN orders o ON o.id=ss.order_id
-       ORDER BY po.created_at DESC
-       LIMIT 500`,
-    );
-    res.json(rows);
   }),
 );
 app.get(

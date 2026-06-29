@@ -16,8 +16,11 @@ const register = async (email, educationStatus, educationInstitution) => {
       email,
       phone: "37009999",
       password,
-      ...(educationStatus ? { educationStatus } : {}),
-      ...(educationInstitution ? { educationInstitution } : {}),
+      activityStatus: educationStatus || "other",
+      ...(educationInstitution ? { activityOrganization: educationInstitution } : {}),
+      ...(!educationStatus ? { activityDetails: "Autre situation de test" } : {}),
+      termsAccepted: true,
+      termsVersion: "2026-06-28-v5",
     }),
   });
 

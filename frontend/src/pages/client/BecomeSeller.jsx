@@ -14,7 +14,7 @@ import {
 import { apiOrigin } from "../../config/runtime.js";
 import "../../styles/seller-flow.css";
 
-const SELLER_TERMS_VERSION = "2026-06-24-v2";
+const SELLER_TERMS_VERSION = "2026-06-28-v5";
 const terms = [
   "Je certifie que toutes les informations fournies sont exactes et à jour.",
   "J’accepte que VinnHT vérifie mon profil avant l’approbation de mon espace vendeur.",
@@ -23,7 +23,9 @@ const terms = [
   "Je m’engage à vendre uniquement des produits légaux, authentiques et conformes aux règles de VinnHT.",
   "Je m’engage à publier des photos réelles, des prix exacts et des descriptions honnêtes.",
   "Je m’engage à maintenir mes stocks à jour et à préparer les commandes dans les délais annoncés.",
-  "Je comprends que les paiements sont envoyés directement sur mon compte MonCash et que je dois vérifier chaque preuve avant de préparer une commande.",
+  "Je comprends que VinnHT fournit des outils de suivi mais n’est pas le transporteur : ma boutique et le livreur choisi restent responsables de l’exécution matérielle de la livraison.",
+  "Je comprends que le retrait en boutique est gratuit et que le choix Livraison ajoute 500 HTG à ma vente pour le service de mon livreur.",
+  "Je comprends que les clients paient VinnHT, que seule l’administration valide la preuve et que mes fonds sont libérés après confirmation de réception.",
   "Je m’engage à protéger les informations des clients et à les utiliser uniquement pour traiter leurs commandes.",
   "Je comprends que VinnHT peut refuser, suspendre ou désactiver mon espace vendeur en cas de fraude, fausses informations, produits interdits ou mauvais comportement.",
   "Je comprends que VinnHT peut demander des informations supplémentaires pour confirmer mon profil ou ma boutique.",
@@ -52,6 +54,8 @@ const initialForm = {
   shopDescription: "",
   shopLogo: null,
   pickupAddress: "",
+  moncashNumber: "",
+  moncashAccountName: "",
 };
 
 const requiredLabels = {
@@ -68,6 +72,8 @@ const requiredLabels = {
   shopName: "Nom de la boutique",
   shopDescription: "Description de la boutique",
   pickupAddress: "Adresse de récupération",
+  moncashNumber: "Numéro MonCash",
+  moncashAccountName: "Nom du titulaire MonCash",
 };
 
 export default function BecomeSellerPage({ api, user, updateUser }) {
@@ -77,6 +83,8 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
     email: user.email || "",
     primaryPhone: user.phone || "",
     profilePhoto: user.profile_image_url || null,
+    moncashNumber: user.phone || "",
+    moncashAccountName: user.name || "",
   }));
   const [request, setRequest] = useState(null);
   const [errors, setErrors] = useState({});
@@ -153,6 +161,8 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
       delete requestDetails.profilePhoto;
       delete requestDetails.shopLogo;
       requestFormData.append("businessName", sellerRequestData.shopName);
+      requestFormData.append("moncashNumber", sellerRequestData.moncashNumber);
+      requestFormData.append("moncashAccountName", sellerRequestData.moncashAccountName);
       requestFormData.append("description", JSON.stringify(requestDetails, null, 2));
       requestFormData.append("termsAccepted", "true");
       requestFormData.append("termsVersion", SELLER_TERMS_VERSION);
@@ -229,7 +239,7 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
           [
             ShieldCheck,
             "Paiement sécurisé",
-            "Le client paie directement votre numéro MonCash et vous vérifiez sa preuve avant la préparation.",
+            "Le client paie VinnHT. Après réception confirmée, vos fonds sont transférés vers le compte MonCash déclaré.",
           ],
         ].map(([Icon, title, text]) => (
           <motion.article whileHover={{ y: -5 }} key={title}>
@@ -424,6 +434,24 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
             errors={errors}
             onChange={setField}
           />
+          <TextField
+            label="Numéro MonCash pour recevoir vos fonds"
+            field="moncashNumber"
+            form={form}
+            errors={errors}
+            onChange={setField}
+          />
+          <TextField
+            label="Nom complet affiché sur le compte MonCash"
+            field="moncashAccountName"
+            form={form}
+            errors={errors}
+            onChange={setField}
+          />
+          <p className="seller-moncash-help full">
+            Vérifiez attentivement ces informations. VinnHT les utilisera pour transférer vos fonds
+            après confirmation de la réception par le client.
+          </p>
         </FormSection>
 
         <button className="seller-submit-button" type="submit">

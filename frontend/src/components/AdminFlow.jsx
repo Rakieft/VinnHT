@@ -353,7 +353,7 @@ export function AdminDashboardContent({ api, user }) {
       label: "Paiements à vérifier",
       value: Number(stats.pending_payments || 0) + Number(stats.failed_payments || 0),
       text: `${stats.failed_payments || 0} paiement(s) échoué(s)`,
-      link: "/admin#weekly-report",
+      link: "/admin/payments",
       tone: "red",
     },
     {
@@ -384,6 +384,7 @@ export function AdminDashboardContent({ api, user }) {
   const quickLinks = [
     [Users, "Gérer les utilisateurs", "/admin/users"],
     [Boxes, "Contrôler les produits", "/admin/products"],
+    [CreditCard, "Vérifier les paiements", "/admin/payments"],
     [FileText, "Rapport hebdomadaire", "#weekly-report"],
     [FileText, "Suivre la progression", "/admin#weekly-report"],
     [Store, "Suivre les boutiques", "/admin/users"],
@@ -1687,6 +1688,348 @@ export function AdminProductsContent({ api }) {
         </aside>
       )}
     </div>
+  );
+}
+
+export function AdminPaymentsContent({ api }) {
+  const [payments, setPayments] = useState([]);
+  const [payouts, setPayouts] = useState([]);
+  const [center, setCenter] = useState({ stats: {}, paymentAccount: {} });
+  const [activeTab, setActiveTab] = useState("proofs");
+  const [statusFilter, setStatusFilter] = useState("review");
+  const [query, setQuery] = useState("");
+  const [rejectReasons, setRejectReasons] = useState({});
+  const [payoutReferences, setPayoutReferences] = useState({});
+  const [selectedProof, setSelectedProof] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    setError("");
+    try {
+      const [{ data: paymentRows }, { data: payoutRows }, { data: centerData }] =
+        await Promise.all([
+          api.get("/admin/payments"),
+          api.get("/admin/payouts"),
+          api.get("/admin/payment-center"),
+        ]);
+      setPayments(paymentRows);
+      setPayouts(payoutRows);
+      setCenter(centerData);
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message ||
+          "Impossible de charger le centre de paiements.",
+      );
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const validatePayment = async (payment) => {
+    setBusy(`payment-${payment.order_id}`);
+    setMessage("");
+    setError("");
+    try {
+      const { data } = await api.patch(
+        `/admin/payments/${payment.order_id}/validate`,
+      );
+      setMessage(data.message);
+      await load();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Validation impossible.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const rejectPayment = async (payment) => {
+    const reason = String(rejectReasons[payment.id] || "").trim();
+    if (reason.length < 8) {
+      setError("Indiquez un motif de refus d’au moins 8 caractères.");
+      return;
+    }
+    setBusy(`payment-${payment.order_id}`);
+    setMessage("");
+    setError("");
+    try {
+      const { data } = await api.patch(
+        `/admin/payments/${payment.order_id}/reject`,
+        { reason },
+      );
+      setMessage(data.message);
+      setRejectReasons((current) => ({ ...current, [payment.id]: "" }));
+      await load();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Refus impossible.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const markPayoutPaid = async (payout) => {
+    const reference = String(payoutReferences[payout.id] || "").trim();
+    if (reference.length < 3) {
+      setError("Ajoutez la référence du transfert MonCash vendeur.");
+      return;
+    }
+    setBusy(`payout-${payout.id}`);
+    setMessage("");
+    setError("");
+    try {
+      const { data } = await api.patch(`/admin/payouts/${payout.id}/paid`, {
+        reference,
+      });
+      setMessage(data.message);
+      setPayoutReferences((current) => ({ ...current, [payout.id]: "" }));
+      await load();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Versement impossible.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visiblePayments = payments.filter((payment) => {
+    const matchesQuery = `${payment.order_number} ${payment.client_name} ${payment.seller_names}`
+      .toLowerCase()
+      .includes(normalizedQuery);
+    const matchesStatus =
+      statusFilter === "all"
+        ? true
+        : statusFilter === "review"
+          ? payment.proof_url && ["pending", "failed"].includes(payment.status)
+          : payment.status === statusFilter;
+    return matchesQuery && matchesStatus;
+  });
+  const visiblePayouts = payouts.filter((payout) =>
+    `${payout.order_number} ${payout.seller_name}`
+      .toLowerCase()
+      .includes(normalizedQuery),
+  );
+  const stats = center.stats || {};
+
+  return (
+    <section className="admin-payments-page">
+      <header className="admin-payments-hero">
+        <div>
+          <span>Paiement protégé VinnHT</span>
+          <h1>Contrôlez les fonds sans perdre le fil.</h1>
+          <p>
+            VinnHT valide les paiements clients, bloque les parts vendeurs puis autorise
+            leur versement uniquement après confirmation de réception.
+          </p>
+        </div>
+        <aside>
+          <ShieldCheck />
+          <small>Compte MonCash VinnHT</small>
+          <strong>{center.paymentAccount?.accountName || "VinnHT"}</strong>
+          <b>{center.paymentAccount?.moncashNumber || "Numéro à configurer"}</b>
+        </aside>
+      </header>
+
+      <div className="admin-payment-stats">
+        {[
+          [CreditCard, "Encaissé", stats.collected, "Paiements validés"],
+          [ShieldCheck, "Fonds bloqués", stats.held_amount, "Réception attendue"],
+          [Wallet, "À verser", stats.releasable_amount, "Réception confirmée"],
+          [CheckCircle2, "Versé", stats.seller_paid, "Transferts terminés"],
+        ].map(([Icon, label, value, note]) => (
+          <article key={label}>
+            <Icon />
+            <small>{label}</small>
+            <strong>{money(value)}</strong>
+            <span>{note}</span>
+          </article>
+        ))}
+      </div>
+
+      {message && <div className="admin-feedback success">{message}</div>}
+      {error && <div className="admin-feedback error">{error}</div>}
+
+      <div className="admin-payment-toolbar">
+        <nav>
+          <button
+            className={activeTab === "proofs" ? "active" : ""}
+            onClick={() => setActiveTab("proofs")}
+          >
+            <CreditCard /> Preuves clients
+          </button>
+          <button
+            className={activeTab === "payouts" ? "active" : ""}
+            onClick={() => setActiveTab("payouts")}
+          >
+            <Wallet /> Versements vendeurs
+          </button>
+        </nav>
+        <label>
+          <Search />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Commande, client ou boutique"
+          />
+        </label>
+      </div>
+
+      {activeTab === "proofs" ? (
+        <>
+          <div className="admin-payment-filters">
+            {["review", "all", "pending", "paid", "failed"].map((status) => (
+              <button
+                className={statusFilter === status ? "active" : ""}
+                onClick={() => setStatusFilter(status)}
+                key={status}
+              >
+                {{
+                  review: "À vérifier",
+                  all: "Tous",
+                  pending: "En attente",
+                  paid: "Validés",
+                  failed: "Refusés",
+                }[status]}
+              </button>
+            ))}
+          </div>
+          <div className="admin-payment-list">
+            {visiblePayments.map((payment) => (
+              <article key={payment.id}>
+                <header>
+                  <div>
+                    <small>{payment.order_number}</small>
+                    <h3>{payment.client_name}</h3>
+                    <p>{payment.seller_names || "Boutique VinnHT"}</p>
+                  </div>
+                  <Status value={payment.status} />
+                </header>
+                <div className="admin-payment-amount">
+                  <span>Montant reçu</span>
+                  <strong>{money(payment.amount)}</strong>
+                  <small>{shortDate(payment.proof_submitted_at || payment.created_at)}</small>
+                </div>
+                {payment.proof_url ? (
+                  <button
+                    className="admin-proof-preview"
+                    onClick={() => setSelectedProof(payment)}
+                  >
+                    <img src={assetUrl(payment.proof_url)} alt="Preuve MonCash" />
+                    <span><Eye /> Examiner la preuve</span>
+                  </button>
+                ) : (
+                  <div className="admin-proof-empty"><Clock3 /> Preuve client attendue</div>
+                )}
+                {payment.rejection_reason && (
+                  <p className="admin-payment-rejection">
+                    <AlertTriangle /> {payment.rejection_reason}
+                  </p>
+                )}
+                {payment.proof_url && payment.status !== "paid" && (
+                  <div className="admin-payment-review-actions">
+                    <input
+                      value={rejectReasons[payment.id] || ""}
+                      onChange={(event) =>
+                        setRejectReasons((current) => ({
+                          ...current,
+                          [payment.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="Motif uniquement si refus"
+                    />
+                    <button
+                      className="reject"
+                      disabled={busy === `payment-${payment.order_id}`}
+                      onClick={() => rejectPayment(payment)}
+                    >
+                      <X /> Refuser
+                    </button>
+                    <button
+                      disabled={busy === `payment-${payment.order_id}`}
+                      onClick={() => validatePayment(payment)}
+                    >
+                      <CheckCircle2 /> Valider
+                    </button>
+                  </div>
+                )}
+              </article>
+            ))}
+            {!visiblePayments.length && (
+              <div className="admin-payment-empty">
+                <ShieldCheck />
+                <h3>Aucun paiement dans cette file.</h3>
+                <p>Les nouvelles preuves apparaîtront automatiquement ici.</p>
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="admin-payout-list">
+          {visiblePayouts.map((payout) => (
+            <article key={payout.id}>
+              <header>
+                <div>
+                  <small>{payout.order_number}</small>
+                  <h3>{payout.seller_name}</h3>
+                </div>
+                <Status value={payout.status} />
+              </header>
+              <strong>{money(payout.amount)}</strong>
+              <p>MonCash vendeur : {payout.seller_moncash || "Non renseigné"}</p>
+              <small>
+                {payout.status === "pending"
+                  ? "Fonds bloqués jusqu’à la confirmation client"
+                  : payout.status === "processing"
+                    ? "Fonds libérés : transfert autorisé"
+                    : payout.status === "paid"
+                      ? `Versé · ${payout.payment_reference || "référence enregistrée"}`
+                      : "Versement suspendu"}
+              </small>
+              {payout.status === "processing" && (
+                <div>
+                  <input
+                    value={payoutReferences[payout.id] || ""}
+                    onChange={(event) =>
+                      setPayoutReferences((current) => ({
+                        ...current,
+                        [payout.id]: event.target.value,
+                      }))
+                    }
+                    placeholder="Référence transfert MonCash"
+                  />
+                  <button
+                    disabled={busy === `payout-${payout.id}`}
+                    onClick={() => markPayoutPaid(payout)}
+                  >
+                    <Send /> Confirmer le versement
+                  </button>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+
+      {selectedProof && (
+        <div className="admin-proof-modal" role="presentation">
+          <section role="dialog" aria-modal="true" aria-label="Preuve MonCash">
+            <header>
+              <div>
+                <small>{selectedProof.order_number}</small>
+                <h2>Preuve de {selectedProof.client_name}</h2>
+              </div>
+              <button onClick={() => setSelectedProof(null)} aria-label="Fermer">
+                <X />
+              </button>
+            </header>
+            <img src={assetUrl(selectedProof.proof_url)} alt="Preuve de paiement MonCash" />
+            {selectedProof.proof_note && <p>{selectedProof.proof_note}</p>}
+          </section>
+        </div>
+      )}
+    </section>
   );
 }
 

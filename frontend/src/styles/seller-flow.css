@@ -2751,6 +2751,18 @@
   background: radial-gradient(circle at 96% 0, rgba(37, 99, 235, 0.05), transparent 28%), #ffffff;
 }
 
+.seller-moncash-help {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 17px;
+  color: #166534 !important;
+  background: #f0fdf4;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
 .seller-form-grid label {
   display: grid;
   gap: 7px;
