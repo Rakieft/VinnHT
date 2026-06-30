@@ -136,6 +136,118 @@ const haitiDepartments = [
   "Sud-Est",
 ];
 
+const PRODUCT_PACK_SIZES = [3, 6, 12, 24];
+
+const normalizePackOptions = (options) =>
+  (Array.isArray(options) ? options : [])
+    .map((option) => ({
+      unitsPerPack: Number(option.unitsPerPack ?? option.units_per_pack),
+      price: option.price ?? "",
+    }))
+    .filter((option) => PRODUCT_PACK_SIZES.includes(option.unitsPerPack));
+
+function ProductPackOptionsEditor({ options, onChange, compact = false }) {
+  const normalizedOptions = normalizePackOptions(options);
+  const enabled = normalizedOptions.length > 0;
+
+  const setEnabled = (nextEnabled) => {
+    onChange(nextEnabled ? [{ unitsPerPack: 3, price: "" }] : []);
+  };
+
+  const toggleSize = (packSize) => {
+    const exists = normalizedOptions.some(
+      (option) => option.unitsPerPack === packSize,
+    );
+    if (exists) {
+      onChange(
+        normalizedOptions.filter(
+          (option) => option.unitsPerPack !== packSize,
+        ),
+      );
+      return;
+    }
+    onChange(
+      [...normalizedOptions, { unitsPerPack: packSize, price: "" }].sort(
+        (first, second) => first.unitsPerPack - second.unitsPerPack,
+      ),
+    );
+  };
+
+  const updatePrice = (packSize, price) => {
+    onChange(
+      normalizedOptions.map((option) =>
+        option.unitsPerPack === packSize
+          ? { ...option, price }
+          : option,
+      ),
+    );
+  };
+
+  return (
+    <section className={`seller-pack-options ${compact ? "compact" : ""}`}>
+      <label className="seller-pack-master-toggle">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => setEnabled(event.target.checked)}
+        />
+        <span>
+          <b>Proposer aussi la vente par lots</b>
+          <small>
+            Le produit reste disponible à l’unité. Activez seulement les lots que vous souhaitez vendre.
+          </small>
+        </span>
+      </label>
+
+      {enabled && (
+        <div className="seller-pack-grid">
+          {PRODUCT_PACK_SIZES.map((packSize) => {
+            const option = normalizedOptions.find(
+              (item) => item.unitsPerPack === packSize,
+            );
+            const selected = Boolean(option);
+
+            return (
+              <article className={selected ? "selected" : ""} key={packSize}>
+                <label className="seller-pack-choice">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleSize(packSize)}
+                  />
+                  <span>
+                    <strong>Lot de {packSize}</strong>
+                    <small>{packSize} unités</small>
+                  </span>
+                </label>
+                {selected && (
+                  <label className="seller-pack-price">
+                    Prix du lot
+                    <span>
+                      <input
+                        required
+                        min="1"
+                        step="0.01"
+                        type="number"
+                        value={option.price}
+                        onChange={(event) =>
+                          updatePrice(packSize, event.target.value)
+                        }
+                        placeholder="0"
+                      />
+                      <b>HTG</b>
+                    </span>
+                  </label>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function SellerProductsContent({ api }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -218,6 +330,10 @@ export function SellerProductsContent({ api }) {
         department: editing.department || "",
         city: editing.city || "",
         attributes: Object.keys(editedAttributes).length ? editedAttributes : undefined,
+        packOptions: normalizePackOptions(editing.pack_options).map((option) => ({
+          unitsPerPack: option.unitsPerPack,
+          price: Number(option.price),
+        })),
       });
       setEditing(null);
       setMessage("Produit modifie avec succes.");
@@ -236,6 +352,7 @@ export function SellerProductsContent({ api }) {
     setEditing({
       ...product,
       attributes: parseProductAttributes(product.attributes),
+      pack_options: normalizePackOptions(product.pack_options),
     });
   };
 
@@ -352,6 +469,14 @@ export function SellerProductsContent({ api }) {
               <p className="seller-product-location">
                 {product.department || "Departement"} - {product.city || "Ville non renseignee"}
               </p>
+              {product.pack_options?.length > 0 && (
+                <div className="seller-product-pack-summary">
+                  <Package size={14} />
+                  Lots disponibles : {product.pack_options
+                    .map((option) => option.units_per_pack)
+                    .join(", ")}
+                </div>
+              )}
               <div className="product-bottom seller-product-price-row">
                 <strong>
                   {Number(product.promotional_price || product.price).toLocaleString("fr-HT")} HTG
@@ -450,6 +575,18 @@ export function SellerProductsContent({ api }) {
                 Un stock à zéro masque automatiquement le produit côté client.
               </small>
             </label>
+            <div className="seller-edit-pack-options full">
+              <ProductPackOptionsEditor
+                compact
+                options={editing.pack_options}
+                onChange={(packOptions) =>
+                  setEditing({
+                    ...editing,
+                    pack_options: packOptions,
+                  })
+                }
+              />
+            </div>
             <label>
               Département
               <select
@@ -565,6 +702,7 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
     city: "",
   });
   const [attributes, setAttributes] = useState({});
+  const [packOptions, setPackOptions] = useState([]);
   const [images, setImages] = useState([]);
   const [previews, setPreviews] = useState([]);
 
@@ -579,11 +717,21 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
       const data = new FormData();
       Object.entries(form).forEach(([key, value]) => data.append(key, value));
       data.append("attributes", JSON.stringify(attributes));
+      data.append(
+        "packOptions",
+        JSON.stringify(
+          normalizePackOptions(packOptions).map((option) => ({
+            unitsPerPack: option.unitsPerPack,
+            price: Number(option.price),
+          })),
+        ),
+      );
       if (images[0]) data.append("images", images[0]);
       await api.post("/products", data);
       setMessage("Produit ajoute avec succes.");
       setForm({ name: "", categoryId: "", description: "", price: "", stock: "", department: "Ouest", city: "" });
       setAttributes({});
+      setPackOptions([]);
       setImages([]);
       setPreviews([]);
       onCreated?.();
@@ -743,6 +891,12 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
               />
               <small>Minimum 1 unité pour rendre le produit visible aux clients.</small>
             </label>
+            <div className="seller-studio-pack-options">
+              <ProductPackOptionsEditor
+                options={packOptions}
+                onChange={setPackOptions}
+              />
+            </div>
           </ProductStudioSection>
 
           <section className="seller-product-form-section">
@@ -808,6 +962,16 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
           </small>
           <h3>{form.name || "Nom de votre produit"}</h3>
           <strong>{Number(form.price || 0).toLocaleString("fr-HT")} HTG</strong>
+          {packOptions.length > 0 && (
+            <div className="seller-preview-packs">
+              {normalizePackOptions(packOptions).map((option) => (
+                <span key={option.unitsPerPack}>
+                  Lot de {option.unitsPerPack}
+                  <b>{Number(option.price || 0).toLocaleString("fr-HT")} HTG</b>
+                </span>
+              ))}
+            </div>
+          )}
           <p>{form.description || "La description de votre produit apparaitra ici."}</p>
           {attributeFields.slice(0, 3).map((field) =>
             attributes[field.key] ? (
@@ -1337,11 +1501,15 @@ export function SellerOrdersContent({ api }) {
             </header>
             <div className="seller-order-items">
               {(order.items || []).map((item) => (
-                <div key={item.product_id}>
+                <div key={`${item.product_id}:${item.pack_size || 1}`}>
                   <img src={imageSource(item.image_url)} alt={item.name} />
                   <span>
                     <strong>{item.name}</strong>
-                    <small>Quantite : {item.quantity}</small>
+                    <small>
+                      {Number(item.pack_size || 1) === 1
+                        ? `Quantité : ${item.quantity}`
+                        : `${item.quantity} lot(s) de ${item.pack_size} · ${item.units_total} unités`}
+                    </small>
                   </span>
                   <b>{money(item.subtotal)}</b>
                 </div>

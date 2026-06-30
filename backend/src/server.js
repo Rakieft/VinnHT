@@ -230,6 +230,71 @@ const sanitizeProductAttributes = (rawAttributes, categorySlug) => {
   return sanitized;
 };
 
+const PRODUCT_PACK_SIZES = [3, 6, 12, 24];
+const PRODUCT_PACK_SIZE_SET = new Set(PRODUCT_PACK_SIZES);
+
+const sanitizeProductPackOptions = (rawOptions) => {
+  let parsed = rawOptions;
+
+  if (typeof rawOptions === "string") {
+    if (Buffer.byteLength(rawOptions, "utf8") > 4096) {
+      const error = new Error("Les formats de vente sont trop volumineux.");
+      error.status = 422;
+      throw error;
+    }
+
+    try {
+      parsed = rawOptions ? JSON.parse(rawOptions) : [];
+    } catch {
+      const error = new Error("Les formats de vente sont invalides.");
+      error.status = 422;
+      throw error;
+    }
+  }
+
+  if (parsed === undefined || parsed === null || parsed === "") return [];
+  if (!Array.isArray(parsed)) {
+    const error = new Error("Les formats de vente sont invalides.");
+    error.status = 422;
+    throw error;
+  }
+
+  const seenSizes = new Set();
+  return parsed.map((option) => {
+    const unitsPerPack = Number(option?.unitsPerPack ?? option?.units_per_pack);
+    const price = Number(option?.price);
+
+    if (!PRODUCT_PACK_SIZE_SET.has(unitsPerPack) || seenSizes.has(unitsPerPack)) {
+      const error = new Error("Chaque format doit être unique et correspondre à 3, 6, 12 ou 24 unités.");
+      error.status = 422;
+      throw error;
+    }
+    if (!Number.isFinite(price) || price <= 0 || price > 99_999_999_999.99) {
+      const error = new Error(`Indiquez un prix valide pour le lot de ${unitsPerPack}.`);
+      error.status = 422;
+      throw error;
+    }
+
+    seenSizes.add(unitsPerPack);
+    return {
+      unitsPerPack,
+      price: Number(price.toFixed(2)),
+    };
+  });
+};
+
+const replaceProductPackOptions = async (executor, productId, options) => {
+  await executor.query("DELETE FROM product_pack_options WHERE product_id=?", [productId]);
+  for (const option of options) {
+    await executor.query(
+      `INSERT INTO product_pack_options
+        (product_id,units_per_pack,price,is_active)
+       VALUES (?,?,?,TRUE)`,
+      [productId, option.unitsPerPack, option.price],
+    );
+  }
+};
+
 const dateOnly = (value) => new Date(`${value}T12:00:00`);
 const sqlDate = (date) => date.toISOString().slice(0, 10);
 const sqlDateTime = (value) =>
@@ -821,6 +886,11 @@ const notifyRole = async (
 };
 const clientProductSelect = `
   SELECT p.*,COALESCE(p.department,'Ouest') department,COALESCE(p.city,'Haiti') city,c.name category_name,u.name seller_name,
+    (
+      SELECT GROUP_CONCAT(ppo.units_per_pack ORDER BY ppo.units_per_pack SEPARATOR ',')
+      FROM product_pack_options ppo
+      WHERE ppo.product_id=p.id AND ppo.is_active=TRUE
+    ) pack_sizes,
     CASE
       WHEN p.is_featured=TRUE
         AND p.promotional_price IS NOT NULL
@@ -1542,6 +1612,9 @@ app.get(
       `SELECT p.*, c.name category_name, c.slug category_slug,
         COALESCE(sp.shop_name,u.name) seller_name,
         COALESCE(p.city,sp.pickup_address,'Haïti') city,
+        pack_meta.pack_sizes,
+        COALESCE(pack_meta.pack_option_count,0) pack_option_count,
+        pack_meta.minimum_pack_price,
         EXISTS(
           SELECT 1 FROM seller_sponsorships ss
           WHERE ss.seller_id=p.seller_id
@@ -1553,6 +1626,15 @@ app.get(
        JOIN categories c ON c.id=p.category_id
        JOIN users u ON u.id=p.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
+       LEFT JOIN (
+         SELECT product_id,
+           GROUP_CONCAT(units_per_pack ORDER BY units_per_pack SEPARATOR ',') pack_sizes,
+           COUNT(*) pack_option_count,
+           MIN(price) minimum_pack_price
+         FROM product_pack_options
+         WHERE is_active=TRUE
+         GROUP BY product_id
+       ) pack_meta ON pack_meta.product_id=p.id
        ${where}
        ORDER BY is_sponsored DESC,p.is_featured DESC,p.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -1649,13 +1731,22 @@ app.get(
     await pool.query(
       `DELETE ci FROM cart_items ci
        JOIN products p ON p.id=ci.product_id
-       WHERE ci.user_id=? AND (p.status<>'active' OR p.stock<1)`,
+       LEFT JOIN product_pack_options ppo
+         ON ppo.product_id=ci.product_id
+        AND ppo.units_per_pack=ci.pack_size
+        AND ppo.is_active=TRUE
+       WHERE ci.user_id=?
+         AND (
+           p.status<>'active' OR
+           p.stock<ci.pack_size OR
+           (ci.pack_size>1 AND ppo.id IS NULL)
+         )`,
       [req.user.id],
     );
     await pool.query(
       `UPDATE cart_items ci
        JOIN products p ON p.id=ci.product_id
-       SET ci.quantity=LEAST(ci.quantity,p.stock)
+       SET ci.quantity=LEAST(ci.quantity,FLOOR(p.stock/ci.pack_size))
        WHERE ci.user_id=?`,
       [req.user.id],
     );
@@ -1676,8 +1767,12 @@ app.get(
             AND delivery_user.status='active'
         ) seller_has_delivery_driver,
         ci.quantity,
+        ci.pack_size,
+        (ci.quantity*ci.pack_size) units_total,
+        FLOOR(p.stock/ci.pack_size) available_pack_count,
         ci.price_snapshot cart_price_snapshot,
         CASE
+          WHEN ci.pack_size>1 THEN ppo.price
           WHEN p.is_featured=TRUE
             AND p.promotional_price IS NOT NULL
             AND p.promotional_price < p.price
@@ -1690,6 +1785,10 @@ app.get(
        JOIN categories c ON c.id=p.category_id
        JOIN users u ON u.id=p.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=p.seller_id
+       LEFT JOIN product_pack_options ppo
+         ON ppo.product_id=ci.product_id
+        AND ppo.units_per_pack=ci.pack_size
+        AND ppo.is_active=TRUE
        WHERE ci.user_id=? AND p.status='active' AND p.stock>0
        ORDER BY ci.updated_at DESC`,
       [req.user.id],
@@ -1708,31 +1807,19 @@ app.get(
       };
     });
 
-    await pool.query(
-      `UPDATE cart_items ci
-       JOIN products p ON p.id=ci.product_id
-       SET ci.price_snapshot=CASE
-         WHEN p.is_featured=TRUE
-           AND p.promotional_price IS NOT NULL
-           AND p.promotional_price<p.price
-           AND (p.offer_ends_at IS NULL OR p.offer_ends_at>NOW())
-         THEN p.promotional_price
-         ELSE p.price
-       END
-       WHERE ci.user_id=?
-         AND (
-           ci.price_snapshot IS NULL OR
-           ABS(ci.price_snapshot-(CASE
-             WHEN p.is_featured=TRUE
-               AND p.promotional_price IS NOT NULL
-               AND p.promotional_price<p.price
-               AND (p.offer_ends_at IS NULL OR p.offer_ends_at>NOW())
-             THEN p.promotional_price
-             ELSE p.price
-           END))>=0.01
-         )`,
-      [req.user.id],
-    );
+    for (const row of cart) {
+      if (
+        row.cart_price_snapshot === null ||
+        Math.abs(Number(row.cart_price_snapshot) - Number(row.current_price)) >= 0.01
+      ) {
+        await pool.query(
+          `UPDATE cart_items
+           SET price_snapshot=?
+           WHERE user_id=? AND product_id=? AND pack_size=?`,
+          [row.current_price, req.user.id, row.id, row.pack_size],
+        );
+      }
+    }
 
     res.json(cart);
   }),
@@ -1742,9 +1829,13 @@ app.put(
   authenticate,
   authorize("client"),
   writeRateLimiter,
-  [body("quantity").isInt({ min: 1 })],
+  [
+    body("quantity").isInt({ min: 1 }),
+    body("packSize").optional().isInt().isIn([1, 3, 6, 12, 24]),
+  ],
   validate,
   asyncRoute(async (req, res) => {
+    const packSize = Number(req.body.packSize || 1);
     const [[product]] = await pool.query(
       `SELECT id,stock,
         CASE
@@ -1760,18 +1851,42 @@ app.put(
       [req.params.productId],
     );
     if (!product) return res.status(404).json({ message: "Produit indisponible." });
-    if (Number(req.body.quantity) > product.stock) {
-      return res.status(409).json({ message: `Stock disponible : ${product.stock}.` });
+    let currentPrice = Number(product.current_price);
+    if (packSize > 1) {
+      const [[packOption]] = await pool.query(
+        `SELECT price
+         FROM product_pack_options
+         WHERE product_id=? AND units_per_pack=? AND is_active=TRUE`,
+        [product.id, packSize],
+      );
+      if (!packOption) {
+        return res.status(422).json({ message: "Ce format de vente n’est pas proposé." });
+      }
+      currentPrice = Number(packOption.price);
+    }
+    const availablePacks = Math.floor(Number(product.stock) / packSize);
+    if (Number(req.body.quantity) > availablePacks) {
+      return res.status(409).json({
+        message:
+          packSize === 1
+            ? `Stock disponible : ${product.stock}.`
+            : `Seulement ${availablePacks} lot(s) de ${packSize} disponible(s).`,
+      });
     }
     await pool.query(
-      `INSERT INTO cart_items (user_id,product_id,quantity,price_snapshot)
-       VALUES (?,?,?,?)
+      `INSERT INTO cart_items (user_id,product_id,pack_size,quantity,price_snapshot)
+       VALUES (?,?,?,?,?)
        ON DUPLICATE KEY UPDATE
         quantity=VALUES(quantity),
         price_snapshot=VALUES(price_snapshot)`,
-      [req.user.id, product.id, req.body.quantity, product.current_price],
+      [req.user.id, product.id, packSize, req.body.quantity, currentPrice],
     );
-    res.json({ message: "Panier mis à jour.", quantity: Number(req.body.quantity) });
+    res.json({
+      message: "Panier mis à jour.",
+      quantity: Number(req.body.quantity),
+      packSize,
+      unitsTotal: Number(req.body.quantity) * packSize,
+    });
   }),
 );
 app.delete(
@@ -1780,10 +1895,18 @@ app.delete(
   authorize("client"),
   writeRateLimiter,
   asyncRoute(async (req, res) => {
-    await pool.query("DELETE FROM cart_items WHERE user_id=? AND product_id=?", [
-      req.user.id,
-      req.params.productId,
-    ]);
+    const packSize = Number(req.query.packSize || 0);
+    if (packSize) {
+      await pool.query(
+        "DELETE FROM cart_items WHERE user_id=? AND product_id=? AND pack_size=?",
+        [req.user.id, req.params.productId, packSize],
+      );
+    } else {
+      await pool.query("DELETE FROM cart_items WHERE user_id=? AND product_id=?", [
+        req.user.id,
+        req.params.productId,
+      ]);
+    }
     res.json({ message: "Produit retiré du panier." });
   }),
 );
@@ -1806,10 +1929,12 @@ app.post(
     body("items").isArray({ max: 500 }),
     body("items.*.productId").isInt({ min: 1 }),
     body("items.*.quantity").isInt({ min: 1 }),
+    body("items.*.packSize").optional().isInt().isIn([1, 3, 6, 12, 24]),
   ],
   validate,
   asyncRoute(async (req, res) => {
     for (const item of req.body.items) {
+      const packSize = Number(item.packSize || 1);
       const [[product]] = await pool.query(
         `SELECT id,stock,
           CASE
@@ -1825,14 +1950,27 @@ app.post(
         [item.productId],
       );
       if (!product) continue;
-      const quantity = Math.min(Number(item.quantity), Number(product.stock));
+      let currentPrice = Number(product.current_price);
+      if (packSize > 1) {
+        const [[packOption]] = await pool.query(
+          `SELECT price
+           FROM product_pack_options
+           WHERE product_id=? AND units_per_pack=? AND is_active=TRUE`,
+          [product.id, packSize],
+        );
+        if (!packOption) continue;
+        currentPrice = Number(packOption.price);
+      }
+      const availablePacks = Math.floor(Number(product.stock) / packSize);
+      if (availablePacks < 1) continue;
+      const quantity = Math.min(Number(item.quantity), availablePacks);
       await pool.query(
-        `INSERT INTO cart_items (user_id,product_id,quantity,price_snapshot)
-         VALUES (?,?,?,?)
+        `INSERT INTO cart_items (user_id,product_id,pack_size,quantity,price_snapshot)
+         VALUES (?,?,?,?,?)
          ON DUPLICATE KEY UPDATE
           quantity=GREATEST(quantity,VALUES(quantity)),
           price_snapshot=VALUES(price_snapshot)`,
-        [req.user.id, product.id, quantity, product.current_price],
+        [req.user.id, product.id, packSize, quantity, currentPrice],
       );
     }
     res.json({ message: "Panier synchronisé." });
@@ -2066,7 +2204,14 @@ app.get(
       "SELECT id,image_url,position FROM product_images WHERE product_id=? ORDER BY position,id",
       [product.id],
     );
-    res.json({ ...product, images });
+    const [packOptions] = await pool.query(
+      `SELECT id,units_per_pack,price
+       FROM product_pack_options
+       WHERE product_id=? AND is_active=TRUE
+       ORDER BY units_per_pack`,
+      [product.id],
+    );
+    res.json({ ...product, images, pack_options: packOptions });
   }),
 );
 app.post(
@@ -2093,6 +2238,7 @@ app.post(
     );
     if (!category) return res.status(422).json({ message: "Rayon invalide." });
     const attributes = sanitizeProductAttributes(req.body.attributes, category.slug);
+    const packOptions = sanitizeProductPackOptions(req.body.packOptions);
     const uploadedImages = await storeImages(req.files, "products");
     const primaryImage = uploadedImages[0] || imageUrl || null;
     const [result] = await pool.query(
@@ -2117,6 +2263,7 @@ app.post(
         [result.insertId, imageUrl, position],
       );
     }
+    await replaceProductPackOptions(pool, result.insertId, packOptions);
     const [[shop]] = await pool.query(
       `SELECT COALESCE(sp.shop_name,u.name) shop_name
        FROM users u
@@ -2145,7 +2292,27 @@ app.get(
       "SELECT p.*,c.name category_name,c.slug category_slug FROM products p JOIN categories c ON c.id=p.category_id WHERE p.seller_id=? ORDER BY p.created_at DESC",
       [req.user.id],
     );
-    res.json(rows);
+    if (!rows.length) return res.json([]);
+    const [packOptions] = await pool.query(
+      `SELECT id,product_id,units_per_pack,price
+       FROM product_pack_options
+       WHERE product_id IN (${rows.map(() => "?").join(",")})
+         AND is_active=TRUE
+       ORDER BY units_per_pack`,
+      rows.map((product) => product.id),
+    );
+    const optionsByProduct = new Map();
+    for (const option of packOptions) {
+      const current = optionsByProduct.get(Number(option.product_id)) || [];
+      current.push(option);
+      optionsByProduct.set(Number(option.product_id), current);
+    }
+    res.json(
+      rows.map((product) => ({
+        ...product,
+        pack_options: optionsByProduct.get(Number(product.id)) || [],
+      })),
+    );
   }),
 );
 
@@ -2417,7 +2584,8 @@ app.get(
     if (!orders.length) return res.json([]);
     const orderIds = orders.map((order) => order.order_id);
     const [items] = await pool.query(
-      `SELECT oi.order_id,oi.product_id,oi.quantity,oi.unit_price,oi.subtotal,pr.name,pr.image_url
+      `SELECT oi.order_id,oi.product_id,oi.quantity,oi.pack_size,oi.units_total,
+        oi.unit_price,oi.subtotal,pr.name,pr.image_url
        FROM order_items oi
        JOIN products pr ON pr.id=oi.product_id
        WHERE oi.seller_id=? AND oi.order_id IN (${orderIds.map(() => "?").join(",")})
@@ -2476,12 +2644,12 @@ app.patch(
       ]);
       if (req.body.status === "cancelled") {
         const [items] = await connection.query(
-          "SELECT product_id,quantity FROM order_items WHERE order_id=? AND seller_id=?",
+          "SELECT product_id,units_total FROM order_items WHERE order_id=? AND seller_id=?",
           [sale.order_id, req.user.id],
         );
         for (const item of items) {
           await connection.query("UPDATE products SET stock=stock+? WHERE id=?", [
-            item.quantity,
+            item.units_total,
             item.product_id,
           ]);
         }
@@ -2669,6 +2837,10 @@ app.patch(
 
     const fields = [];
     const values = [];
+    const packOptions =
+      req.body.packOptions === undefined
+        ? undefined
+        : sanitizeProductPackOptions(req.body.packOptions);
     const mapping = {
       name: "name",
       categoryId: "category_id",
@@ -2719,16 +2891,21 @@ app.patch(
         message: "Le prix promotionnel doit être inférieur au prix normal.",
       });
     }
-    if (!fields.length)
+    if (!fields.length && packOptions === undefined)
       return res.status(422).json({ message: "Aucune modification fournie." });
 
-    values.push(req.params.id, req.user.id);
-    const [result] = await pool.query(
-      `UPDATE products SET ${fields.join(",")} WHERE id=? AND seller_id=?`,
-      values,
-    );
-    if (!result.affectedRows)
-      return res.status(404).json({ message: "Produit introuvable." });
+    if (fields.length) {
+      values.push(req.params.id, req.user.id);
+      const [result] = await pool.query(
+        `UPDATE products SET ${fields.join(",")} WHERE id=? AND seller_id=?`,
+        values,
+      );
+      if (!result.affectedRows)
+        return res.status(404).json({ message: "Produit introuvable." });
+    }
+    if (packOptions !== undefined) {
+      await replaceProductPackOptions(pool, currentProduct.id, packOptions);
+    }
     const [[updatedProduct]] = await pool.query(
       `SELECT p.id,p.name,p.price,p.promotional_price,p.is_featured,p.offer_ends_at,p.status,
         COALESCE(sp.shop_name,u.name) shop_name,
@@ -2918,6 +3095,7 @@ app.post(
     body("items").isArray({ min: 1 }),
     body("items.*.productId").isInt({ min: 1 }),
     body("items.*.quantity").isInt({ min: 1 }),
+    body("items.*.packSize").optional().isInt().isIn([1, 3, 6, 12, 24]),
     body("fulfillmentMethod").optional().isIn(["pickup", "delivery"]),
     body("fulfillmentChoices")
       .optional()
@@ -2982,22 +3160,70 @@ app.post(
         ids,
       );
       const byId = new Map(products.map((p) => [p.id, p]));
+      const [packOptions] = await connection.query(
+        `SELECT product_id,units_per_pack,price
+         FROM product_pack_options
+         WHERE is_active=TRUE
+           AND product_id IN (${ids.map(() => "?").join(",")})`,
+        ids,
+      );
+      const packOptionByKey = new Map(
+        packOptions.map((option) => [
+          `${Number(option.product_id)}:${Number(option.units_per_pack)}`,
+          option,
+        ]),
+      );
       let total = 0;
       const sellerTotals = new Map();
+      const requiredUnitsByProduct = new Map();
+      const normalizedItems = [];
       for (const item of req.body.items) {
         const product = byId.get(Number(item.productId));
         const quantity = Number(item.quantity);
-        if (!product || quantity < 1 || product.stock < quantity)
+        const packSize = Number(item.packSize || 1);
+        const packOption =
+          packSize === 1
+            ? null
+            : packOptionByKey.get(`${Number(item.productId)}:${packSize}`);
+        if (
+          !product ||
+          quantity < 1 ||
+          ![1, ...PRODUCT_PACK_SIZES].includes(packSize) ||
+          (packSize > 1 && !packOption)
+        )
           throw Object.assign(
-            new Error("Un produit est indisponible ou en stock insuffisant."),
-            { status: 409 },
+            new Error("Un produit ou un format de vente est indisponible."),
+            { status: 422 },
           );
-        const subtotal = product.price * quantity;
+        const price = packSize === 1 ? Number(product.price) : Number(packOption.price);
+        const unitsRequired = quantity * packSize;
+        const subtotal = price * quantity;
+        requiredUnitsByProduct.set(
+          product.id,
+          (requiredUnitsByProduct.get(product.id) || 0) + unitsRequired,
+        );
+        normalizedItems.push({
+          product,
+          quantity,
+          packSize,
+          unitsRequired,
+          price,
+          subtotal,
+        });
         total += subtotal;
         sellerTotals.set(
           product.seller_id,
           (sellerTotals.get(product.seller_id) || 0) + subtotal,
         );
+      }
+      for (const [productId, unitsRequired] of requiredUnitsByProduct) {
+        const product = byId.get(productId);
+        if (!product || Number(product.stock) < unitsRequired) {
+          throw Object.assign(
+            new Error("Un produit est indisponible ou en stock insuffisant pour les lots choisis."),
+            { status: 409 },
+          );
+        }
       }
       const sellerFulfillment = [
         ...new Map(
@@ -3108,22 +3334,25 @@ app.post(
           JSON.stringify(sellerFulfillment),
         ],
       );
-      for (const item of req.body.items) {
-        const product = byId.get(Number(item.productId));
-        const subtotal = product.price * Number(item.quantity);
+      for (const item of normalizedItems) {
+        const product = item.product;
         await connection.query(
-          "INSERT INTO order_items (order_id,product_id,seller_id,quantity,unit_price,subtotal) VALUES (?,?,?,?,?,?)",
+          `INSERT INTO order_items
+            (order_id,product_id,seller_id,quantity,pack_size,units_total,unit_price,subtotal)
+           VALUES (?,?,?,?,?,?,?,?)`,
           [
             order.insertId,
             product.id,
             product.seller_id,
             item.quantity,
-            product.price,
-            subtotal,
+            item.packSize,
+            item.unitsRequired,
+            item.price,
+            item.subtotal,
           ],
         );
         await connection.query("UPDATE products SET stock=stock-? WHERE id=?", [
-          item.quantity,
+          item.unitsRequired,
           product.id,
         ]);
         const [[remainingProduct]] = await connection.query(
@@ -3298,7 +3527,7 @@ app.get(
       `SELECT
         (SELECT COUNT(*) FROM orders WHERE client_id=?) orders,
         (SELECT COUNT(*) FROM favorites WHERE user_id=?) favorites,
-        (SELECT COALESCE(SUM(quantity),0) FROM cart_items WHERE user_id=?) cart_items`,
+        (SELECT COALESCE(SUM(quantity*pack_size),0) FROM cart_items WHERE user_id=?) cart_items`,
       [req.user.id, req.user.id, req.user.id],
     );
     const [[activeOrder]] = await pool.query(

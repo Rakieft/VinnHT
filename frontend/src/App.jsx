@@ -1,6 +1,7 @@
 ﻿import axios from "axios";
 import React from "react";
 import {
+  ArrowLeft,
   ArrowRight,
   BarChart3,
   Bell,
@@ -225,6 +226,18 @@ const productOfferIsActive = (product) =>
       Number(product.promotional_price) < Number(product.price) &&
       (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date()),
   );
+const productPackSizes = (product) => {
+  if (Array.isArray(product?.pack_options)) {
+    return product.pack_options
+      .map((option) => Number(option.units_per_pack))
+      .filter((packSize) => Number.isFinite(packSize) && packSize > 1);
+  }
+
+  return String(product?.pack_sizes || "")
+    .split(",")
+    .map((packSize) => Number(packSize))
+    .filter((packSize) => Number.isFinite(packSize) && packSize > 1);
+};
 
 function WhatsAppIcon({ size = 19 }) {
   return (
@@ -248,6 +261,16 @@ const FavoritesContext = createContext(null);
 const useAuth = () => useContext(AuthContext);
 const useCart = () => useContext(CartContext);
 const useFavorites = () => useContext(FavoritesContext);
+const cartLineKey = (item) =>
+  `${Number(item?.id ?? item?.productId)}:${Number(item?.pack_size ?? item?.packSize ?? 1)}`;
+const cartUnitsCount = (items) =>
+  items.reduce(
+    (total, item) =>
+      total +
+      Number(item.quantity || 0) *
+        Number(item.pack_size || item.packSize || 1),
+    0,
+  );
 const roleHome = {
   client: "/client",
   seller: "/seller",
@@ -454,7 +477,7 @@ function Providers({ children }) {
       if (!user?.roles?.includes("client")) return { cart: [], changes: [] };
 
       const previousById = new Map(
-        cart.map((item) => [Number(item.id), Number(item.price || 0)]),
+        cart.map((item) => [cartLineKey(item), Number(item.price || 0)]),
       );
       const { data } = await api.get("/cart");
       const refreshedCart = Array.isArray(data) ? data : [];
@@ -462,7 +485,7 @@ function Providers({ children }) {
         const currentPrice = Number(item.price || 0);
         const previousPrice = item.price_changed
           ? Number(item.previous_price || 0)
-          : previousById.get(Number(item.id));
+          : previousById.get(cartLineKey(item));
 
         if (
           previousPrice === undefined ||
@@ -473,7 +496,7 @@ function Providers({ children }) {
 
         return [
           {
-            id: item.id,
+            id: cartLineKey(item),
             name: item.name,
             previousPrice,
             currentPrice,
@@ -587,34 +610,73 @@ function Providers({ children }) {
       dismissPriceNotice() {
         setCartPriceNotice(null);
       },
-      async add(product) {
+      async add(product, packSize = 1) {
         if (!user?.roles?.includes("client")) {
           throw new Error("CLIENT_REQUIRED");
         }
         const stock = Math.max(0, Number(product.stock) || 0);
-        if (stock < 1) {
+        const normalizedPackSize = Number(packSize || 1);
+        const maximum = Math.floor(stock / normalizedPackSize);
+        if (maximum < 1) {
           throw new Error("OUT_OF_STOCK");
         }
-        const current = cart.find((item) => Number(item.id) === Number(product.id));
+        const current = cart.find(
+          (item) =>
+            Number(item.id) === Number(product.id) &&
+            Number(item.pack_size || 1) === normalizedPackSize,
+        );
         const currentQuantity = Number(current?.quantity) || 0;
-        const quantity = Math.min(currentQuantity + 1, stock);
-        await api.put(`/cart/${product.id}`, { quantity });
+        const quantity = Math.min(currentQuantity + 1, maximum);
+        await api.put(`/cart/${product.id}`, {
+          quantity,
+          packSize: normalizedPackSize,
+        });
         const { data } = await api.get("/cart");
         setCart(Array.isArray(data) ? data : []);
         return quantity;
       },
-      async remove(id) {
-        await api.delete(`/cart/${id}`);
-        setCart((items) => items.filter((i) => i.id !== id));
+      async remove(id, packSize = 1) {
+        const normalizedPackSize = Number(packSize || 1);
+        await api.delete(`/cart/${id}`, {
+          params: { packSize: normalizedPackSize },
+        });
+        setCart((items) =>
+          items.filter(
+            (item) =>
+              !(
+                Number(item.id) === Number(id) &&
+                Number(item.pack_size || 1) === normalizedPackSize
+              ),
+          ),
+        );
       },
-      async updateQuantity(id, quantity) {
-        const item = cart.find((product) => product.id === id);
-        const maximum = Math.max(1, Number(item.stock) || 1);
+      async updateQuantity(id, quantity, packSize = 1) {
+        const normalizedPackSize = Number(packSize || 1);
+        const item = cart.find(
+          (product) =>
+            Number(product.id) === Number(id) &&
+            Number(product.pack_size || 1) === normalizedPackSize,
+        );
+        const maximum = Math.max(
+          1,
+          Number(item?.available_pack_count) ||
+            Math.floor(Number(item?.stock || 1) / normalizedPackSize),
+        );
         const nextQuantity = Math.min(maximum, Math.max(1, Number(quantity) || 1));
-        await api.put(`/cart/${id}`, { quantity: nextQuantity });
+        await api.put(`/cart/${id}`, {
+          quantity: nextQuantity,
+          packSize: normalizedPackSize,
+        });
         setCart((items) =>
           items.map((product) =>
-            product.id === id ? { ...product, quantity: nextQuantity } : product,
+            Number(product.id) === Number(id) &&
+            Number(product.pack_size || 1) === normalizedPackSize
+              ? {
+                  ...product,
+                  quantity: nextQuantity,
+                  units_total: nextQuantity * normalizedPackSize,
+                }
+              : product,
           ),
         );
       },
@@ -661,7 +723,7 @@ function Navbar() {
   const { user, logout, activeRole } = useAuth();
   const { cart } = useCart();
   const navigate = useNavigate();
-  const count = cart.reduce((n, item) => n + Number(item.quantity || 0), 0);
+  const count = cartUnitsCount(cart);
   const submitSearch = (event) => {
     event.preventDefault();
     navigate(`/products${search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""}`);
@@ -870,6 +932,7 @@ function ProductCard({ product }) {
   const { isFavorite, toggle } = useFavorites();
   const favorite = isFavorite(product.id);
   const activeOffer = productOfferIsActive(product);
+  const packSizes = productPackSizes(product);
   return (
     <motion.article className="product-card" whileHover={{ y: -8 }}>
       <Link className="product-media" to={`/products/${product.id}`}>
@@ -886,6 +949,16 @@ function ProductCard({ product }) {
           </span>
         ) : (
           <Badge tone="gold">Tendance</Badge>
+        )}
+        {packSizes.length > 0 && (
+          <span
+            className="product-pack-card-badge"
+            aria-label={`Disponible par lots de ${packSizes.join(", ")}`}
+          >
+            <Package size={13} />
+            <b>Vente en lots</b>
+            <small>{packSizes.join(" · ")}</small>
+          </span>
         )}
       </Link>
       <button
@@ -910,7 +983,10 @@ function ProductCard({ product }) {
           <ShieldCheck size={14} /> Vendeur vérifié : {product.seller_name}
         </p>
         <div className="product-bottom">
-          <strong>{productPrice(product).toLocaleString("fr-HT")} HTG</strong>
+          <span className="product-card-price">
+            {packSizes.length > 0 && <small>Prix à l’unité</small>}
+            <strong>{productPrice(product).toLocaleString("fr-HT")} HTG</strong>
+          </span>
           <button className="round-btn" onClick={() => add(product)}>
             <ShoppingCart size={18} />
           </button>
@@ -2335,6 +2411,7 @@ function ProductDetails() {
   const [similar, setSimilar] = useState([]);
   const [missing, setMissing] = useState(false);
   const [cartMessage, setCartMessage] = useState("");
+  const [selectedPackSize, setSelectedPackSize] = useState(1);
   const { add } = useCart();
   const { isFavorite, toggle } = useFavorites();
 
@@ -2343,6 +2420,7 @@ function ProductDetails() {
       .get(`/products/${id}`)
       .then(async ({ data }) => {
         setProduct(data);
+        setSelectedPackSize(1);
         const response = await api.get("/products", {
           params: { category: data.category_slug },
         });
@@ -2373,8 +2451,12 @@ function ProductDetails() {
     }
 
     try {
-      await add(product);
-      setCartMessage("Produit ajoute au panier.");
+      await add(product, selectedPackSize);
+      setCartMessage(
+        selectedPackSize === 1
+          ? "Produit ajouté au panier."
+          : `Lot de ${selectedPackSize} ajouté au panier.`,
+      );
     } catch (error) {
       if (error.message === "CLIENT_REQUIRED") {
         navigate("/login");
@@ -2412,32 +2494,146 @@ function ProductDetails() {
   );
   const productAttributes = productAttributeEntries(product);
   const activeOffer = productOfferIsActive(product);
+  const packOptions = Array.isArray(product.pack_options)
+    ? [...product.pack_options].sort(
+        (first, second) =>
+          Number(first.units_per_pack) - Number(second.units_per_pack),
+      )
+    : [];
+  const selectedPack = packOptions.find(
+    (option) => Number(option.units_per_pack) === selectedPackSize,
+  );
+  const selectedPrice =
+    selectedPackSize === 1
+      ? productPrice(product)
+      : Number(selectedPack?.price || 0);
+  const availableSelections = Math.floor(
+    Number(product.stock || 0) / selectedPackSize,
+  );
+  const regularTotalForSelection =
+    productPrice(product) * selectedPackSize;
+  const selectionSavings = Math.max(
+    0,
+    regularTotalForSelection - selectedPrice,
+  );
 
   return (
     <MarketplaceLayout>
+      <div className="product-detail-topbar">
+        <Link to="/products">
+          <ArrowLeft size={17} />
+          Retour au catalogue
+        </Link>
+        <span>
+          <ShieldCheck size={16} />
+          Achat protégé par VinnHT
+        </span>
+      </div>
       <section className="product-detail">
         <div className="gallery">
           <img src={assetUrl(product.image_url)} alt={product.name} />
         </div>
         <div className="product-info">
-          {activeOffer && (
-            <span className="vinnht-offer-detail-badge">
-              <Sparkles size={15} />
-              Offre spéciale VinnHT
-            </span>
-          )}
-          <Badge tone="gold">Vendeur verifie</Badge>
+          <div className="product-detail-badges">
+            {activeOffer && (
+              <span className="vinnht-offer-detail-badge">
+                <Sparkles size={15} />
+                Offre spéciale VinnHT
+              </span>
+            )}
+            <Badge tone="gold">
+              <ShieldCheck size={14} />
+              Vendeur vérifié
+            </Badge>
+            {packOptions.length > 0 && (
+              <span className="product-detail-pack-badge">
+                <Package size={14} />
+                Unité et lots disponibles
+              </span>
+            )}
+          </div>
           <h1>{product.name}</h1>
           <p className="lead">
             Une selection premium proposee par {product.shop_name || product.seller_name}{product.city ? `, disponible a ${product.city}` : ""}{product.department ? ` dans le departement ${product.department}` : ""}.
           </p>
-          <h2>{productPrice(product).toLocaleString("fr-HT")} HTG</h2>
+          <div className="product-detail-price-row">
+            <div>
+              <small>
+                {selectedPackSize === 1
+                  ? "Prix à l’unité"
+                  : `Prix du lot de ${selectedPackSize}`}
+              </small>
+              <h2>{selectedPrice.toLocaleString("fr-HT")} HTG</h2>
+            </div>
+            {selectedPackSize > 1 && selectionSavings > 0 && (
+              <span>
+                <Sparkles size={14} />
+                Économisez {selectionSavings.toLocaleString("fr-HT")} HTG
+              </span>
+            )}
+          </div>
+          {packOptions.length > 0 && (
+            <section className="product-pack-selector" aria-label="Format d’achat">
+              <header>
+                <div>
+                  <small>Format d’achat</small>
+                  <h3>Choisissez votre format</h3>
+                  <p>Le prix et le stock s’actualisent selon votre choix.</p>
+                </div>
+                <span>
+                  {selectedPackSize === 1
+                    ? "1 unité"
+                    : `${selectedPackSize} unités par lot`}
+                </span>
+              </header>
+              <div>
+                <button
+                  className={selectedPackSize === 1 ? "active" : ""}
+                  type="button"
+                  aria-pressed={selectedPackSize === 1}
+                  onClick={() => {
+                    setSelectedPackSize(1);
+                    setCartMessage("");
+                  }}
+                >
+                  <span>À l’unité</span>
+                  <strong>{productPrice(product).toLocaleString("fr-HT")} HTG</strong>
+                </button>
+                {packOptions.map((option) => {
+                  const packSize = Number(option.units_per_pack);
+                  return (
+                    <button
+                      className={selectedPackSize === packSize ? "active" : ""}
+                      type="button"
+                      aria-pressed={selectedPackSize === packSize}
+                      disabled={Number(product.stock || 0) < packSize}
+                      onClick={() => {
+                        setSelectedPackSize(packSize);
+                        setCartMessage("");
+                      }}
+                      key={option.id || packSize}
+                    >
+                      <span>Lot de {packSize}</span>
+                      <strong>{Number(option.price).toLocaleString("fr-HT")} HTG</strong>
+                      <small>
+                        {Number(product.stock || 0) < packSize
+                          ? "Stock insuffisant"
+                          : `${Math.round(Number(option.price) / packSize).toLocaleString("fr-HT")} HTG/unité`}
+                      </small>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           <div className="product-detail-meta">
             <span>
               <ShoppingBag /> {product.category_name || "Produit"}
             </span>
             <span>
-              <Package /> {product.stock ?? 0} disponible(s)
+              <Package /> {selectedPackSize === 1
+                ? `${product.stock ?? 0} unité(s) disponible(s)`
+                : `${availableSelections} lot(s) disponible(s)`}
             </span>
             <span>
               <MapPin /> {product.department ? `${product.department} - ` : ""}{product.city || "Haiti"}
@@ -2469,7 +2665,10 @@ function ProductDetails() {
           {cartMessage && <div className="product-cart-feedback">{cartMessage}</div>}
           <div className="detail-actions">
             <Button onClick={addProductToCart}>
-              <ShoppingCart size={18} /> Ajouter au panier
+              <ShoppingCart size={18} />
+              {selectedPackSize === 1
+                ? "Ajouter au panier"
+                : `Ajouter le lot de ${selectedPackSize}`}
             </Button>
             <Button variant="glass" onClick={() => toggle(product)}>
               <Heart fill={isFavorite(product.id) ? "currentColor" : "none"} />
@@ -3476,7 +3675,7 @@ function DashboardNotifications({ role }) {
 function DashboardLayout({ children }) {
   const { user, activeRole, switchRole } = useAuth();
   const { cart } = useCart();
-  const cartCount = cart.reduce((total, item) => total + Number(item.quantity || 0), 0);
+  const cartCount = cartUnitsCount(cart);
   const alternativeRoles = (user.roles || []).filter(
     (role) => switchableAccountRoles.includes(role) && role !== activeRole
   );
@@ -3810,7 +4009,7 @@ function ClientDashboardPage() {
   const [offers, setOffers] = useState([]);
   const [shops, setShops] = useState([]);
   const [dashboard, setDashboard] = useState(null);
-  const cartCount = cart.reduce((total, item) => total + Number(item.quantity || 0), 0);
+  const cartCount = cartUnitsCount(cart);
 
   useEffect(() => {
     api
@@ -4077,6 +4276,7 @@ function ClientCheckoutPage() {
       items: orderCart.map((item) => ({
         productId: item.id,
         quantity: item.quantity,
+        packSize: Number(item.pack_size || 1),
       })),
     });
     setResult(data);

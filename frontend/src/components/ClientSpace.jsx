@@ -81,6 +81,11 @@ const clientProductOfferIsActive = (product) =>
       Number(product.promotional_price) < Number(product.price) &&
       (!product.offer_ends_at || new Date(product.offer_ends_at) > new Date()),
   );
+const clientProductPackSizes = (product) =>
+  String(product?.pack_sizes || "")
+    .split(",")
+    .map((packSize) => Number(packSize))
+    .filter((packSize) => Number.isFinite(packSize) && packSize > 1);
 
 const clientProductOfferHasExpired = (product) =>
   Boolean(
@@ -233,6 +238,7 @@ function ClientProductCard({
 }) {
   const activeOffer = clientProductOfferIsActive(product);
   const expiredOffer = favorite && clientProductOfferHasExpired(product);
+  const packSizes = clientProductPackSizes(product);
 
   return (
     <motion.article
@@ -259,6 +265,16 @@ function ClientProductCard({
         ) : (
           <span className="badge badge-gold">Tendance</span>
         )}
+        {packSizes.length > 0 && (
+          <span
+            className="product-pack-card-badge"
+            aria-label={`Disponible par lots de ${packSizes.join(", ")}`}
+          >
+            <Package size={13} />
+            <b>Vente en lots</b>
+            <small>{packSizes.join(" · ")}</small>
+          </span>
+        )}
       </Link>
       <button
         className={`product-favorite-button ${favorite ? "active" : ""}`}
@@ -283,7 +299,10 @@ function ClientProductCard({
           Vendeur vérifié : {product.seller_name || product.shop_name || "Boutique VinnHT"}
         </p>
         <div className="product-bottom">
-          <strong>{clientProductPrice(product).toLocaleString("fr-HT")} HTG</strong>
+          <span className="product-card-price">
+            {packSizes.length > 0 && <small>Prix à l’unité</small>}
+            <strong>{clientProductPrice(product).toLocaleString("fr-HT")} HTG</strong>
+          </span>
           <button className="round-btn" onClick={() => onAdd?.(product)} aria-label="Ajouter au panier">
             <ShoppingCart size={18} />
           </button>
@@ -1263,7 +1282,11 @@ function ClientOrderDetail({
             <div>
               <small>{item.seller_name}</small>
               <h3>{item.product_name}</h3>
-              <p>Quantité : {item.quantity}</p>
+              <p>
+                {Number(item.pack_size || 1) === 1
+                  ? `Quantité : ${item.quantity}`
+                  : `${item.quantity} lot(s) de ${item.pack_size} · ${item.units_total} unités`}
+              </p>
             </div>
             <strong>{Number(item.subtotal).toLocaleString("fr-HT")} HTG</strong>
           </article>
@@ -1387,29 +1410,55 @@ export function ClientCartContent({
                 {items.map((item) => {
                   const quantity = Number(item.quantity || 1);
                   const price = Number(item.price || 0);
-                  const stock = Math.max(1, Number(item.stock || 1));
+                  const packSize = Number(item.pack_size || 1);
+                  const unitsTotal = quantity * packSize;
+                  const stock = Math.max(
+                    1,
+                    Number(item.available_pack_count) ||
+                      Math.floor(Number(item.stock || 1) / packSize),
+                  );
 
                   return (
-                    <article className="client-cart-item" key={item.id}>
+                    <article
+                      className="client-cart-item"
+                      key={`${item.id}:${packSize}`}
+                    >
                       <img src={imageSource(item.image_url) || "/vinnht-logo.png"} alt={item.name} />
                       <div>
                         <small>{item.category_name || "Produit"}</small>
                         <h4>{item.name}</h4>
                         <p>{item.city || "Haiti"}</p>
+                        <span className="client-cart-pack-label">
+                          <Package size={13} />
+                          {packSize === 1
+                            ? "À l’unité"
+                            : `Lot de ${packSize} · ${unitsTotal} unités au total`}
+                        </span>
                       </div>
                       <label className="cart-quantity-control">
-                        Qte
+                        {packSize === 1 ? "Quantité" : "Nombre de lots"}
                         <input
                           type="number"
                           min="1"
                           max={stock}
                           value={quantity}
-                          onChange={(event) => updateQuantity?.(item.id, event.target.value)}
+                          onChange={(event) =>
+                            updateQuantity?.(
+                              item.id,
+                              event.target.value,
+                              packSize,
+                            )
+                          }
                         />
-                        <small>Max. {stock}</small>
+                        <small>
+                          Max. {stock} {packSize === 1 ? "unité(s)" : "lot(s)"}
+                        </small>
                       </label>
                       <strong>{(price * quantity).toLocaleString("fr-HT")} HTG</strong>
-                      <button onClick={() => remove?.(item.id)} aria-label={`Retirer ${item.name}`}>
+                      <button
+                        onClick={() => remove?.(item.id, packSize)}
+                        aria-label={`Retirer ${item.name}`}
+                      >
                         <Trash2 size={16} />
                       </button>
                     </article>
@@ -1884,9 +1933,11 @@ export function ClientCheckoutContent({
           <span>Étape 3 · Résumé</span>
           <h3>{cart.length} article(s)</h3>
           {cart.map((item) => (
-            <div key={item.id}>
+            <div key={`${item.id}:${item.pack_size || 1}`}>
               <small>
-                {item.name} x {item.quantity}
+                {item.name} · {Number(item.pack_size || 1) === 1
+                  ? `${item.quantity} unité(s)`
+                  : `${item.quantity} lot(s) de ${item.pack_size}`}
               </small>
               <b>{(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString("fr-HT")} HTG</b>
             </div>

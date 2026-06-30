@@ -287,6 +287,10 @@ const runFlow = async () => {
       description: "Produit temporaire de validation.",
       price: 2500,
       stock: 5,
+      packOptions: [
+        { unitsPerPack: 3, price: 5000 },
+        { unitsPerPack: 12, price: 18000 },
+      ],
       attributes: {
         condition: "Neuf",
       },
@@ -295,6 +299,11 @@ const runFlow = async () => {
       imageUrl: "https://images.unsplash.com/photo-1523275335684-37898b6baf30",
     },
   });
+  const productWithPacks = await request(`/products/${createdProduct.data.id}`);
+  assert.deepEqual(
+    productWithPacks.data.pack_options.map((option) => Number(option.units_per_pack)),
+    [3, 12],
+  );
   const secondProduct = await request("/products", {
     method: "POST",
     cookie: secondSeller.cookie,
@@ -455,18 +464,21 @@ const runFlow = async () => {
   await request(`/cart/${createdProduct.data.id}`, {
     method: "PUT",
     cookie: buyer.cookie,
-    body: { quantity: 2 },
+    body: { quantity: 1, packSize: 3 },
   });
   const cartBeforeOrder = await request("/cart", { cookie: buyer.cookie });
   assert.equal(cartBeforeOrder.data.length, 1);
   assert.equal(cartBeforeOrder.data[0].seller_name, "Boutique Smoke VinnHT");
-  assert.equal(Number(cartBeforeOrder.data[0].quantity), 2);
+  assert.equal(Number(cartBeforeOrder.data[0].quantity), 1);
+  assert.equal(Number(cartBeforeOrder.data[0].pack_size), 3);
+  assert.equal(Number(cartBeforeOrder.data[0].units_total), 3);
+  assert.equal(Number(cartBeforeOrder.data[0].price), 5000);
 
   const order = await request("/orders", {
     method: "POST",
     cookie: buyer.cookie,
     body: {
-      items: [{ productId: createdProduct.data.id, quantity: 2 }],
+      items: [{ productId: createdProduct.data.id, quantity: 1, packSize: 3 }],
       fulfillmentMethod: "delivery",
       deliveryAddress: "Pétion-Ville, rue de la validation numéro 10",
     },
@@ -481,6 +493,12 @@ const runFlow = async () => {
   assert.equal(Number(order.data.paymentInstructions[0].amount), 5500);
   const cartAfterOrder = await request("/cart", { cookie: buyer.cookie });
   assert.equal(cartAfterOrder.data.length, 0);
+  const packedOrderDetail = await request(`/orders/${order.data.id}`, {
+    cookie: buyer.cookie,
+  });
+  assert.equal(Number(packedOrderDetail.data.items[0].pack_size), 3);
+  assert.equal(Number(packedOrderDetail.data.items[0].quantity), 1);
+  assert.equal(Number(packedOrderDetail.data.items[0].units_total), 3);
 
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=",
@@ -605,7 +623,7 @@ const runFlow = async () => {
     "SELECT stock FROM products WHERE id=?",
     [createdProduct.data.id],
   );
-  assert.equal(productAfterOrder.stock, 3);
+  assert.equal(productAfterOrder.stock, 2);
 
   await request(`/cart/${createdProduct.data.id}`, {
     method: "PUT",
@@ -779,6 +797,7 @@ const runFlow = async () => {
   console.log("✓ Boutique et produit créés");
   console.log("✓ Suivi boutique et alertes nouveaux produits/offres validés");
   console.log("✓ Panier, commande et stock validés");
+  console.log("✓ Vente optionnelle par lots 3/6/12/24 validée");
   console.log("✓ Message support client reçu et notifié côté admin");
   console.log("✓ Téléphone et identité du formulaire Contact visibles côté admin");
   console.log("✓ Preuve MonCash validée uniquement par l’admin VinnHT");

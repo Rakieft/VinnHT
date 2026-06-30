@@ -1886,6 +1886,20 @@ body.client-order-modal-open {
   font-weight: 800;
 }
 
+.client-cart-item .client-cart-pack-label {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
 .cart-quantity-control {
   display: flex;
   align-items: center;
