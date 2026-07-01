@@ -30,6 +30,7 @@ import { generateToken } from "./utils/generateToken.js";
 import { clearSessionCookie, setSessionCookie } from "./utils/sessionCookie.js";
 import { storeImage, storeImages } from "./utils/imageStorage.js";
 import { cleanupExpiredMessages } from "./utils/messageRetention.js";
+import { deliveryHistoryCutoffSql } from "./utils/deliveryRetention.js";
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   throw new Error("JWT_SECRET doit contenir au moins 32 caractères.");
@@ -98,6 +99,10 @@ const PAYMENT_MODEL = process.env.PAYMENT_MODEL || "protected_vinnht";
 const VINNHT_MONCASH_NUMBER = String(process.env.VINNHT_MONCASH_NUMBER || "").trim();
 const VINNHT_MONCASH_ACCOUNT_NAME =
   String(process.env.VINNHT_MONCASH_ACCOUNT_NAME || "VinnHT").trim() || "VinnHT";
+const PAYOUT_MIN_AMOUNT = Math.max(
+  1,
+  Number(process.env.PAYOUT_MIN_AMOUNT || 500),
+);
 
 if (
   process.env.NODE_ENV === "production" &&
@@ -312,6 +317,125 @@ const reportPeriod = (endingValue) => {
     start: sqlDate(start),
     end: sqlDate(ending),
     exclusiveEnd: sqlDate(exclusiveEnd),
+  };
+};
+const deliveryWeekPeriod = (value = new Date()) => {
+  const current = value instanceof Date ? new Date(value) : dateOnly(value);
+  current.setHours(12, 0, 0, 0);
+  const start = new Date(current);
+  start.setDate(current.getDate() - ((current.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const exclusiveEnd = new Date(start);
+  exclusiveEnd.setDate(start.getDate() + 7);
+  return {
+    start: sqlDate(start),
+    end: sqlDate(end),
+    exclusiveEnd: sqlDate(exclusiveEnd),
+  };
+};
+const getDeliveryWeeklySummary = async (executor, deliveryUserId, period) => {
+  const [confirmedRows] = await executor.query(
+    `SELECT DATE(entry.confirmed_at) delivery_date,
+      COUNT(*) delivery_count,
+      COALESCE(SUM(entry.delivery_fee),0) amount
+     FROM (
+       SELECT drc.confirmed_at,ss.delivery_fee
+       FROM seller_delivery_assignments sda
+       JOIN seller_sales ss ON ss.id=sda.seller_sale_id
+       JOIN delivery_receipt_confirmations drc
+         ON drc.seller_delivery_assignment_id=sda.id
+       WHERE sda.delivery_user_id=?
+         AND drc.confirmed_at>=? AND drc.confirmed_at<?
+       UNION ALL
+       SELECT drc.confirmed_at,o.delivery_fee
+       FROM deliveries d
+       JOIN orders o ON o.id=d.order_id
+       JOIN delivery_receipt_confirmations drc ON drc.delivery_id=d.id
+       WHERE d.delivery_user_id=?
+         AND drc.confirmed_at>=? AND drc.confirmed_at<?
+         AND NOT EXISTS (
+           SELECT 1 FROM seller_delivery_assignments sda
+           WHERE sda.order_id=d.order_id
+         )
+     ) entry
+     GROUP BY DATE(entry.confirmed_at)
+     ORDER BY delivery_date`,
+    [
+      deliveryUserId,
+      period.start,
+      period.exclusiveEnd,
+      deliveryUserId,
+      period.start,
+      period.exclusiveEnd,
+    ],
+  );
+  const [[pending]] = await executor.query(
+    `SELECT COUNT(*) delivery_count,COALESCE(SUM(entry.delivery_fee),0) amount
+     FROM (
+       SELECT ss.delivery_fee
+       FROM seller_delivery_assignments sda
+       JOIN seller_sales ss ON ss.id=sda.seller_sale_id
+       LEFT JOIN delivery_receipt_confirmations drc
+         ON drc.seller_delivery_assignment_id=sda.id
+       WHERE sda.delivery_user_id=? AND sda.status='delivered'
+         AND sda.delivered_at>=? AND sda.delivered_at<?
+         AND drc.id IS NULL
+       UNION ALL
+       SELECT o.delivery_fee
+       FROM deliveries d
+       JOIN orders o ON o.id=d.order_id
+       LEFT JOIN delivery_receipt_confirmations drc ON drc.delivery_id=d.id
+       WHERE d.delivery_user_id=? AND d.status='delivered'
+         AND d.delivered_at>=? AND d.delivered_at<?
+         AND drc.id IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM seller_delivery_assignments sda
+           WHERE sda.order_id=d.order_id
+         )
+     ) entry`,
+    [
+      deliveryUserId,
+      period.start,
+      period.exclusiveEnd,
+      deliveryUserId,
+      period.start,
+      period.exclusiveEnd,
+    ],
+  );
+  const amountsByDate = new Map(
+    confirmedRows.map((row) => [sqlDate(new Date(row.delivery_date)), Number(row.amount || 0)]),
+  );
+  const countByDate = new Map(
+    confirmedRows.map((row) => [sqlDate(new Date(row.delivery_date)), Number(row.delivery_count || 0)]),
+  );
+  const dayLabels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+  const start = dateOnly(period.start);
+  const days = dayLabels.map((label, index) => {
+    const current = new Date(start);
+    current.setDate(start.getDate() + index);
+    const currentDate = sqlDate(current);
+    return {
+      date: currentDate,
+      label,
+      amount: amountsByDate.get(currentDate) || 0,
+      deliveries: countByDate.get(currentDate) || 0,
+    };
+  });
+  const confirmedEarnings = days.reduce((sum, day) => sum + day.amount, 0);
+  const confirmedDeliveries = days.reduce((sum, day) => sum + day.deliveries, 0);
+  const maxAmount = Math.max(...days.map((day) => day.amount), 0);
+  return {
+    periodStart: period.start,
+    periodEnd: period.end,
+    confirmedEarnings,
+    confirmedDeliveries,
+    pendingEarnings: Number(pending.amount || 0),
+    pendingDeliveries: Number(pending.delivery_count || 0),
+    days: days.map((day) => ({
+      ...day,
+      level: maxAmount ? Math.round((day.amount / maxAmount) * 100) : 0,
+    })),
   };
 };
 const previousWeekForSunday = (value = new Date()) => {
@@ -884,6 +1008,102 @@ const notifyRole = async (
     );
   }
 };
+
+const ensureSellerWallet = async (executor, sellerId) => {
+  await executor.query(
+    `INSERT IGNORE INTO seller_wallets
+      (seller_id,available_balance,reserved_balance,total_paid)
+     VALUES (?,0,0,0)`,
+    [sellerId],
+  );
+};
+
+const walletSnapshot = async (executor, sellerId, lock = false) => {
+  await ensureSellerWallet(executor, sellerId);
+  const [[wallet]] = await executor.query(
+    `SELECT seller_id,available_balance,reserved_balance,total_paid,updated_at
+     FROM seller_wallets
+     WHERE seller_id=?${lock ? " FOR UPDATE" : ""}`,
+    [sellerId],
+  );
+  return wallet;
+};
+
+const recordWalletTransaction = async (
+  executor,
+  {
+    sellerId,
+    payoutId = null,
+    requestId = null,
+    eventKey,
+    type,
+    amount,
+    actorId = null,
+    note = null,
+  },
+) => {
+  const wallet = await walletSnapshot(executor, sellerId);
+  await executor.query(
+    `INSERT IGNORE INTO wallet_transactions
+      (seller_id,payout_id,payout_request_id,event_key,type,amount,
+       available_after,reserved_after,actor_id,note)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [
+      sellerId,
+      payoutId,
+      requestId,
+      eventKey,
+      type,
+      amount,
+      wallet.available_balance,
+      wallet.reserved_balance,
+      actorId,
+      note,
+    ],
+  );
+};
+
+const releaseSellerPayout = async (
+  executor,
+  sellerSaleId,
+  actorId = null,
+) => {
+  const [[payout]] = await executor.query(
+    `SELECT id,seller_id,amount,status
+     FROM payouts
+     WHERE seller_sale_id=?
+     FOR UPDATE`,
+    [sellerSaleId],
+  );
+  if (!payout || payout.status !== "pending") return false;
+
+  await walletSnapshot(executor, payout.seller_id, true);
+  await executor.query(
+    `UPDATE payouts
+     SET status='processing',released_at=NOW()
+     WHERE id=? AND status='pending'`,
+    [payout.id],
+  );
+  await executor.query(
+    `UPDATE seller_wallets
+     SET available_balance=available_balance+?
+     WHERE seller_id=?`,
+    [payout.amount, payout.seller_id],
+  );
+  await recordWalletTransaction(executor, {
+    sellerId: payout.seller_id,
+    payoutId: payout.id,
+    eventKey: `sale-release:${payout.id}`,
+    type: "sale_released",
+    amount: payout.amount,
+    actorId,
+    note: "Vente libérée après confirmation de réception du client.",
+  });
+  return true;
+};
+
+const createPayoutRequestNumber = () =>
+  `VHT-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 const clientProductSelect = `
   SELECT p.*,COALESCE(p.department,'Ouest') department,COALESCE(p.city,'Haiti') city,c.name category_name,u.name seller_name,
     (
@@ -1578,6 +1798,14 @@ app.get(
       where += " AND c.slug = ?";
       params.push(req.query.category);
     }
+    if (req.query.subcategory) {
+      where += " AND p.subcategory_slug = ?";
+      params.push(req.query.subcategory);
+    }
+    if (req.query.productType) {
+      where += " AND p.product_type_slug = ?";
+      params.push(req.query.productType);
+    }
     if (req.query.department) {
       where += " AND p.department = ?";
       params.push(req.query.department);
@@ -1589,8 +1817,11 @@ app.get(
     if (req.query.search) {
       where += ` AND (
         p.name LIKE ? OR p.description LIKE ? OR u.name LIKE ? OR c.name LIKE ?
+        OR p.subcategory_slug LIKE ? OR p.product_type_slug LIKE ?
       )`;
       params.push(
+        `%${req.query.search}%`,
+        `%${req.query.search}%`,
         `%${req.query.search}%`,
         `%${req.query.search}%`,
         `%${req.query.search}%`,
@@ -2222,6 +2453,16 @@ app.post(
   [
     body("name").trim().isLength({ min: 2 }),
     body("categoryId").isInt(),
+    body("subcategorySlug")
+      .optional({ checkFalsy: true })
+      .trim()
+      .matches(/^[a-z0-9-]+$/)
+      .isLength({ max: 120 }),
+    body("productTypeSlug")
+      .optional({ checkFalsy: true })
+      .trim()
+      .matches(/^[a-z0-9-]+$/)
+      .isLength({ max: 120 }),
     body("price").isFloat({ min: 0 }),
     body("stock")
       .isInt({ min: 1 })
@@ -2231,7 +2472,18 @@ app.post(
   ],
   validate,
   asyncRoute(async (req, res) => {
-    const { name, categoryId, description, price, stock, imageUrl, department, city } = req.body;
+    const {
+      name,
+      categoryId,
+      subcategorySlug,
+      productTypeSlug,
+      description,
+      price,
+      stock,
+      imageUrl,
+      department,
+      city,
+    } = req.body;
     const [[category]] = await pool.query(
       "SELECT id,slug FROM categories WHERE id=?",
       [categoryId],
@@ -2242,10 +2494,15 @@ app.post(
     const uploadedImages = await storeImages(req.files, "products");
     const primaryImage = uploadedImages[0] || imageUrl || null;
     const [result] = await pool.query(
-      "INSERT INTO products (seller_id,category_id,name,slug,description,attributes,price,stock,department,city,image_url) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      `INSERT INTO products
+        (seller_id,category_id,subcategory_slug,product_type_slug,name,slug,description,
+         attributes,price,stock,department,city,image_url)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         req.user.id,
         categoryId,
+        subcategorySlug || null,
+        productTypeSlug || null,
         name,
         slugify(name),
         description || null,
@@ -2805,6 +3062,16 @@ app.patch(
   [
     body("name").optional().trim().isLength({ min: 2 }),
     body("categoryId").optional().isInt(),
+    body("subcategorySlug")
+      .optional({ checkFalsy: true })
+      .trim()
+      .matches(/^[a-z0-9-]+$/)
+      .isLength({ max: 120 }),
+    body("productTypeSlug")
+      .optional({ checkFalsy: true })
+      .trim()
+      .matches(/^[a-z0-9-]+$/)
+      .isLength({ max: 120 }),
     body("price").optional().isFloat({ min: 0 }),
     body("promotionalPrice").optional({ checkFalsy: true }).isFloat({ min: 0 }),
     body("isFeatured").optional().isBoolean(),
@@ -2844,6 +3111,8 @@ app.patch(
     const mapping = {
       name: "name",
       categoryId: "category_id",
+      subcategorySlug: "subcategory_slug",
+      productTypeSlug: "product_type_slug",
       description: "description",
       price: "price",
       promotionalPrice: "promotional_price",
@@ -2874,7 +3143,12 @@ app.patch(
       if (req.body[input] !== undefined) {
         fields.push(`${column}=?`);
         values.push(
-          ["promotionalPrice", "offerEndsAt"].includes(input) && !req.body[input]
+          [
+            "promotionalPrice",
+            "offerEndsAt",
+            "subcategorySlug",
+            "productTypeSlug",
+          ].includes(input) && !req.body[input]
             ? null
             : input === "offerEndsAt"
               ? sqlDateTime(req.body[input])
@@ -2959,6 +3233,286 @@ app.get(
       [req.user.id],
     );
     res.json(rows);
+  }),
+);
+
+app.get(
+  "/api/seller/wallet",
+  authenticate,
+  authorize("seller"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    await ensureSellerWallet(pool, req.user.id);
+    const [
+      [[wallet]],
+      [[held]],
+      [[profile]],
+      [requests],
+      [transactions],
+    ] = await Promise.all([
+      pool.query(
+        `SELECT seller_id,available_balance,reserved_balance,total_paid,updated_at
+         FROM seller_wallets WHERE seller_id=?`,
+        [req.user.id],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount),0) held_balance,COUNT(*) held_sales
+         FROM payouts WHERE seller_id=? AND status='pending'`,
+        [req.user.id],
+      ),
+      pool.query(
+        `SELECT sp.shop_name,sp.moncash_number,sp.moncash_account_name,
+          sp.shop_logo_url,sp.status
+         FROM seller_profiles sp
+         WHERE sp.seller_id=?`,
+        [req.user.id],
+      ),
+      pool.query(
+        `SELECT pr.*,reviewer.name reviewed_by_name,manager.name manager_name
+         FROM payout_requests pr
+         LEFT JOIN users reviewer ON reviewer.id=pr.reviewed_by
+         LEFT JOIN users manager ON manager.id=pr.manager_id
+         WHERE pr.seller_id=?
+         ORDER BY pr.created_at DESC
+         LIMIT 50`,
+        [req.user.id],
+      ),
+      pool.query(
+        `SELECT wt.*,po.seller_sale_id,o.order_number,pr.request_number
+         FROM wallet_transactions wt
+         LEFT JOIN payouts po ON po.id=wt.payout_id
+         LEFT JOIN seller_sales ss ON ss.id=po.seller_sale_id
+         LEFT JOIN orders o ON o.id=ss.order_id
+         LEFT JOIN payout_requests pr ON pr.id=wt.payout_request_id
+         WHERE wt.seller_id=?
+         ORDER BY wt.created_at DESC,wt.id DESC
+         LIMIT 100`,
+        [req.user.id],
+      ),
+    ]);
+
+    res.json({
+      wallet: {
+        ...wallet,
+        held_balance: held.held_balance,
+        held_sales: held.held_sales,
+      },
+      payoutAccount: profile || null,
+      minimumRequestAmount: PAYOUT_MIN_AMOUNT,
+      requests,
+      transactions,
+    });
+  }),
+);
+
+app.post(
+  "/api/seller/wallet/requests",
+  authenticate,
+  authorize("seller"),
+  writeRateLimiter,
+  [
+    body("amount")
+      .isFloat({ min: PAYOUT_MIN_AMOUNT })
+      .withMessage(`Le montant minimum est de ${PAYOUT_MIN_AMOUNT} HTG.`),
+    body("note").optional({ checkFalsy: true }).trim().isLength({ max: 500 }),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const amount = Math.round(Number(req.body.amount) * 100) / 100;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[profile]] = await connection.query(
+        `SELECT sp.shop_name,sp.moncash_number,sp.moncash_account_name,sp.status
+         FROM seller_profiles sp
+         WHERE sp.seller_id=?
+         FOR UPDATE`,
+        [req.user.id],
+      );
+      if (!profile) {
+        await connection.rollback();
+        return res.status(409).json({ message: "Profil vendeur introuvable." });
+      }
+      if (!profile.moncash_number || !profile.moncash_account_name) {
+        await connection.rollback();
+        return res.status(409).json({
+          message:
+            "Ajoutez le numéro MonCash et le nom du titulaire dans Ma boutique avant toute demande.",
+        });
+      }
+
+      const wallet = await walletSnapshot(connection, req.user.id, true);
+      const [[activeRequest]] = await connection.query(
+        `SELECT id,request_number,status
+         FROM payout_requests
+         WHERE seller_id=? AND status IN ('pending','approved','processing')
+         LIMIT 1
+         FOR UPDATE`,
+        [req.user.id],
+      );
+      if (activeRequest) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: `La demande ${activeRequest.request_number} est encore en cours.`,
+        });
+      }
+
+      if (amount > Number(wallet.available_balance) + 0.001) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Le montant demandé dépasse votre solde disponible.",
+        });
+      }
+
+      const requestNumber = createPayoutRequestNumber();
+      const [created] = await connection.query(
+        `INSERT INTO payout_requests
+          (request_number,seller_id,amount,moncash_number,
+           moncash_account_name,seller_note)
+         VALUES (?,?,?,?,?,?)`,
+        [
+          requestNumber,
+          req.user.id,
+          amount,
+          profile.moncash_number,
+          profile.moncash_account_name,
+          req.body.note || null,
+        ],
+      );
+      await connection.query(
+        `UPDATE seller_wallets
+         SET available_balance=available_balance-?,reserved_balance=reserved_balance+?
+         WHERE seller_id=?`,
+        [amount, amount, req.user.id],
+      );
+
+      const [eligiblePayouts] = await connection.query(
+        `SELECT po.id,
+          po.amount-COALESCE((
+            SELECT SUM(pri.amount)
+            FROM payout_request_items pri
+            JOIN payout_requests pr ON pr.id=pri.payout_request_id
+            WHERE pri.payout_id=po.id
+              AND pr.status IN ('pending','approved','processing','paid')
+          ),0) remaining_amount
+         FROM payouts po
+         WHERE po.seller_id=? AND po.status='processing'
+         ORDER BY po.released_at,po.id
+         FOR UPDATE`,
+        [req.user.id],
+      );
+      let amountToAllocate = amount;
+      for (const payout of eligiblePayouts) {
+        if (amountToAllocate <= 0.001) break;
+        const allocated = Math.min(
+          amountToAllocate,
+          Number(payout.remaining_amount),
+        );
+        await connection.query(
+          `INSERT INTO payout_request_items
+            (payout_request_id,payout_id,amount)
+           VALUES (?,?,?)`,
+          [created.insertId, payout.id, allocated],
+        );
+        amountToAllocate = Math.round((amountToAllocate - allocated) * 100) / 100;
+      }
+      if (amountToAllocate > 0.001) {
+        throw new Error("Le solde du wallet ne correspond pas aux ventes libérées.");
+      }
+
+      await recordWalletTransaction(connection, {
+        sellerId: req.user.id,
+        requestId: created.insertId,
+        eventKey: `payout-request-reserved:${created.insertId}`,
+        type: "withdrawal_reserved",
+        amount,
+        actorId: req.user.id,
+        note: `Demande ${requestNumber} envoyée pour approbation.`,
+      });
+      await notifyRole(
+        connection,
+        "admin",
+        "payout.requested",
+        "Nouvelle demande de paiement",
+        `${profile.shop_name || req.user.name} demande ${amount.toLocaleString("fr-HT")} HTG.`,
+        "/admin/payout-requests",
+        "payout_request",
+        created.insertId,
+      );
+      await connection.commit();
+      await audit(req, "payout_request.created", "payout_request", created.insertId, {
+        amount,
+        requestNumber,
+      });
+      res.status(201).json({
+        message: "Votre demande a été envoyée à l’administration VinnHT.",
+        requestId: created.insertId,
+        requestNumber,
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
+app.patch(
+  "/api/seller/wallet/requests/:id/cancel",
+  authenticate,
+  authorize("seller"),
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[request]] = await connection.query(
+        `SELECT * FROM payout_requests
+         WHERE id=? AND seller_id=?
+         FOR UPDATE`,
+        [req.params.id, req.user.id],
+      );
+      if (!request) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Demande introuvable." });
+      }
+      if (request.status !== "pending") {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Seule une demande encore en attente peut être annulée.",
+        });
+      }
+      await walletSnapshot(connection, req.user.id, true);
+      await connection.query(
+        "UPDATE payout_requests SET status='cancelled' WHERE id=?",
+        [request.id],
+      );
+      await connection.query(
+        `UPDATE seller_wallets
+         SET available_balance=available_balance+?,
+           reserved_balance=GREATEST(0,reserved_balance-?)
+         WHERE seller_id=?`,
+        [request.amount, request.amount, req.user.id],
+      );
+      await recordWalletTransaction(connection, {
+        sellerId: req.user.id,
+        requestId: request.id,
+        eventKey: `payout-request-cancelled:${request.id}`,
+        type: "withdrawal_released",
+        amount: request.amount,
+        actorId: req.user.id,
+        note: `Demande ${request.request_number} annulée par le vendeur.`,
+      });
+      await connection.commit();
+      await audit(req, "payout_request.cancelled", "payout_request", request.id);
+      res.json({ message: "Demande annulée. Le montant est de nouveau disponible." });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }),
 );
 
@@ -3808,11 +4362,10 @@ app.patch(
             "UPDATE seller_sales SET status='completed' WHERE id=? AND status!='cancelled'",
             [assignment.seller_sale_id],
           );
-          await connection.query(
-            `UPDATE payouts
-             SET status='processing',released_at=NOW()
-             WHERE seller_sale_id=? AND status='pending'`,
-            [assignment.seller_sale_id],
+          await releaseSellerPayout(
+            connection,
+            assignment.seller_sale_id,
+            req.user.id,
           );
         }
       } else {
@@ -3857,13 +4410,20 @@ app.patch(
              WHERE order_id=? AND status NOT IN ('completed','cancelled')`,
             [orderId],
           );
-          await connection.query(
-            `UPDATE payouts po
-             JOIN seller_sales ss ON ss.id=po.seller_sale_id
-             SET po.status='processing',po.released_at=NOW()
-             WHERE ss.order_id=? AND po.status='pending'`,
+          const [orderSales] = await connection.query(
+            `SELECT id
+             FROM seller_sales
+             WHERE order_id=? AND status!='cancelled'
+             FOR UPDATE`,
             [orderId],
           );
+          for (const orderSale of orderSales) {
+            await releaseSellerPayout(
+              connection,
+              orderSale.id,
+              req.user.id,
+            );
+          }
         }
       }
 
@@ -3961,12 +4521,7 @@ app.patch(
            WHERE id=?`,
           [req.user.id, sale.id],
         );
-        await connection.query(
-          `UPDATE payouts
-           SET status='processing',released_at=NOW()
-           WHERE seller_sale_id=? AND status='pending'`,
-          [sale.id],
-        );
+        await releaseSellerPayout(connection, sale.id, req.user.id);
         await connection.query(
           `UPDATE orders o
            SET o.status='delivered'
@@ -4611,6 +5166,42 @@ app.patch(
 );
 
 app.get(
+  "/api/deliveries/profile",
+  authenticate,
+  authorize("delivery"),
+  asyncRoute(async (req, res) => {
+    const [[association]] = await pool.query(
+      `SELECT sdd.status,sdd.zones,sdd.vehicle_type,sdd.created_at linked_at,
+        seller.id seller_id,seller.name seller_name,
+        COALESCE(sp.shop_name,seller.name) shop_name,sp.shop_logo_url,
+        sp.pickup_address,sp.delivery_zones
+       FROM seller_delivery_drivers sdd
+       JOIN users seller ON seller.id=sdd.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=sdd.seller_id
+       WHERE sdd.delivery_user_id=?
+       LIMIT 1`,
+      [req.user.id],
+    );
+    const [[stats]] = await pool.query(
+      `SELECT
+        COUNT(*) mission_count,
+        COALESCE(SUM(status='delivered'),0) delivered_count,
+        COALESCE(SUM(status IN ('assigned','picked_up','in_transit')),0) active_count
+       FROM seller_delivery_assignments
+       WHERE delivery_user_id=?`,
+      [req.user.id],
+    );
+    res.json({
+      association: association || null,
+      stats: {
+        missions: Number(stats.mission_count || 0),
+        delivered: Number(stats.delivered_count || 0),
+        active: Number(stats.active_count || 0),
+      },
+    });
+  }),
+);
+app.get(
   "/api/deliveries/dashboard",
   authenticate,
   authorize("delivery"),
@@ -4651,7 +5242,13 @@ app.get(
       `SELECT d.id,d.status,d.assigned_at,d.delivered_at,o.order_number,o.delivery_address,o.total
        FROM deliveries d
        JOIN orders o ON o.id=d.order_id
-       WHERE d.delivery_user_id=?`,
+       WHERE d.delivery_user_id=?
+         AND (
+           d.status IN ('assigned','picked_up','in_transit')
+           OR (d.status='delivered' AND d.delivered_at>=DATE_SUB(NOW(),INTERVAL 60 DAY))
+         )
+       ORDER BY COALESCE(d.delivered_at,d.assigned_at) DESC
+       LIMIT 50`,
       [req.user.id],
     );
     const [sellerRecent] = await pool.query(
@@ -4660,18 +5257,40 @@ app.get(
        FROM seller_delivery_assignments sda
        JOIN seller_sales ss ON ss.id=sda.seller_sale_id
        JOIN orders o ON o.id=sda.order_id
-       WHERE sda.delivery_user_id=?`,
+       WHERE sda.delivery_user_id=?
+         AND (
+           sda.status IN ('assigned','picked_up','in_transit')
+           OR (sda.status='delivered' AND sda.delivered_at>=DATE_SUB(NOW(),INTERVAL 60 DAY))
+         )
+       ORDER BY COALESCE(sda.delivered_at,sda.assigned_at) DESC
+       LIMIT 50`,
       [req.user.id],
     );
-    const recent = [...sellerRecent, ...mainRecent]
-      .sort((a, b) => {
-        const activeA = ['assigned','picked_up','in_transit'].includes(a.status) ? 0 : 1;
-        const activeB = ['assigned','picked_up','in_transit'].includes(b.status) ? 0 : 1;
-        if (activeA !== activeB) return activeA - activeB;
-        return new Date(b.delivered_at || b.assigned_at || 0) - new Date(a.delivered_at || a.assigned_at || 0);
-      })
-      .slice(0, 5);
-    res.json({ stats, recent });
+    const allMissions = [...sellerRecent, ...mainRecent];
+    const priority = allMissions
+      .filter((mission) => ["assigned", "picked_up", "in_transit"].includes(mission.status))
+      .sort(
+        (a, b) =>
+          new Date(b.assigned_at || 0) - new Date(a.assigned_at || 0),
+      )[0] || null;
+    const recent = allMissions
+      .filter((mission) => mission.status === "delivered")
+      .sort(
+        (a, b) =>
+          new Date(b.delivered_at || 0) - new Date(a.delivered_at || 0),
+      )
+      .slice(0, 3);
+    res.json({ stats, priority, recent });
+  }),
+);
+app.get(
+  "/api/deliveries/weekly-report",
+  authenticate,
+  authorize("delivery"),
+  asyncRoute(async (req, res) => {
+    const period = deliveryWeekPeriod();
+    const report = await getDeliveryWeeklySummary(pool, req.user.id, period);
+    res.json(report);
   }),
 );
 app.get(
@@ -4679,6 +5298,9 @@ app.get(
   authenticate,
   authorize("delivery"),
   asyncRoute(async (req, res) => {
+    const historyCutoff = deliveryHistoryCutoffSql(
+      process.env.DELIVERY_HISTORY_RETENTION_DAYS,
+    );
     const [rows] = await pool.query(
       `SELECT
         d.*,
@@ -4702,6 +5324,10 @@ app.get(
        LEFT JOIN users seller ON seller.id=oi.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=seller.id
        WHERE d.delivery_user_id=?
+         AND (
+           d.status NOT IN ('delivered','failed')
+           OR COALESCE(d.delivered_at,d.assigned_at,o.created_at)>=${historyCutoff}
+         )
        GROUP BY d.id,o.id,client.id
        ORDER BY COALESCE(d.delivered_at,d.assigned_at) DESC`,
       [req.user.id],
@@ -4732,6 +5358,10 @@ app.get(
        LEFT JOIN seller_profiles sp ON sp.seller_id=sda.seller_id
        LEFT JOIN order_items oi ON oi.order_id=o.id AND oi.seller_id=sda.seller_id
        WHERE sda.delivery_user_id=?
+         AND (
+           sda.status NOT IN ('delivered','failed')
+           OR COALESCE(sda.delivered_at,sda.assigned_at,o.created_at)>=${historyCutoff}
+         )
        GROUP BY sda.id,o.id,ss.id,client.id,seller.id,sp.shop_name,sp.pickup_address
        ORDER BY COALESCE(sda.delivered_at,sda.assigned_at) DESC`,
       [req.user.id],
@@ -6559,6 +7189,433 @@ app.get(
     res.json(rows);
   }),
 );
+
+app.get(
+  "/api/admin/payout-requests",
+  authenticate,
+  authorize("admin"),
+  noStore,
+  asyncRoute(async (_req, res) => {
+    const [requests] = await pool.query(
+      `SELECT pr.*,u.email seller_email,u.phone seller_phone,
+        COALESCE(sp.shop_name,u.name) seller_name,sp.shop_logo_url,
+        reviewer.name reviewed_by_name,manager.name manager_name,
+        COUNT(pri.id) payout_count
+       FROM payout_requests pr
+       JOIN users u ON u.id=pr.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=pr.seller_id
+       LEFT JOIN users reviewer ON reviewer.id=pr.reviewed_by
+       LEFT JOIN users manager ON manager.id=pr.manager_id
+       LEFT JOIN payout_request_items pri ON pri.payout_request_id=pr.id
+       GROUP BY pr.id,u.email,u.phone,sp.shop_name,u.name,sp.shop_logo_url,
+         reviewer.name,manager.name
+       ORDER BY FIELD(pr.status,'pending','approved','processing','failed','paid','rejected','cancelled'),
+         pr.created_at DESC
+       LIMIT 300`,
+    );
+    const [[stats]] = await pool.query(
+      `SELECT
+        COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) pending_amount,
+        SUM(status='pending') pending_count,
+        COALESCE(SUM(CASE WHEN status IN ('approved','processing') THEN amount ELSE 0 END),0) approved_amount,
+        COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END),0) paid_amount
+       FROM payout_requests`,
+    );
+    res.json({ requests, stats });
+  }),
+);
+
+app.patch(
+  "/api/admin/payout-requests/:id/review",
+  authenticate,
+  authorize("admin"),
+  writeRateLimiter,
+  [
+    body("decision").isIn(["approved", "rejected"]),
+    body("note").optional({ checkFalsy: true }).trim().isLength({ max: 500 }),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[request]] = await connection.query(
+        `SELECT pr.*,COALESCE(sp.shop_name,u.name) seller_name
+         FROM payout_requests pr
+         JOIN users u ON u.id=pr.seller_id
+         LEFT JOIN seller_profiles sp ON sp.seller_id=pr.seller_id
+         WHERE pr.id=?
+         FOR UPDATE`,
+        [req.params.id],
+      );
+      if (!request) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Demande introuvable." });
+      }
+      if (request.status !== "pending") {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Cette demande a déjà été examinée.",
+        });
+      }
+      if (req.body.decision === "rejected" && !req.body.note) {
+        await connection.rollback();
+        return res.status(422).json({
+          message: "Ajoutez un motif pour refuser cette demande.",
+        });
+      }
+
+      await connection.query(
+        `UPDATE payout_requests
+         SET status=?,admin_note=?,reviewed_by=?,reviewed_at=NOW()
+         WHERE id=?`,
+        [req.body.decision, req.body.note || null, req.user.id, request.id],
+      );
+
+      if (req.body.decision === "rejected") {
+        await walletSnapshot(connection, request.seller_id, true);
+        await connection.query(
+          `UPDATE seller_wallets
+           SET available_balance=available_balance+?,
+             reserved_balance=GREATEST(0,reserved_balance-?)
+           WHERE seller_id=?`,
+          [request.amount, request.amount, request.seller_id],
+        );
+        await recordWalletTransaction(connection, {
+          sellerId: request.seller_id,
+          requestId: request.id,
+          eventKey: `payout-request-rejected:${request.id}`,
+          type: "withdrawal_released",
+          amount: request.amount,
+          actorId: req.user.id,
+          note: req.body.note,
+        });
+        await notifyUser(
+          connection,
+          request.seller_id,
+          "seller",
+          "payout.rejected",
+          "Demande de paiement refusée",
+          `La demande ${request.request_number} a été refusée. Motif : ${req.body.note}`,
+          "/seller/sales",
+          "payout_request",
+          request.id,
+        );
+      } else {
+        await notifyUser(
+          connection,
+          request.seller_id,
+          "seller",
+          "payout.approved",
+          "Demande de paiement approuvée",
+          `La demande ${request.request_number} est transmise au manager pour paiement.`,
+          "/seller/sales",
+          "payout_request",
+          request.id,
+        );
+        await notifyRole(
+          connection,
+          "manager",
+          "payout.approved",
+          "Transfert vendeur à effectuer",
+          `${request.seller_name} attend un transfert de ${Number(request.amount).toLocaleString("fr-HT")} HTG.`,
+          "/manager/payouts",
+          "payout_request",
+          request.id,
+        );
+      }
+
+      await connection.commit();
+      await audit(req, `payout_request.${req.body.decision}`, "payout_request", request.id, {
+        note: req.body.note || null,
+      });
+      res.json({
+        message:
+          req.body.decision === "approved"
+            ? "Demande approuvée et transmise au manager."
+            : "Demande refusée et montant rendu au wallet vendeur.",
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
+app.get(
+  "/api/manager/payout-requests",
+  authenticate,
+  authorize("manager"),
+  noStore,
+  asyncRoute(async (_req, res) => {
+    const [requests] = await pool.query(
+      `SELECT pr.*,u.email seller_email,u.phone seller_phone,
+        COALESCE(sp.shop_name,u.name) seller_name,sp.shop_logo_url,
+        reviewer.name reviewed_by_name,manager.name manager_name,
+        COUNT(pri.id) payout_count
+       FROM payout_requests pr
+       JOIN users u ON u.id=pr.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=pr.seller_id
+       LEFT JOIN users reviewer ON reviewer.id=pr.reviewed_by
+       LEFT JOIN users manager ON manager.id=pr.manager_id
+       LEFT JOIN payout_request_items pri ON pri.payout_request_id=pr.id
+       WHERE pr.status IN ('approved','processing','paid','failed')
+       GROUP BY pr.id,u.email,u.phone,sp.shop_name,u.name,sp.shop_logo_url,
+         reviewer.name,manager.name
+       ORDER BY FIELD(pr.status,'processing','approved','failed','paid'),
+         COALESCE(pr.processing_at,pr.reviewed_at,pr.created_at) DESC
+       LIMIT 300`,
+    );
+    const [[stats]] = await pool.query(
+      `SELECT
+        SUM(status='approved') approved_count,
+        COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) approved_amount,
+        COALESCE(SUM(CASE WHEN status='processing' THEN amount ELSE 0 END),0) processing_amount,
+        COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END),0) paid_amount
+       FROM payout_requests`,
+    );
+    res.json({ requests, stats });
+  }),
+);
+
+app.patch(
+  "/api/manager/payout-requests/:id/processing",
+  authenticate,
+  authorize("manager"),
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[request]] = await connection.query(
+        "SELECT * FROM payout_requests WHERE id=? FOR UPDATE",
+        [req.params.id],
+      );
+      if (!request) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Demande introuvable." });
+      }
+      if (request.status !== "approved") {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Seule une demande approuvée peut être prise en charge.",
+        });
+      }
+      await connection.query(
+        `UPDATE payout_requests
+         SET status='processing',manager_id=?,processing_at=NOW()
+         WHERE id=?`,
+        [req.user.id, request.id],
+      );
+      await notifyUser(
+        connection,
+        request.seller_id,
+        "seller",
+        "payout.processing",
+        "Paiement en traitement",
+        `Le manager prépare le transfert MonCash de ${request.request_number}.`,
+        "/seller/sales",
+        "payout_request",
+        request.id,
+      );
+      await connection.commit();
+      await audit(req, "payout_request.processing", "payout_request", request.id);
+      res.json({ message: "Demande prise en charge. Effectuez maintenant le transfert MonCash." });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
+app.patch(
+  "/api/manager/payout-requests/:id/complete",
+  authenticate,
+  authorize("manager"),
+  writeRateLimiter,
+  [body("reference").trim().isLength({ min: 3, max: 120 })],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[request]] = await connection.query(
+        "SELECT * FROM payout_requests WHERE id=? FOR UPDATE",
+        [req.params.id],
+      );
+      if (!request) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Demande introuvable." });
+      }
+      if (request.status !== "processing" || Number(request.manager_id) !== Number(req.user.id)) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Cette demande doit être prise en charge par votre compte avant confirmation.",
+        });
+      }
+
+      await walletSnapshot(connection, request.seller_id, true);
+      await connection.query(
+        `UPDATE payout_requests
+         SET status='paid',payment_reference=?,paid_at=NOW(),failure_reason=NULL
+         WHERE id=?`,
+        [req.body.reference, request.id],
+      );
+      await connection.query(
+        `UPDATE seller_wallets
+         SET reserved_balance=GREATEST(0,reserved_balance-?),
+           total_paid=total_paid+?
+         WHERE seller_id=?`,
+        [request.amount, request.amount, request.seller_id],
+      );
+      await recordWalletTransaction(connection, {
+        sellerId: request.seller_id,
+        requestId: request.id,
+        eventKey: `payout-request-paid:${request.id}`,
+        type: "withdrawal_paid",
+        amount: request.amount,
+        actorId: req.user.id,
+        note: `Transfert MonCash ${req.body.reference}.`,
+      });
+
+      await connection.query(
+        `UPDATE payouts po
+         JOIN (
+           SELECT pri.payout_id,SUM(pri.amount) paid_amount
+           FROM payout_request_items pri
+           JOIN payout_requests pr ON pr.id=pri.payout_request_id
+           WHERE pr.status='paid'
+           GROUP BY pri.payout_id
+         ) settled ON settled.payout_id=po.id
+         SET po.status='paid',po.paid_at=NOW(),po.paid_by=?,
+           po.payment_reference=?
+         WHERE po.seller_id=? AND po.status='processing'
+           AND settled.paid_amount>=po.amount-0.009`,
+        [req.user.id, req.body.reference, request.seller_id],
+      );
+      await notifyUser(
+        connection,
+        request.seller_id,
+        "seller",
+        "payout.paid",
+        "Transfert MonCash effectué",
+        `${Number(request.amount).toLocaleString("fr-HT")} HTG ont été transférés. Référence : ${req.body.reference}.`,
+        "/seller/sales",
+        "payout_request",
+        request.id,
+      );
+      await notifyRole(
+        connection,
+        "admin",
+        "payout.paid",
+        "Paiement vendeur terminé",
+        `La demande ${request.request_number} a été payée par le manager.`,
+        "/admin/payout-requests",
+        "payout_request",
+        request.id,
+      );
+      await connection.commit();
+      await audit(req, "payout_request.paid", "payout_request", request.id, {
+        reference: req.body.reference,
+        amount: request.amount,
+      });
+      res.json({ message: "Transfert confirmé et wallet vendeur mis à jour." });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
+app.patch(
+  "/api/manager/payout-requests/:id/fail",
+  authenticate,
+  authorize("manager"),
+  writeRateLimiter,
+  [body("reason").trim().isLength({ min: 8, max: 500 })],
+  validate,
+  asyncRoute(async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [[request]] = await connection.query(
+        "SELECT * FROM payout_requests WHERE id=? FOR UPDATE",
+        [req.params.id],
+      );
+      if (!request) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Demande introuvable." });
+      }
+      if (request.status !== "processing" || Number(request.manager_id) !== Number(req.user.id)) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Cette demande n’est pas en traitement sur votre compte.",
+        });
+      }
+
+      await walletSnapshot(connection, request.seller_id, true);
+      await connection.query(
+        `UPDATE payout_requests
+         SET status='failed',failure_reason=?
+         WHERE id=?`,
+        [req.body.reason, request.id],
+      );
+      await connection.query(
+        `UPDATE seller_wallets
+         SET available_balance=available_balance+?,
+           reserved_balance=GREATEST(0,reserved_balance-?)
+         WHERE seller_id=?`,
+        [request.amount, request.amount, request.seller_id],
+      );
+      await recordWalletTransaction(connection, {
+        sellerId: request.seller_id,
+        requestId: request.id,
+        eventKey: `payout-request-failed:${request.id}`,
+        type: "withdrawal_released",
+        amount: request.amount,
+        actorId: req.user.id,
+        note: req.body.reason,
+      });
+      await notifyUser(
+        connection,
+        request.seller_id,
+        "seller",
+        "payout.failed",
+        "Transfert MonCash non abouti",
+        `Le montant est revenu dans votre solde disponible. Motif : ${req.body.reason}`,
+        "/seller/sales",
+        "payout_request",
+        request.id,
+      );
+      await notifyRole(
+        connection,
+        "admin",
+        "payout.failed",
+        "Échec d’un transfert vendeur",
+        `La demande ${request.request_number} doit être suivie.`,
+        "/admin/payout-requests",
+        "payout_request",
+        request.id,
+      );
+      await connection.commit();
+      await audit(req, "payout_request.failed", "payout_request", request.id, {
+        reason: req.body.reason,
+      });
+      res.json({ message: "Échec enregistré. Le montant est redevenu disponible." });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
 app.patch(
   "/api/admin/payouts/:id/paid",
   authenticate,
@@ -6567,6 +7624,12 @@ app.patch(
   [body("reference").trim().isLength({ min: 3, max: 120 })],
   validate,
   asyncRoute(async (req, res) => {
+    if (PAYMENT_MODEL === "protected_vinnht") {
+      return res.status(409).json({
+        message:
+          "Utilisez une demande vendeur approuvée puis la file de transfert du manager.",
+      });
+    }
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -6656,6 +7719,12 @@ app.patch(
   authorize("admin"),
   writeRateLimiter,
   asyncRoute(async (req, res) => {
+    if (PAYMENT_MODEL === "protected_vinnht") {
+      return res.status(409).json({
+        message:
+          "Les paiements vendeurs protégés passent par une demande approuvée et un transfert manager.",
+      });
+    }
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -7162,6 +8231,39 @@ const publishSaturdayReportNotification = async () => {
     );
   }
 };
+const publishSundayDeliveryReportNotification = async () => {
+  const now = new Date();
+  if (now.getDay() !== 0) return;
+  const period = deliveryWeekPeriod(now);
+  const [drivers] = await pool.query(
+    `SELECT DISTINCT u.id
+     FROM users u
+     JOIN user_roles ur ON ur.user_id=u.id AND ur.role='delivery'
+     WHERE u.status='active'
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.user_id=u.id
+           AND n.type='weekly_report.delivery'
+           AND n.entity_type='weekly_report'
+           AND n.entity_id=?
+       )`,
+    [period.end],
+  );
+  for (const driver of drivers) {
+    const report = await getDeliveryWeeklySummary(pool, driver.id, period);
+    await notifyUser(
+      pool,
+      driver.id,
+      "delivery",
+      "weekly_report.delivery",
+      "Votre rapport de livraison est prêt",
+      `${report.confirmedDeliveries} livraison(s) confirmée(s) pour ${Number(report.confirmedEarnings).toLocaleString("fr-HT")} HTG cette semaine.`,
+      "/delivery",
+      "weekly_report",
+      period.end,
+    );
+  }
+};
 const runMessageRetentionCleanup = async () => {
   const result = await cleanupExpiredMessages(
     pool,
@@ -7191,6 +8293,7 @@ server.listen(port, () => {
   console.log(`VinnHT API disponible sur ${protocol}://localhost:${port}`);
   runMessageRetentionCleanup().catch(console.error);
   publishSaturdayReportNotification().catch(console.error);
+  publishSundayDeliveryReportNotification().catch(console.error);
   const messageRetentionTimer = setInterval(
     () => {
       runMessageRetentionCleanup().catch(console.error);
@@ -7205,4 +8308,11 @@ server.listen(port, () => {
     60 * 60 * 1000,
   );
   saturdayReportTimer.unref();
+  const sundayDeliveryReportTimer = setInterval(
+    () => {
+      publishSundayDeliveryReportNotification().catch(console.error);
+    },
+    60 * 60 * 1000,
+  );
+  sundayDeliveryReportTimer.unref();
 });

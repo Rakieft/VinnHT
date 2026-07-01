@@ -40,6 +40,12 @@ import {
   getProductAttributeFields,
   parseProductAttributes,
 } from "../config/productAttributes.js";
+import {
+  getTaxonomyGroup,
+  getTaxonomyRayon,
+  getTaxonomyTypeLabel,
+  taxonomySlug,
+} from "../config/marketplaceTaxonomy.js";
 import { shopPublicPath } from "../utils/shopUrl.js";
 import "../styles/seller-flow.css";
 
@@ -321,6 +327,8 @@ export function SellerProductsContent({ api }) {
       await api.patch(`/seller/products/${editing.id}`, {
         name: editing.name,
         categoryId: Number(editing.category_id),
+        subcategorySlug: editing.subcategory_slug || "",
+        productTypeSlug: editing.product_type_slug || "",
         price: Number(editing.price),
         promotionalPrice: editing.promotional_price ? Number(editing.promotional_price) : "",
         isFeatured: Boolean(editing.is_featured),
@@ -365,6 +373,8 @@ export function SellerProductsContent({ api }) {
       category_id: categoryId,
       category_name: category?.name || "",
       category_slug: category?.slug || "autres",
+      subcategory_slug: "",
+      product_type_slug: "",
       attributes: {},
     }));
   };
@@ -552,6 +562,46 @@ export function SellerProductsContent({ api }) {
                 ))}
               </select>
             </label>
+            {getTaxonomyRayon(editing.category_slug) && (
+              <label>
+                Sous-rayon
+                <select
+                  required
+                  value={editing.subcategory_slug || ""}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      subcategory_slug: event.target.value,
+                      product_type_slug: "",
+                    })
+                  }
+                >
+                  <option value="">Choisir un sous-rayon</option>
+                  {getTaxonomyRayon(editing.category_slug).groups.map((group) => (
+                    <option value={group.slug} key={group.slug}>{group.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {getTaxonomyGroup(editing.category_slug, editing.subcategory_slug) && (
+              <label>
+                Type de produit
+                <select
+                  required
+                  value={editing.product_type_slug || ""}
+                  onChange={(event) =>
+                    setEditing({ ...editing, product_type_slug: event.target.value })
+                  }
+                >
+                  <option value="">Choisir un type</option>
+                  {getTaxonomyGroup(editing.category_slug, editing.subcategory_slug).types.map(
+                    (type) => (
+                      <option value={taxonomySlug(type)} key={taxonomySlug(type)}>{type}</option>
+                    ),
+                  )}
+                </select>
+              </label>
+            )}
             <label>
               Prix HTG
               <input
@@ -695,6 +745,8 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
   const [form, setForm] = useState({
     name: "",
     categoryId: "",
+    subcategorySlug: "",
+    productTypeSlug: "",
     description: "",
     price: "",
     stock: "",
@@ -729,7 +781,17 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
       if (images[0]) data.append("images", images[0]);
       await api.post("/products", data);
       setMessage("Produit ajoute avec succes.");
-      setForm({ name: "", categoryId: "", description: "", price: "", stock: "", department: "Ouest", city: "" });
+      setForm({
+        name: "",
+        categoryId: "",
+        subcategorySlug: "",
+        productTypeSlug: "",
+        description: "",
+        price: "",
+        stock: "",
+        department: "Ouest",
+        city: "",
+      });
       setAttributes({});
       setPackOptions([]);
       setImages([]);
@@ -742,6 +804,11 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
 
   const selectedCategory = categories.find(
     (category) => String(category.id) === String(form.categoryId),
+  );
+  const selectedTaxonomyRayon = getTaxonomyRayon(selectedCategory?.slug);
+  const selectedTaxonomyGroup = getTaxonomyGroup(
+    selectedCategory?.slug,
+    form.subcategorySlug,
   );
   const attributeFields = getProductAttributeFields(selectedCategory);
 
@@ -779,7 +846,12 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
                 required
                 value={form.categoryId}
                 onChange={(event) => {
-                  setForm({ ...form, categoryId: event.target.value });
+                  setForm({
+                    ...form,
+                    categoryId: event.target.value,
+                    subcategorySlug: "",
+                    productTypeSlug: "",
+                  });
                   setAttributes({});
                 }}
               >
@@ -791,6 +863,44 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
                 ))}
               </select>
             </label>
+            {selectedTaxonomyRayon && (
+              <label>
+                Sous-rayon
+                <select
+                  required
+                  value={form.subcategorySlug}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      subcategorySlug: event.target.value,
+                      productTypeSlug: "",
+                    })
+                  }
+                >
+                  <option value="">Choisir un sous-rayon</option>
+                  {selectedTaxonomyRayon.groups.map((group) => (
+                    <option value={group.slug} key={group.slug}>{group.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {selectedTaxonomyGroup && (
+              <label>
+                Type de produit
+                <select
+                  required
+                  value={form.productTypeSlug}
+                  onChange={(event) =>
+                    setForm({ ...form, productTypeSlug: event.target.value })
+                  }
+                >
+                  <option value="">Choisir un type de produit</option>
+                  {selectedTaxonomyGroup.types.map((type) => (
+                    <option value={taxonomySlug(type)} key={taxonomySlug(type)}>{type}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </ProductStudioSection>
 
           <ProductStudioSection
@@ -957,8 +1067,15 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
             {previews[0] ? <img src={previews[0]} alt="Apercu principal" /> : <ImagePlus />}
           </div>
           <small>
-            {categories.find((category) => String(category.id) === String(form.categoryId))?.name ||
-              "Categorie"}
+            {[
+              selectedCategory?.name,
+              selectedTaxonomyGroup?.name,
+              getTaxonomyTypeLabel(
+                selectedCategory?.slug,
+                form.subcategorySlug,
+                form.productTypeSlug,
+              ),
+            ].filter(Boolean).join(" › ") || "Catégorie"}
           </small>
           <h3>{form.name || "Nom de votre produit"}</h3>
           <strong>{Number(form.price || 0).toLocaleString("fr-HT")} HTG</strong>
@@ -1234,7 +1351,7 @@ export function SellerDashboardContent({ api, user }) {
         <div>
           <span>Performance de votre boutique</span>
           <h2>{money(stats.net_sales)}</h2>
-          <p>Revenu net estime apres commission, sans fonction de retrait configuree.</p>
+          <p>Revenu net estimé, suivi et payable depuis votre wallet VinnHT.</p>
         </div>
         <Wallet />
       </section>
@@ -1308,8 +1425,6 @@ export function SellerOrdersContent({ api }) {
 
   useEffect(() => {
     setAssigningDriverId(selected?.seller_delivery_user_id || "");
-    setShowPaymentProof(false);
-    setRejectReason("");
   }, [selected]);
 
   useEffect(() => {
@@ -1573,7 +1688,7 @@ export function SellerOrdersContent({ api }) {
                 "Paiement",
                 sellerPaymentLabels[selectedPaymentStatus] || selectedPaymentStatus,
                 selectedPaymentIsValid,
-                selectedCanValidatePayment || !selected.payment_proof_url || selectedPaymentStatus === "failed",
+                !selectedPaymentIsValid && selectedPaymentStatus !== "failed",
               ],
               [
                 "Preparation",
@@ -1896,7 +2011,7 @@ export function SellerPayoutsContent({ api }) {
     <SellerPageHeader
       eyebrow="Suivi financier"
       title="Mes revenus"
-      text="Consultez vos ventes et revenus estimes. Les retraits seront definis ulterieurement."
+      text="Consultez vos ventes, votre solde disponible et vos demandes de paiement."
     >
       <section className="seller-payout-banner">
         <span>
@@ -1905,7 +2020,7 @@ export function SellerPayoutsContent({ api }) {
         <div>
           <small>Revenu net estime</small>
           <h2>{money(netTotal)}</h2>
-          <p>Aucune demande de retrait ni methode de paiement n'est configuree.</p>
+          <p>Les paiements sont envoyés vers le compte MonCash vérifié de votre boutique.</p>
         </div>
       </section>
       <SellerFinanceTable

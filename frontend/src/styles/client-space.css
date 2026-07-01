@@ -3012,8 +3012,9 @@ body.client-order-modal-open {
   border-bottom: 1px solid var(--line);
 }
 
-.conversation-room header div {
+.conversation-room-contact {
   flex: 1;
+  min-width: 0;
 }
 
 .conversation-room h3,
@@ -3028,6 +3029,12 @@ body.client-order-modal-open {
   color: var(--success);
   font-size: 12px;
   font-weight: 900;
+}
+
+.conversation-room header p svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
 }
 
 .conversation-room i {
@@ -3080,6 +3087,28 @@ body.client-order-modal-open {
   justify-self: end;
   color: #ffffff;
   background: var(--blue);
+}
+
+.message-history-empty {
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  max-width: 360px;
+  padding: 28px;
+  color: var(--gray);
+  text-align: center;
+}
+
+.message-history-empty strong {
+  color: var(--dark);
+  font-size: 16px;
+}
+
+.message-history-empty span:last-child {
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .conversation-room footer,
@@ -4094,23 +4123,84 @@ body.client-order-modal-open {
   .messages-mobile-back {
     display: grid;
     place-items: center;
-    flex: 0 0 42px;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
   }
 
   .conversation-room header {
     position: sticky;
     top: 0;
     z-index: 4;
+    min-height: 72px;
+    gap: 10px;
+    padding: 12px;
     background: rgba(255, 255, 255, 0.96);
     backdrop-filter: blur(16px);
+  }
+
+  .conversation-room header .conversation-avatar.large {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .conversation-room-contact h3 {
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .conversation-room-contact p {
+    margin-top: 3px;
+    overflow: hidden;
+    font-size: 10.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .message-history {
+    padding: 16px 12px 14px;
+    scrollbar-gutter: auto;
+  }
+
+  .message-history-empty {
+    gap: 7px;
+    padding: 20px 18px;
+  }
+
+  .message-history-empty .conversation-avatar.large {
+    width: 58px;
+    height: 58px;
+    border-radius: 19px;
   }
 
   .conversation-room form {
     position: relative;
     z-index: 5;
     flex: 0 0 auto;
+    gap: 8px;
+    margin: 0 10px 10px;
+    padding: 7px;
+    border: 1px solid rgba(37, 99, 235, 0.12);
+    border-radius: 20px;
     background: rgba(255, 255, 255, 0.98);
     backdrop-filter: blur(16px);
+    box-shadow: 0 14px 32px rgba(15, 23, 42, 0.1);
+  }
+
+  .conversation-room form input {
+    min-width: 0;
+    min-height: 46px;
+    background: #f8fafc;
+  }
+
+  .conversation-room form button {
+    width: 46px;
+    height: 46px;
+    border-radius: 15px;
   }
 
   .settings-security-panel {
@@ -4510,4 +4600,71 @@ body.client-order-modal-open {
   margin-top: 5px;
   color: #94a3b8;
   font-weight: 800;
+}
+
+/* La messagerie mobile occupe exactement l'espace entre le header et la navigation. */
+@media (max-width: 720px) {
+  body.dashboard-messages-open {
+    height: 100dvh;
+    padding-bottom: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .dash-shell.dashboard-messages-view {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    padding-bottom: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .dashboard-messages-view .dash-main {
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .dashboard-messages-view .dash-main > main {
+    box-sizing: border-box;
+    height: calc(100dvh - 78px);
+    min-height: 0;
+    padding: 20px 15px calc(96px + env(safe-area-inset-bottom, 0px));
+    overflow: hidden;
+  }
+
+  .dashboard-messages-view .marketplace-messages-page,
+  .dashboard-messages-view .client-messages-shell {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+  }
+
+  .dashboard-messages-view .client-messages-shell.conversation-open .conversation-room {
+    padding-bottom: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .client-profile-grid,
+  .client-profile-card,
+  .client-profile-form,
+  .profile-form-grid {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .client-profile-form,
+  .profile-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .client-profile-form header,
+  .profile-form-grid label,
+  .profile-form-grid input,
+  .profile-form-grid select {
+    min-width: 0;
+  }
 }

@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, CircleUserRound, MessageCircle, Search, Send } from "lucide-react";
+import {
+  ArrowLeft,
+  CircleUserRound,
+  MessageCircle,
+  Search,
+  Send,
+  ShieldCheck,
+} from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { assetUrl } from "../config/runtime.js";
 import "../styles/client-space.css";
@@ -174,28 +181,35 @@ export default function MarketplaceMessages({
                   <ArrowLeft />
                 </button>
                 <ConversationAvatar image={current.image_url} name={current.name} large />
-                <div>
+                <div className="conversation-room-contact">
                   <h3>{current.name}</h3>
                   <p>
-                    <i />
-                    Conversation sécurisée VinnHT
+                    <ShieldCheck />
+                    Conversation sécurisée
                   </p>
                 </div>
-                <button aria-label="Profil">
-                  <CircleUserRound />
-                </button>
               </header>
               <div className="message-history">
-                {messages.map((message) => (
-                  <p
-                    className={Number(message.sender_id) === Number(user.id) ? "sent" : "received"}
-                    key={message.id}
-                  >
-                    {message.body}
-                  </p>
-                ))}
+                {messages.length ? (
+                  messages.map((message) => (
+                    <p
+                      className={Number(message.sender_id) === Number(user.id) ? "sent" : "received"}
+                      key={message.id}
+                    >
+                      {message.body}
+                    </p>
+                  ))
+                ) : (
+                  <div className="message-history-empty">
+                    <ConversationAvatar image={current.image_url} name={current.name} large />
+                    <strong>Discutez avec {current.name}</strong>
+                    <span>
+                      Posez votre question ici. Vos échanges restent protégés dans VinnHT.
+                    </span>
+                  </div>
+                )}
               </div>
-              <form onSubmit={sendMessage}>
+              <form onSubmit={sendMessage} aria-label="Écrire un message">
                 <input
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}

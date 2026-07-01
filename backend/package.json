@@ -15,6 +15,7 @@
     "db:backup": "node src/scripts/backup.js",
     "db:restore": "node src/scripts/restore.js",
     "smoke:marketplace": "node src/scripts/smokeMarketplace.js",
+    "smoke:wallet": "node src/scripts/smokeWallet.js",
     "smoke:promotion-expiry": "node src/scripts/smokePromotionExpiry.js",
     "smoke:education-registration": "node src/scripts/smokeEducationRegistration.js",
     "check": "node --check src/server.js",

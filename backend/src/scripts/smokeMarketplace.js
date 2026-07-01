@@ -284,6 +284,8 @@ const runFlow = async () => {
     body: {
       name: "Produit Smoke VinnHT",
       categoryId: category.id,
+      subcategorySlug: "divers",
+      productTypeSlug: "nouveautes",
       description: "Produit temporaire de validation.",
       price: 2500,
       stock: 5,
@@ -303,6 +305,17 @@ const runFlow = async () => {
   assert.deepEqual(
     productWithPacks.data.pack_options.map((option) => Number(option.units_per_pack)),
     [3, 12],
+  );
+  assert.equal(productWithPacks.data.subcategory_slug, "divers");
+  assert.equal(productWithPacks.data.product_type_slug, "nouveautes");
+  const filteredTaxonomyProducts = await request(
+    "/products?category=autres&subcategory=divers&productType=nouveautes",
+  );
+  assert(
+    filteredTaxonomyProducts.data.some(
+      (product) => Number(product.id) === Number(createdProduct.data.id),
+    ),
+    "Le filtrage par sous-rayon et type de produit ne retourne pas le produit créé.",
   );
   const secondProduct = await request("/products", {
     method: "POST",

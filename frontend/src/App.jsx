@@ -69,8 +69,14 @@ import {
   SearchBar,
   StatCard,
 } from "./components/ui.jsx";
+import CatalogTaxonomy from "./components/CatalogTaxonomy.jsx";
 import { apiOrigin, assetUrl } from "./config/runtime.js";
 import { productAttributeEntries } from "./config/productAttributes.js";
+import {
+  getTaxonomyGroup,
+  getTaxonomyRayon,
+  getTaxonomyTypeLabel,
+} from "./config/marketplaceTaxonomy.js";
 import { shopPublicPath, shopSellerIdFromParam } from "./utils/shopUrl.js";
 import sousHeroImage from "./assets/images/sous-hero-vinnht-student.jpg";
 import contactSupportImage from "./assets/images/contact-support-hands-vinnht.jpg";
@@ -130,6 +136,17 @@ const ReportsContent = lazyNamed(loadAdminFlow, "ReportsContent");
 const SellersOverviewContent = lazyNamed(loadAdminFlow, "SellersOverviewContent");
 const StaffProfileContent = lazyNamed(loadAdminFlow, "StaffProfileContent");
 const StaffSettingsContent = lazyNamed(loadAdminFlow, "StaffSettingsContent");
+
+const loadWalletFlow = () => import("./components/WalletFlow.jsx");
+const SellerWalletContent = lazyNamed(loadWalletFlow, "SellerWalletContent");
+const AdminPayoutApprovalContent = lazyNamed(
+  loadWalletFlow,
+  "AdminPayoutApprovalContent",
+);
+const ManagerPayoutOperationsContent = lazyNamed(
+  loadWalletFlow,
+  "ManagerPayoutOperationsContent",
+);
 
 const BecomeSellerPage = React.lazy(() => import("./pages/client/BecomeSeller.jsx"));
 const MarketplaceMessages = React.lazy(() => import("./components/MarketplaceMessages.jsx"));
@@ -933,6 +950,12 @@ function ProductCard({ product }) {
   const favorite = isFavorite(product.id);
   const activeOffer = productOfferIsActive(product);
   const packSizes = productPackSizes(product);
+  const productGroup = getTaxonomyGroup(product.category_slug, product.subcategory_slug);
+  const productTypeLabel = getTaxonomyTypeLabel(
+    product.category_slug,
+    product.subcategory_slug,
+    product.product_type_slug,
+  );
   return (
     <motion.article className="product-card" whileHover={{ y: -8 }}>
       <Link className="product-media" to={`/products/${product.id}`}>
@@ -970,7 +993,7 @@ function ProductCard({ product }) {
       </button>
       <div className="product-body">
         <div className="product-meta">
-          <span>{product.category_name}</span>
+          <span>{productTypeLabel || productGroup?.name || product.category_name}</span>
           <span>
             <MapPin size={13} />
             {product.city || "Haïti"}
@@ -2101,12 +2124,13 @@ function ProductsCatalog() {
   const [products, setProducts] = useState([]);
   const [query, setQuery] = useState(initialSearch);
   const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
+  const [productType, setProductType] = useState("");
   const [department, setDepartment] = useState("");
   const [city, setCity] = useState("");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [showAllUniverses, setShowAllUniverses] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -2114,6 +2138,8 @@ function ProductsCatalog() {
       .get("/products", {
         params: {
           category: category || undefined,
+          subcategory: subcategory || undefined,
+          productType: productType || undefined,
           search: query || undefined,
           department: department || undefined,
           city: city || undefined,
@@ -2128,7 +2154,7 @@ function ProductsCatalog() {
       })
       .catch(() => setProducts([]))
       .finally(() => setLoading(false));
-  }, [category, query, department, city, offersOnly, page]);
+  }, [category, subcategory, productType, query, department, city, offersOnly, page]);
 
   useEffect(() => {
     setQuery(new URLSearchParams(location.search).get("search") || "");
@@ -2137,13 +2163,31 @@ function ProductsCatalog() {
 
   useEffect(() => {
     setPage(1);
-  }, [category, query, department, city]);
+  }, [category, subcategory, productType, query, department, city]);
 
   const availableCities = [...new Set(products.map((product) => product.city).filter(Boolean))];
-  const featuredUniverses = marketplaceDepartments.slice(0, 6);
-  const selectUniverse = (slug) => {
-    setCategory(category === slug ? "" : slug);
-    setShowAllUniverses(false);
+  const selectedRayon = getTaxonomyRayon(category);
+  const selectedGroup = getTaxonomyGroup(category, subcategory);
+  const selectedTypeLabel = getTaxonomyTypeLabel(category, subcategory, productType);
+  const clearTaxonomy = () => {
+    setCategory("");
+    setSubcategory("");
+    setProductType("");
+  };
+  const selectRayon = (slug) => {
+    setCategory(slug);
+    setSubcategory("");
+    setProductType("");
+  };
+  const selectGroup = (rayonSlug, groupSlug) => {
+    setCategory(rayonSlug);
+    setSubcategory(groupSlug);
+    setProductType("");
+  };
+  const selectProductType = (rayonSlug, groupSlug, typeSlug) => {
+    setCategory(rayonSlug);
+    setSubcategory(groupSlug);
+    setProductType(typeSlug);
   };
 
   return (
@@ -2173,96 +2217,17 @@ function ProductsCatalog() {
         </form>
       </section>
 
-      <section className="catalog-departments">
-        <SectionHead eyebrow="Explorer par univers" title="Que recherchez-vous aujourd'hui" />
-        <div className="department-mobile-strip" aria-label="Rayons populaires">
-          {featuredUniverses.map(([name, slug, Icon]) => (
-            <button
-              className={category === slug ? "active" : ""}
-              onClick={() => selectUniverse(slug)}
-              key={name}
-            >
-              <Icon />
-              <span>{name}</span>
-            </button>
-          ))}
-          <button className="show-all-universes" onClick={() => setShowAllUniverses(true)}>
-            <ShoppingBag />
-            <span>Voir tous</span>
-          </button>
-        </div>
-        <div className="department-grid catalog-department-grid">
-          {marketplaceDepartments.map(([name, slug, Icon, children]) => (
-            <button
-              className={category === slug ? "active" : ""}
-              onClick={() => selectUniverse(slug)}
-              key={name}
-            >
-              <span>
-                <Icon />
-              </span>
-              <div>
-                <h3>{name}</h3>
-                <p>{children.join(" - ")}</p>
-              </div>
-              <ChevronRight />
-            </button>
-          ))}
-        </div>
-        {showAllUniverses && (
-          <div className="mobile-universe-layer" role="dialog" aria-modal="true" aria-label="Tous les rayons">
-            <button className="mobile-universe-backdrop" onClick={() => setShowAllUniverses(false)} />
-            <motion.div
-              className="mobile-universe-sheet"
-              initial={{ y: 80, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-            >
-              <header>
-                <div>
-                  <span>Rayons VinnHT</span>
-                  <h2>Tous les univers</h2>
-                </div>
-                <button onClick={() => setShowAllUniverses(false)} aria-label="Fermer les rayons">
-                  <X />
-                </button>
-              </header>
-              <div>
-                {marketplaceDepartments.map(([name, slug, Icon, children]) => (
-                  <button
-                    className={category === slug ? "active" : ""}
-                    onClick={() => selectUniverse(slug)}
-                    key={name}
-                  >
-                    <span><Icon /></span>
-                    <div>
-                      <strong>{name}</strong>
-                      <small>{children.slice(0, 3).join(" - ")}</small>
-                    </div>
-                    <ChevronRight />
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </section>
-
       <section className="catalog-products-section">
-        <aside className="catalog-filters">
-          <span>Rayons</span>
-          <button className={!category ? "active" : ""} onClick={() => setCategory("")}>
-            Tous les produits
-          </button>
-          {categories.map(([name, slug]) => (
-            <button
-              className={category === slug ? "active" : ""}
-              onClick={() => setCategory(slug)}
-              key={slug}
-            >
-              {name}
-            </button>
-          ))}
-        </aside>
+        <CatalogTaxonomy
+          category={category}
+          subcategory={subcategory}
+          productType={productType}
+          offersOnly={offersOnly}
+          onSelectAll={clearTaxonomy}
+          onSelectRayon={selectRayon}
+          onSelectGroup={selectGroup}
+          onSelectType={selectProductType}
+        />
         <div className="catalog-results">
           <header>
             <div>
@@ -2270,10 +2235,16 @@ function ProductsCatalog() {
               <h2>
                 {offersOnly
                    ? "Offres spéciales"
-                  : category
-                    ? "Produits du rayon"
-                    : "Tous les produits"}
+                  : selectedTypeLabel || selectedGroup?.name || selectedRayon?.name || "Tous les produits"}
               </h2>
+              {(selectedRayon || selectedGroup || selectedTypeLabel) && (
+                <div className="catalog-selection-path">
+                  {selectedRayon && <span>{selectedRayon.name}</span>}
+                  {selectedGroup && <span>{selectedGroup.name}</span>}
+                  {selectedTypeLabel && <span>{selectedTypeLabel}</span>}
+                  <button type="button" onClick={clearTaxonomy}>Effacer</button>
+                </div>
+              )}
             </div>
             <select
               value={department}
@@ -3371,7 +3342,7 @@ const menus = {
     ["Vue d’ensemble", "/seller", LayoutDashboard],
     ["Mes produits", "/seller/products", ShoppingBag],
     ["Commandes", "/seller/orders", Package],
-    ["Ventes & revenus", "/seller/sales", BarChart3],
+    ["Ventes & wallet", "/seller/sales", Wallet],
     ["Ma boutique", "/seller/shop", Store],
     ["Messages", "/seller/messages", MessageCircle],
     ["Paramètres", "/seller/settings", Settings],
@@ -3388,6 +3359,7 @@ const menus = {
     ["Rapports opérationnels", "/manager/sales-reports", BarChart3],
     ["Gestion vendeurs", "/manager/sellers", Store],
     ["Gestion livraison", "/manager/deliveries", Truck],
+    ["Transferts vendeurs", "/manager/payouts", Wallet],
     ["Profil", "/manager/profile", CircleUserRound],
     ["Paramètres", "/manager/settings", Settings],
   ],
@@ -3396,7 +3368,7 @@ const menus = {
     ["Vendeurs", "/admin/users", Users],
     ["Catégories", "/admin/categories", ShoppingBasket],
     ["Produits", "/admin/products", ShoppingBag],
-    ["Paiements", "/admin/payments", CreditCard],
+    ["Demandes paiement", "/admin/payout-requests", Wallet],
     ["Profil", "/admin/profile", CircleUserRound],
     ["Support", "/admin/contact-requests", MessageCircle],
     ["Paramètres", "/admin/settings", Settings],
@@ -3672,15 +3644,39 @@ function DashboardNotifications({ role }) {
   );
 }
 
-function DashboardLayout({ children }) {
+function DashboardLayout({ children, className = "" }) {
   const { user, activeRole, switchRole } = useAuth();
+  const location = useLocation();
   const { cart } = useCart();
   const cartCount = cartUnitsCount(cart);
+  const routeRole = location.pathname.startsWith("/seller")
+    ? "seller"
+    : location.pathname.startsWith("/delivery")
+      ? "delivery"
+      : location.pathname.startsWith("/manager")
+        ? "manager"
+        : location.pathname.startsWith("/admin")
+          ? "admin"
+          : "client";
   const alternativeRoles = (user.roles || []).filter(
     (role) => switchableAccountRoles.includes(role) && role !== activeRole
   );
+
+  useEffect(() => {
+    const roles = user.roles || [];
+    if (activeRole !== routeRole && (roles.includes(routeRole) || roles.includes("admin"))) {
+      switchRole(routeRole);
+    }
+  }, [activeRole, location.pathname, routeRole, user.roles]);
+
+  useEffect(() => {
+    if (!className.split(" ").includes("dashboard-messages-view")) return undefined;
+    document.body.classList.add("dashboard-messages-open");
+    return () => document.body.classList.remove("dashboard-messages-open");
+  }, [className]);
+
   return (
-    <div className="dash-shell">
+    <div className={`dash-shell ${className}`.trim()}>
       <Sidebar />
       <div className="dash-main">
         <header className="dash-top">
@@ -4380,7 +4376,7 @@ function ClientCheckoutPage() {
 function ClientMessagesPage() {
   const { user } = useAuth();
   return (
-    <DashboardLayout>
+    <DashboardLayout className="dashboard-messages-view">
       <MarketplaceMessages api={api} user={user} />
     </DashboardLayout>
   );
@@ -4389,7 +4385,7 @@ function ClientMessagesPage() {
 function SellerMessagesPage() {
   const { user } = useAuth();
   return (
-    <DashboardLayout>
+    <DashboardLayout className="dashboard-messages-view">
       <MarketplaceMessages api={api} user={user} sellerMode />
     </DashboardLayout>
   );
@@ -4450,7 +4446,7 @@ function SellerOrdersPage() {
 function SellerSalesPage() {
   return (
     <DashboardLayout>
-      <SellerSalesContent api={api} />
+      <SellerWalletContent api={api} />
     </DashboardLayout>
   );
 }
@@ -4647,6 +4643,22 @@ function AdminPaymentsPage() {
   return (
     <DashboardLayout>
       <AdminPaymentsContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function AdminPayoutRequestsPage() {
+  return (
+    <DashboardLayout>
+      <AdminPayoutApprovalContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function ManagerPayoutsPage() {
+  return (
+    <DashboardLayout>
+      <ManagerPayoutOperationsContent api={api} />
     </DashboardLayout>
   );
 }
@@ -4973,6 +4985,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/manager/payouts"
+        element={
+          <Protected roles={["manager"]}>
+            <ManagerPayoutsPage />
+          </Protected>
+        }
+      />
+      <Route
         path="/manager/profile"
         element={
           <Protected roles={["manager"]}>
@@ -5021,10 +5041,18 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/admin/payout-requests"
+        element={
+          <Protected roles={["admin"]}>
+            <AdminPayoutRequestsPage />
+          </Protected>
+        }
+      />
+      <Route
         path="/admin/payments"
         element={
           <Protected roles={["admin"]}>
-            <AdminPaymentsPage />
+            <Navigate to="/admin" replace />
           </Protected>
         }
       />

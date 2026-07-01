@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Camera, Check, Trash2, X } from "lucide-react";
+import { Camera, Check, ShieldCheck, Trash2, X } from "lucide-react";
 import { apiOrigin } from "../config/runtime.js";
+import "../styles/profile-photo-manager.css";
 
 export default function ProfilePhotoManager({ api, user, updateUser, onMessage }) {
   const [source, setSource] = useState("");
@@ -9,7 +10,11 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
   const [positionY, setPositionY] = useState(50);
   const [busy, setBusy] = useState(false);
   const imageRef = useRef(null);
-  const currentPhoto = user?.profile_image_url ? `${apiOrigin}${user.profile_image_url}` : "";
+  const currentPhoto = user?.profile_image_url
+    ? user.profile_image_url.startsWith("/uploads")
+      ? `${apiOrigin}${user.profile_image_url}`
+      : user.profile_image_url
+    : "";
   const currentPhotoWithCache = currentPhoto
     ? `${currentPhoto}${currentPhoto.includes("?") ? "&" : "?"}v=${user?.profile_image_url || ""}`
     : "";
@@ -17,6 +22,23 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
   useEffect(() => () => {
     if (source) URL.revokeObjectURL(source);
   }, [source]);
+
+  useEffect(() => {
+    if (!source) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeWithEscape = (event) => {
+      if (event.key === "Escape" && !busy) setSource("");
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeWithEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeWithEscape);
+    };
+  }, [busy, source]);
 
   const choose = (event) => {
     const file = event.target.files?.[0];
@@ -46,6 +68,7 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
       const maxY = Math.max(0, height - size);
       context.drawImage(image, -(maxX * positionX) / 100, -(maxY * positionY) / 100, width, height);
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+      if (!blob) throw new Error("La photo n'a pas pu etre preparee.");
       const data = new FormData();
       data.append("profilePhoto", blob, "profil-vinnht.jpg");
       const { data: response } = await api.patch("/auth/profile", data);
@@ -60,6 +83,7 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
   };
 
   const remove = async () => {
+    if (!window.confirm("Supprimer votre photo de profil VinnHT ?")) return;
     setBusy(true);
     try {
       const { data } = await api.delete("/auth/profile/photo");
@@ -74,39 +98,58 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
 
   return (
     <>
-      <div className="profile-photo-manager">
-        <span>
+      <div className="vinnht-profile-photo-manager">
+        <span className="vinnht-profile-photo-preview">
           {currentPhoto ? (
             <img src={currentPhotoWithCache} alt="Photo de profil" />
           ) : (
             <Camera />
           )}
         </span>
-        <div>
-          <label>
+        <span className={`vinnht-profile-photo-status ${currentPhoto ? "is-ready" : "is-missing"}`}>
+          {currentPhoto ? <ShieldCheck /> : <Camera />}
+          {currentPhoto ? "Photo de profil prête" : "Photo de profil à ajouter"}
+        </span>
+        <div className="vinnht-profile-photo-actions">
+          <label className={busy ? "is-disabled" : ""}>
             <Camera /> Choisir et recadrer
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={choose} />
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={choose}
+              disabled={busy}
+            />
           </label>
           {currentPhoto && (
-            <button type="button" onClick={remove} disabled={busy}>
+            <button className="vinnht-profile-photo-remove" type="button" onClick={remove} disabled={busy}>
               <Trash2 /> Supprimer
             </button>
           )}
         </div>
       </div>
       {source && (
-        <div className="photo-crop-overlay">
-          <section className="photo-crop-dialog">
+        <div className="vinnht-photo-crop-overlay" role="presentation">
+          <section
+            className="vinnht-photo-crop-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vinnht-photo-crop-title"
+          >
             <header>
               <div>
                 <span>Photo de profil</span>
-                <h2>Recadrer votre photo</h2>
+                <h2 id="vinnht-photo-crop-title">Recadrer votre photo</h2>
               </div>
-              <button type="button" onClick={() => setSource("")}>
+              <button
+                type="button"
+                onClick={() => setSource("")}
+                disabled={busy}
+                aria-label="Fermer le recadrage"
+              >
                 <X />
               </button>
             </header>
-            <div className="photo-crop-stage">
+            <div className="vinnht-photo-crop-stage">
               <img
                 ref={imageRef}
                 src={source}
@@ -117,7 +160,7 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
                 }}
               />
             </div>
-            <div className="photo-crop-controls">
+            <div className="vinnht-photo-crop-controls">
               <label>
                 Zoom
                 <input
@@ -151,7 +194,7 @@ export default function ProfilePhotoManager({ api, user, updateUser, onMessage }
               </label>
             </div>
             <footer>
-              <button type="button" onClick={() => setSource("")}>
+              <button type="button" onClick={() => setSource("")} disabled={busy}>
                 Annuler
               </button>
               <button type="button" onClick={saveCrop} disabled={busy}>

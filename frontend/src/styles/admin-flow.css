@@ -3425,6 +3425,27 @@
 }
 
 @media (max-width: 620px) {
+  .admin-profile-layout,
+  .admin-profile-card,
+  .admin-profile-form,
+  .admin-manager-profile-create {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .admin-profile-form {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px;
+  }
+
+  .admin-profile-form header,
+  .admin-profile-form .full,
+  .admin-profile-form label,
+  .admin-profile-form button {
+    grid-column: 1;
+    min-width: 0;
+  }
+
   .admin-support-page.mobile-discussion-open {
     gap: 0;
   }

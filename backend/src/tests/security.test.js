@@ -7,6 +7,10 @@ import {
   cleanupExpiredMessages,
   normalizeRetentionDays,
 } from "../utils/messageRetention.js";
+import {
+  deliveryHistoryCutoffSql,
+  normalizeDeliveryRetentionDays,
+} from "../utils/deliveryRetention.js";
 
 const response = () => ({
   code: 200,
@@ -98,4 +102,11 @@ test("le nettoyage supprime les anciens messages puis les conversations vides", 
   assert.match(queries[1], /LEFT JOIN messages/);
   assert.equal(result.deletedMessages, 2);
   assert.equal(result.deletedConversations, 2);
+});
+
+test("l'historique livreur conserve deux mois par défaut", () => {
+  assert.equal(normalizeDeliveryRetentionDays(undefined), 60);
+  assert.equal(normalizeDeliveryRetentionDays("0"), 60);
+  assert.equal(normalizeDeliveryRetentionDays("90"), 90);
+  assert.match(deliveryHistoryCutoffSql(undefined), /INTERVAL 60 DAY/);
 });

@@ -4005,3 +4005,24 @@
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 720px) {
+  .seller-profile-layout,
+  .seller-profile-card,
+  .seller-profile-form {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .seller-profile-layout,
+  .seller-profile-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .seller-profile-form header,
+  .seller-profile-form label,
+  .seller-profile-form input,
+  .seller-profile-form button {
+    min-width: 0;
+  }
+}
