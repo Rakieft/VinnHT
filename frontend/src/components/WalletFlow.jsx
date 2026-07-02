@@ -45,6 +45,7 @@ const statusMeta = {
   approved: { label: "Approuvée", tone: "approved", Icon: ShieldCheck },
   rejected: { label: "Refusée", tone: "danger", Icon: X },
   processing: { label: "Transfert en cours", tone: "processing", Icon: RefreshCw },
+  verification_required: { label: "À vérifier", tone: "warning", Icon: AlertTriangle },
   paid: { label: "Payée", tone: "success", Icon: CheckCircle2 },
   failed: { label: "Échec du transfert", tone: "danger", Icon: AlertTriangle },
   cancelled: { label: "Annulée", tone: "muted", Icon: X },
@@ -650,13 +651,17 @@ export function ManagerPayoutOperationsContent({ api }) {
   const [filter, setFilter] = useState("ready");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [beneficiaryChecked, setBeneficiaryChecked] = useState(false);
+  const [transferConfirmed, setTransferConfirmed] = useState(false);
+  const [providerBalance, setProviderBalance] = useState(null);
+  const provider = data.provider || {};
 
   const requests = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return data.requests.filter((request) => {
       const matchesStatus =
         filter === "all" ||
-        (filter === "ready" && ["approved", "processing"].includes(request.status)) ||
+        (filter === "ready" && ["approved", "processing", "verification_required"].includes(request.status)) ||
         request.status === filter;
       return matchesStatus && `${request.request_number} ${request.seller_name} ${request.moncash_number}`.toLowerCase().includes(normalized);
     });
@@ -683,6 +688,50 @@ export function ManagerPayoutOperationsContent({ api }) {
     }
   };
 
+  const openRequest = (request) => {
+    setBeneficiaryChecked(false);
+    setTransferConfirmed(false);
+    setSelected(request);
+  };
+
+  const refreshProvider = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const { data: response } = await api.get("/manager/moncash/status");
+      setProviderBalance(response.balance);
+      if (response.message) setError(response.message);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "MonCash est momentanément indisponible.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runMonCashAction = async (action) => {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const { data: response } = await api.post(
+        `/manager/payout-requests/${selected.id}/${action}`,
+      );
+      setMessage(response.message);
+      if (action === "beneficiary-check") {
+        setBeneficiaryChecked(true);
+      } else {
+        setSelected(null);
+        await load();
+      }
+    } catch (requestError) {
+      const response = requestError.response?.data;
+      setError(response?.message || "Action MonCash impossible.");
+      if (response?.requiresReconciliation) await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) return <WalletLoading />;
 
   return (
@@ -690,11 +739,29 @@ export function ManagerPayoutOperationsContent({ api }) {
       <WalletPageHeading
         eyebrow="Opérations financières"
         title="Transferts vendeurs"
-        text="Prenez en charge uniquement les demandes approuvées, effectuez le MonCash puis enregistrez sa référence."
+        text="Contrôlez le bénéficiaire, envoyez le paiement par l’API MonCash et réconciliez chaque opération sans risque de doublon."
       >
         <span className="wallet-role-chip manager"><Landmark /> Exécution manager</span>
       </WalletPageHeading>
       <WalletFeedback message={message} error={error} />
+      <section className={`moncash-provider-strip ${provider.enabled ? "online" : "standby"}`}>
+        <span><Landmark /></span>
+        <div>
+          <small>Passerelle MonCash · {provider.mode || "sandbox"}</small>
+          <b>{provider.enabled ? "API activée" : "Préparée, mais désactivée"}</b>
+          <p>
+            {provider.enabled
+              ? "Les virements sont exécutés depuis VinnHT avec contrôle anti-doublon."
+              : "Aucun virement réel ne peut partir tant que MONCASH_ENABLED reste à false."}
+          </p>
+        </div>
+        {provider.enabled && (
+          <button type="button" disabled={busy} onClick={refreshProvider}>
+            <RefreshCw />
+            {providerBalance === null ? "Vérifier le solde" : money(providerBalance)}
+          </button>
+        )}
+      </section>
       <section className="wallet-metric-grid wallet-desk-metrics">
         <WalletMetric icon={PlayCircle} label="Prêtes" value={data.stats.approved_amount} note={`${data.stats.approved_count || 0} transfert(s)`} tone="blue" />
         <WalletMetric icon={RefreshCw} label="En traitement" value={data.stats.processing_amount} note="Pris en charge" tone="gold" />
@@ -703,7 +770,7 @@ export function ManagerPayoutOperationsContent({ api }) {
       <section className="payout-desk-toolbar">
         <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Boutique, demande ou MonCash" /></label>
         <nav>
-          {["ready", "approved", "processing", "paid", "failed", "all"].map((status) => (
+          {["ready", "approved", "processing", "verification_required", "paid", "failed", "all"].map((status) => (
             <button className={filter === status ? "active" : ""} onClick={() => setFilter(status)} key={status}>
               {status === "ready" ? "À traiter" : status === "all" ? "Toutes" : statusMeta[status]?.label || status}
             </button>
@@ -712,7 +779,7 @@ export function ManagerPayoutOperationsContent({ api }) {
       </section>
       <section className="payout-desk-grid">
         {requests.map((request) => (
-          <PayoutDeskCard request={request} onOpen={setSelected} actionLabel={request.status === "approved" ? "Prendre en charge" : "Ouvrir le suivi"} key={request.id} />
+          <PayoutDeskCard request={request} onOpen={openRequest} actionLabel={request.status === "approved" ? "Prendre en charge" : "Ouvrir le suivi"} key={request.id} />
         ))}
         {!requests.length && <div className="wallet-empty desk"><Landmark /><h3>Aucun transfert dans cette file</h3><p>Les demandes approuvées par l’admin apparaîtront ici.</p></div>}
       </section>
@@ -740,9 +807,45 @@ export function ManagerPayoutOperationsContent({ api }) {
                 <PlayCircle /> Prendre en charge ce transfert
               </button>
             )}
-            {selected.status === "processing" && (
+            {selected.status === "processing" && provider.enabled && provider.configured && (
+              <div className="manager-transfer-actions moncash-api-actions">
+                <div className="wallet-modal-notice">
+                  <ShieldCheck />
+                  <p>VinnHT vérifiera le bénéficiaire et le solde Prefunded avant l’envoi. Le PIN MonCash ne doit jamais être demandé.</p>
+                </div>
+                <button
+                  className={beneficiaryChecked ? "moncash-check-success" : "moncash-check-button"}
+                  type="button"
+                  disabled={busy || beneficiaryChecked}
+                  onClick={() => runMonCashAction("beneficiary-check")}
+                >
+                  {beneficiaryChecked ? <CheckCircle2 /> : <ShieldCheck />}
+                  {beneficiaryChecked ? "Bénéficiaire contrôlé" : "Vérifier le bénéficiaire"}
+                </button>
+                <label className="moncash-transfer-consent">
+                  <input
+                    type="checkbox"
+                    checked={transferConfirmed}
+                    onChange={(event) => setTransferConfirmed(event.target.checked)}
+                  />
+                  <span>
+                    <b>Je confirme ce virement de {money(selected.amount)}</b>
+                    <small>Vers {selected.moncash_number}, au nom de {selected.moncash_account_name}.</small>
+                  </span>
+                </label>
+                <button
+                  className="moncash-send-button"
+                  type="button"
+                  disabled={busy || !beneficiaryChecked || !transferConfirmed}
+                  onClick={() => runMonCashAction("transfer")}
+                >
+                  <Send /> {busy ? "Traitement sécurisé..." : "Envoyer avec MonCash"}
+                </button>
+              </div>
+            )}
+            {selected.status === "processing" && (!provider.enabled || !provider.configured) && provider.manualFallback && (
               <div className="manager-transfer-actions">
-                <div className="wallet-modal-notice"><ShieldCheck /><p>Vérifiez le numéro et le titulaire avant d’envoyer l’argent. Ne demandez jamais le PIN du vendeur.</p></div>
+                <div className="wallet-modal-notice"><ShieldCheck /><p>Mode manuel temporaire. Vérifiez le transfert dans le portail MonCash avant d’enregistrer sa référence.</p></div>
                 <label>Référence MonCash<input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Ex. MC-84A920..." /></label>
                 <button disabled={busy || reference.trim().length < 3} onClick={() => runAction("complete", { reference: reference.trim() })}>
                   <CheckCircle2 /> Confirmer le transfert
@@ -753,6 +856,20 @@ export function ManagerPayoutOperationsContent({ api }) {
                     <AlertTriangle /> Enregistrer l’échec
                   </button>
                 </div>
+              </div>
+            )}
+            {selected.status === "verification_required" && (
+              <div className="manager-transfer-actions moncash-reconcile-box">
+                <div className="wallet-modal-notice">
+                  <AlertTriangle />
+                  <p>La réponse du transfert était incertaine. Ne renvoyez jamais l’argent avant d’avoir interrogé MonCash avec la même référence.</p>
+                </div>
+                {selected.provider_transfer_reference && (
+                  <p className="wallet-reference">Référence sécurisée : {selected.provider_transfer_reference}</p>
+                )}
+                <button type="button" disabled={busy} onClick={() => runMonCashAction("reconcile")}>
+                  <RefreshCw /> {busy ? "Vérification..." : "Réconcilier avec MonCash"}
+                </button>
               </div>
             )}
             {["paid", "failed"].includes(selected.status) && (

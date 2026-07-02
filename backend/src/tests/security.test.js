@@ -11,6 +11,11 @@ import {
   deliveryHistoryCutoffSql,
   normalizeDeliveryRetentionDays,
 } from "../utils/deliveryRetention.js";
+import {
+  createMonCashReference,
+  normalizeMonCashReceiver,
+  publicMonCashConfiguration,
+} from "../services/moncashPayoutService.js";
 
 const response = () => ({
   code: 200,
@@ -109,4 +114,26 @@ test("l'historique livreur conserve deux mois par défaut", () => {
   assert.equal(normalizeDeliveryRetentionDays("0"), 60);
   assert.equal(normalizeDeliveryRetentionDays("90"), 90);
   assert.match(deliveryHistoryCutoffSql(undefined), /INTERVAL 60 DAY/);
+});
+
+test("MonCash reste désactivé sans activation explicite", () => {
+  const previous = process.env.MONCASH_ENABLED;
+  delete process.env.MONCASH_ENABLED;
+  assert.equal(publicMonCashConfiguration().enabled, false);
+  if (previous === undefined) delete process.env.MONCASH_ENABLED;
+  else process.env.MONCASH_ENABLED = previous;
+});
+
+test("les numéros MonCash haïtiens sont normalisés", () => {
+  assert.equal(normalizeMonCashReceiver("37 12-34 56"), "37123456");
+  assert.equal(normalizeMonCashReceiver("50937123456"), "37123456");
+  assert.throws(() => normalizeMonCashReceiver("123"), /8 chiffres/);
+});
+
+test("chaque tentative MonCash reçoit une référence VinnHT bornée", () => {
+  const first = createMonCashReference(42);
+  const second = createMonCashReference(42);
+  assert.match(first, /^VHTPAY-42-/);
+  assert.notEqual(first, second);
+  assert.ok(first.length <= 120);
 });

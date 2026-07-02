@@ -31,6 +31,16 @@ import { clearSessionCookie, setSessionCookie } from "./utils/sessionCookie.js";
 import { storeImage, storeImages } from "./utils/imageStorage.js";
 import { cleanupExpiredMessages } from "./utils/messageRetention.js";
 import { deliveryHistoryCutoffSql } from "./utils/deliveryRetention.js";
+import {
+  checkMonCashCustomer,
+  createMonCashReference,
+  getMonCashPrefundedBalance,
+  getMonCashTransferStatus,
+  MonCashProviderError,
+  publicMonCashConfiguration,
+  redactMonCashPayload,
+  sendMonCashTransfer,
+} from "./services/moncashPayoutService.js";
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   throw new Error("JWT_SECRET doit contenir au moins 32 caractères.");
@@ -1104,6 +1114,73 @@ const releaseSellerPayout = async (
 
 const createPayoutRequestNumber = () =>
   `VHT-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+const settlePayoutRequest = async (
+  executor,
+  request,
+  actorId,
+  paymentReference,
+) => {
+  await walletSnapshot(executor, request.seller_id, true);
+  await executor.query(
+    `UPDATE payout_requests
+     SET status='paid',payment_reference=?,paid_at=NOW(),failure_reason=NULL
+     WHERE id=?`,
+    [paymentReference, request.id],
+  );
+  await executor.query(
+    `UPDATE seller_wallets
+     SET reserved_balance=GREATEST(0,reserved_balance-?),
+       total_paid=total_paid+?
+     WHERE seller_id=?`,
+    [request.amount, request.amount, request.seller_id],
+  );
+  await recordWalletTransaction(executor, {
+    sellerId: request.seller_id,
+    requestId: request.id,
+    eventKey: `payout-request-paid:${request.id}`,
+    type: "withdrawal_paid",
+    amount: request.amount,
+    actorId,
+    note: `Transfert MonCash ${paymentReference}.`,
+  });
+  await executor.query(
+    `UPDATE payouts po
+     JOIN (
+       SELECT pri.payout_id,SUM(pri.amount) paid_amount
+       FROM payout_request_items pri
+       JOIN payout_requests pr ON pr.id=pri.payout_request_id
+       WHERE pr.status='paid'
+       GROUP BY pri.payout_id
+     ) settled ON settled.payout_id=po.id
+     SET po.status='paid',po.paid_at=NOW(),po.paid_by=?,
+       po.payment_reference=?
+     WHERE po.seller_id=? AND po.status='processing'
+       AND settled.paid_amount>=po.amount-0.009`,
+    [actorId, paymentReference, request.seller_id],
+  );
+  await notifyUser(
+    executor,
+    request.seller_id,
+    "seller",
+    "payout.paid",
+    "Transfert MonCash effectué",
+    `${Number(request.amount).toLocaleString("fr-HT")} HTG ont été transférés. Référence : ${paymentReference}.`,
+    "/seller/sales",
+    "payout_request",
+    request.id,
+  );
+  await notifyRole(
+    executor,
+    "admin",
+    "payout.paid",
+    "Paiement vendeur terminé",
+    `La demande ${request.request_number} a été payée par le manager.`,
+    "/admin/payout-requests",
+    "payout_request",
+    request.id,
+  );
+};
 const clientProductSelect = `
   SELECT p.*,COALESCE(p.department,'Ouest') department,COALESCE(p.city,'Haiti') city,c.name category_name,u.name seller_name,
     (
@@ -7354,17 +7431,27 @@ app.get(
       `SELECT pr.*,u.email seller_email,u.phone seller_phone,
         COALESCE(sp.shop_name,u.name) seller_name,sp.shop_logo_url,
         reviewer.name reviewed_by_name,manager.name manager_name,
+        attempt.provider_reference provider_transfer_reference,
+        attempt.provider_transaction_id,
+        attempt.status provider_transfer_status,
+        attempt.error_message provider_error_message,
         COUNT(pri.id) payout_count
        FROM payout_requests pr
        JOIN users u ON u.id=pr.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=pr.seller_id
        LEFT JOIN users reviewer ON reviewer.id=pr.reviewed_by
        LEFT JOIN users manager ON manager.id=pr.manager_id
+       LEFT JOIN payout_transfer_attempts attempt ON attempt.id=(
+         SELECT MAX(latest_attempt.id)
+         FROM payout_transfer_attempts latest_attempt
+         WHERE latest_attempt.payout_request_id=pr.id
+       )
        LEFT JOIN payout_request_items pri ON pri.payout_request_id=pr.id
-       WHERE pr.status IN ('approved','processing','paid','failed')
+       WHERE pr.status IN ('approved','processing','verification_required','paid','failed')
        GROUP BY pr.id,u.email,u.phone,sp.shop_name,u.name,sp.shop_logo_url,
-         reviewer.name,manager.name
-       ORDER BY FIELD(pr.status,'processing','approved','failed','paid'),
+         reviewer.name,manager.name,attempt.provider_reference,
+         attempt.provider_transaction_id,attempt.status,attempt.error_message
+       ORDER BY FIELD(pr.status,'verification_required','processing','approved','failed','paid'),
          COALESCE(pr.processing_at,pr.reviewed_at,pr.created_at) DESC
        LIMIT 300`,
     );
@@ -7373,10 +7460,35 @@ app.get(
         SUM(status='approved') approved_count,
         COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) approved_amount,
         COALESCE(SUM(CASE WHEN status='processing' THEN amount ELSE 0 END),0) processing_amount,
+        COALESCE(SUM(CASE WHEN status='verification_required' THEN amount ELSE 0 END),0) verification_amount,
         COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END),0) paid_amount
        FROM payout_requests`,
     );
-    res.json({ requests, stats });
+    res.json({ requests, stats, provider: publicMonCashConfiguration() });
+  }),
+);
+
+app.get(
+  "/api/manager/moncash/status",
+  authenticate,
+  authorize("manager"),
+  noStore,
+  asyncRoute(async (_req, res) => {
+    const provider = publicMonCashConfiguration();
+    if (!provider.enabled || !provider.configured) {
+      return res.json({ provider, balance: null });
+    }
+    try {
+      const balance = await getMonCashPrefundedBalance();
+      res.json({ provider, balance: balance.balance });
+    } catch (error) {
+      res.status(error.status || 502).json({
+        provider,
+        balance: null,
+        code: error.code || "MONCASH_ERROR",
+        message: error.message,
+      });
+    }
   }),
 );
 
@@ -7432,6 +7544,313 @@ app.patch(
   }),
 );
 
+app.post(
+  "/api/manager/payout-requests/:id/beneficiary-check",
+  authenticate,
+  authorize("manager"),
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const [[request]] = await pool.query(
+      `SELECT id,request_number,manager_id,status,moncash_number,
+        moncash_account_name
+       FROM payout_requests WHERE id=?`,
+      [req.params.id],
+    );
+    if (!request) return res.status(404).json({ message: "Demande introuvable." });
+    if (
+      !["processing", "verification_required"].includes(request.status) ||
+      Number(request.manager_id) !== Number(req.user.id)
+    ) {
+      return res.status(409).json({
+        message: "Prenez d’abord en charge cette demande avec votre compte.",
+      });
+    }
+
+    const customer = await checkMonCashCustomer(request.moncash_number);
+    await audit(req, "payout_request.beneficiary_checked", "payout_request", request.id, {
+      requestNumber: request.request_number,
+      receiverEnding: String(request.moncash_number).replace(/\D/g, "").slice(-4),
+    });
+    res.json({
+      message: "Le compte bénéficiaire a répondu auprès de MonCash.",
+      accountName: request.moncash_account_name,
+      customer: redactMonCashPayload(customer),
+    });
+  }),
+);
+
+app.post(
+  "/api/manager/payout-requests/:id/transfer",
+  authenticate,
+  authorize("manager"),
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    let attemptId = null;
+    let providerReference = null;
+    let transferSubmitted = false;
+    let requestSnapshot = null;
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+      const [[request]] = await connection.query(
+        "SELECT * FROM payout_requests WHERE id=? FOR UPDATE",
+        [req.params.id],
+      );
+      if (!request) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Demande introuvable." });
+      }
+      if (
+        !["processing", "verification_required"].includes(request.status) ||
+        Number(request.manager_id) !== Number(req.user.id)
+      ) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Cette demande doit être prise en charge par votre compte.",
+        });
+      }
+
+      const [[activeAttempt]] = await connection.query(
+        `SELECT id,status,provider_reference
+         FROM payout_transfer_attempts
+         WHERE payout_request_id=?
+           AND status IN ('created','submitting','verification_required','manual_review')
+         ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+        [request.id],
+      );
+      if (activeAttempt) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Un transfert existe déjà. Vérifiez son statut avant toute nouvelle tentative.",
+          requiresReconciliation: true,
+          reference: activeAttempt.provider_reference,
+        });
+      }
+
+      providerReference = createMonCashReference(request.id);
+      const [created] = await connection.query(
+        `INSERT INTO payout_transfer_attempts
+          (payout_request_id,provider_reference,receiver_snapshot,amount,
+           status,attempted_by)
+         VALUES (?,?,?,?, 'created',?)`,
+        [
+          request.id,
+          providerReference,
+          request.moncash_number,
+          request.amount,
+          req.user.id,
+        ],
+      );
+      attemptId = created.insertId;
+      requestSnapshot = request;
+      await connection.commit();
+
+      await checkMonCashCustomer(request.moncash_number);
+      const prefunded = await getMonCashPrefundedBalance();
+      if (prefunded.balance !== null && prefunded.balance + 0.001 < Number(request.amount)) {
+        throw new MonCashProviderError("Le solde Prefunded VinnHT est insuffisant.", {
+          code: "MONCASH_INSUFFICIENT_PREFUNDED_BALANCE",
+          status: 409,
+        });
+      }
+
+      await pool.query(
+        `UPDATE payout_transfer_attempts
+         SET status='submitting',submitted_at=NOW()
+         WHERE id=? AND status='created'`,
+        [attemptId],
+      );
+      transferSubmitted = true;
+      const transfer = await sendMonCashTransfer({
+        amount: request.amount,
+        receiver: request.moncash_number,
+        description: `VinnHT ${request.request_number}`,
+        reference: providerReference,
+      });
+
+      await connection.beginTransaction();
+      const [[currentRequest]] = await connection.query(
+        "SELECT * FROM payout_requests WHERE id=? FOR UPDATE",
+        [request.id],
+      );
+      if (currentRequest.status === "paid") {
+        await connection.rollback();
+        return res.json({
+          message: "Ce transfert avait déjà été confirmé.",
+          reference: currentRequest.payment_reference,
+        });
+      }
+      await connection.query(
+        `UPDATE payout_transfer_attempts
+         SET status='successful',provider_transaction_id=?,provider_status='successful',
+           safe_response=?,verified_at=NOW(),error_code=NULL,error_message=NULL
+         WHERE id=?`,
+        [
+          transfer.transactionId,
+          JSON.stringify(redactMonCashPayload(transfer.providerResponse)),
+          attemptId,
+        ],
+      );
+      await settlePayoutRequest(
+        connection,
+        currentRequest,
+        req.user.id,
+        transfer.transactionId || providerReference,
+      );
+      await connection.commit();
+      await audit(req, "payout_request.moncash_paid", "payout_request", request.id, {
+        providerReference,
+        transactionId: transfer.transactionId,
+        amount: request.amount,
+      });
+      res.json({
+        message: "MonCash a confirmé le transfert et le wallet a été mis à jour.",
+        reference: providerReference,
+        transactionId: transfer.transactionId,
+      });
+    } catch (error) {
+      if (connection.connection?._closing !== true) {
+        try { await connection.rollback(); } catch { /* transaction déjà terminée */ }
+      }
+      if (attemptId) {
+        const uncertain = transferSubmitted || error.ambiguous;
+        await pool.query(
+          `UPDATE payout_transfer_attempts
+           SET status=?,error_code=?,error_message=?,safe_response=?
+           WHERE id=?`,
+          [
+            uncertain ? "verification_required" : "failed",
+            error.code || "MONCASH_TRANSFER_ERROR",
+            String(error.message || "Erreur MonCash").slice(0, 500),
+            error.details ? JSON.stringify(redactMonCashPayload(error.details)) : null,
+            attemptId,
+          ],
+        );
+        if (uncertain && requestSnapshot) {
+          await pool.query(
+            `UPDATE payout_requests
+             SET status='verification_required',failure_reason=?
+             WHERE id=? AND status<>'paid'`,
+            ["Réponse MonCash incertaine : réconciliation obligatoire.", requestSnapshot.id],
+          );
+        }
+      }
+      await audit(req, "payout_request.moncash_error", "payout_request", req.params.id, {
+        providerReference,
+        code: error.code || "MONCASH_TRANSFER_ERROR",
+        ambiguous: Boolean(transferSubmitted || error.ambiguous),
+      });
+      res.status(error.status || 502).json({
+        message: error.message || "Le transfert MonCash n’a pas pu être confirmé.",
+        code: error.code || "MONCASH_TRANSFER_ERROR",
+        requiresReconciliation: Boolean(transferSubmitted || error.ambiguous),
+        reference: providerReference,
+      });
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
+app.post(
+  "/api/manager/payout-requests/:id/reconcile",
+  authenticate,
+  authorize("manager"),
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const [[attempt]] = await pool.query(
+      `SELECT attempt.*,pr.seller_id,pr.request_number,pr.manager_id,
+        pr.status request_status
+       FROM payout_transfer_attempts attempt
+       JOIN payout_requests pr ON pr.id=attempt.payout_request_id
+       WHERE attempt.payout_request_id=?
+       ORDER BY attempt.id DESC LIMIT 1`,
+      [req.params.id],
+    );
+    if (!attempt) return res.status(404).json({ message: "Aucun transfert à vérifier." });
+    if (Number(attempt.manager_id) !== Number(req.user.id)) {
+      return res.status(403).json({ message: "Ce transfert appartient à un autre responsable." });
+    }
+    if (attempt.status === "successful" || attempt.request_status === "paid") {
+      return res.json({ message: "Le transfert est déjà confirmé.", successful: true });
+    }
+
+    try {
+      const result = await getMonCashTransferStatus(attempt.provider_reference);
+      if (!result.successful) {
+        await pool.query(
+          `UPDATE payout_transfer_attempts
+           SET status='manual_review',provider_status=?,safe_response=?,verified_at=NOW()
+           WHERE id=?`,
+          [
+            result.providerStatus,
+            JSON.stringify(redactMonCashPayload(result.providerResponse)),
+            attempt.id,
+          ],
+        );
+        return res.status(409).json({
+          message: "MonCash ne confirme pas encore ce transfert. Une vérification manuelle reste nécessaire.",
+          successful: false,
+        });
+      }
+
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [[request]] = await connection.query(
+          "SELECT * FROM payout_requests WHERE id=? FOR UPDATE",
+          [req.params.id],
+        );
+        if (request.status !== "paid") {
+          await connection.query(
+            `UPDATE payout_transfer_attempts
+             SET status='successful',provider_transaction_id=?,provider_status=?,
+               safe_response=?,verified_at=NOW(),error_code=NULL,error_message=NULL
+             WHERE id=?`,
+            [
+              result.transactionId,
+              result.providerStatus,
+              JSON.stringify(redactMonCashPayload(result.providerResponse)),
+              attempt.id,
+            ],
+          );
+          await settlePayoutRequest(
+            connection,
+            request,
+            req.user.id,
+            result.transactionId || attempt.provider_reference,
+          );
+        }
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+      await audit(req, "payout_request.reconciled", "payout_request", req.params.id, {
+        providerReference: attempt.provider_reference,
+        transactionId: result.transactionId,
+      });
+      res.json({ message: "Le transfert a été retrouvé et confirmé.", successful: true });
+    } catch (error) {
+      if (error instanceof MonCashProviderError) {
+        await pool.query(
+          `UPDATE payout_transfer_attempts
+           SET status='manual_review',error_code=?,error_message=?
+           WHERE id=?`,
+          [error.code, String(error.message).slice(0, 500), attempt.id],
+        );
+      }
+      res.status(error.status || 502).json({
+        message: error.message || "Vérification MonCash impossible.",
+        code: error.code || "MONCASH_RECONCILIATION_ERROR",
+      });
+    }
+  }),
+);
+
 app.patch(
   "/api/manager/payout-requests/:id/complete",
   authenticate,
@@ -7440,6 +7859,12 @@ app.patch(
   [body("reference").trim().isLength({ min: 3, max: 120 })],
   validate,
   asyncRoute(async (req, res) => {
+    const provider = publicMonCashConfiguration();
+    if (provider.enabled || !provider.manualFallback) {
+      return res.status(409).json({
+        message: "La confirmation manuelle est désactivée. Utilisez le transfert MonCash sécurisé.",
+      });
+    }
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
