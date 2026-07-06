@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Clock3,
+  Download,
   History,
   Landmark,
   LockKeyhole,
@@ -116,7 +117,14 @@ function WalletPageHeading({ eyebrow, title, text, children }) {
   );
 }
 
-function WalletMetric({ icon: Icon, label, value, note, tone = "blue" }) {
+function WalletMetric({
+  icon: Icon,
+  label,
+  value,
+  note,
+  tone = "blue",
+  suffix = "HTG",
+}) {
   return (
     <motion.article
       className={`wallet-metric ${tone}`}
@@ -127,7 +135,8 @@ function WalletMetric({ icon: Icon, label, value, note, tone = "blue" }) {
       <span><Icon /></span>
       <small>{label}</small>
       <strong>
-        <CountUp end={Number(value || 0)} duration={0.8} separator=" " decimals={0} /> HTG
+        <CountUp end={Number(value || 0)} duration={0.8} separator=" " decimals={0} />
+        {suffix && ` ${suffix}`}
       </strong>
       <p>{note}</p>
     </motion.article>
@@ -444,7 +453,7 @@ export function SellerWalletContent({ api }) {
             </label>
             <div className="wallet-modal-notice">
               <ShieldCheck />
-              <p>Le montant sera réservé pendant l’approbation admin et le transfert du manager.</p>
+              <p>Le montant sera réservé pendant l’approbation admin et le transfert de l’équipe finance.</p>
             </div>
             <footer>
               <button type="button" onClick={() => setShowRequest(false)}>Retour</button>
@@ -575,7 +584,7 @@ export function AdminPayoutApprovalContent({ api }) {
       <WalletPageHeading
         eyebrow="Contrôle administratif"
         title="Demandes de paiement"
-        text="Vérifiez l’identité MonCash, le montant et les ventes libérées. Le manager exécutera ensuite le transfert."
+        text="Vérifiez l’identité MonCash, le montant et les ventes libérées. L’équipe finance exécutera ensuite le transfert."
       >
         <span className="wallet-role-chip"><ShieldCheck /> Approbation uniquement</span>
       </WalletPageHeading>
@@ -642,7 +651,7 @@ export function AdminPayoutApprovalContent({ api }) {
 export function ManagerPayoutOperationsContent({ api }) {
   const { data, loading, error, setError, load } = usePayoutDesk(
     api,
-    "/manager/payout-requests",
+    "/finance/payout-requests",
   );
   const [selected, setSelected] = useState(null);
   const [reference, setReference] = useState("");
@@ -673,7 +682,7 @@ export function ManagerPayoutOperationsContent({ api }) {
     setMessage("");
     try {
       const { data: response } = await api.patch(
-        `/manager/payout-requests/${selected.id}/${action}`,
+        `/finance/payout-requests/${selected.id}/${action}`,
         payload,
       );
       setMessage(response.message);
@@ -698,7 +707,7 @@ export function ManagerPayoutOperationsContent({ api }) {
     setBusy(true);
     setError("");
     try {
-      const { data: response } = await api.get("/manager/moncash/status");
+      const { data: response } = await api.get("/finance/moncash/status");
       setProviderBalance(response.balance);
       if (response.message) setError(response.message);
     } catch (requestError) {
@@ -714,7 +723,7 @@ export function ManagerPayoutOperationsContent({ api }) {
     setMessage("");
     try {
       const { data: response } = await api.post(
-        `/manager/payout-requests/${selected.id}/${action}`,
+        `/finance/payout-requests/${selected.id}/${action}`,
       );
       setMessage(response.message);
       if (action === "beneficiary-check") {
@@ -741,7 +750,7 @@ export function ManagerPayoutOperationsContent({ api }) {
         title="Transferts vendeurs"
         text="Contrôlez le bénéficiaire, envoyez le paiement par l’API MonCash et réconciliez chaque opération sans risque de doublon."
       >
-        <span className="wallet-role-chip manager"><Landmark /> Exécution manager</span>
+        <span className="wallet-role-chip manager"><Landmark /> Exécution finance</span>
       </WalletPageHeading>
       <WalletFeedback message={message} error={error} />
       <section className={`moncash-provider-strip ${provider.enabled ? "online" : "standby"}`}>
@@ -884,6 +893,173 @@ export function ManagerPayoutOperationsContent({ api }) {
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+export function FinanceReportContent({ api }) {
+  const [report, setReport] = useState(null);
+  const today = new Date();
+  const defaultMonthlyDate = new Date(
+    today.getFullYear(),
+    today.getDate() >= 30 ? today.getMonth() : today.getMonth() - 1,
+    1,
+  );
+  const defaultMonthlyKey = `${defaultMonthlyDate.getFullYear()}-${String(
+    defaultMonthlyDate.getMonth() + 1,
+  ).padStart(2, "0")}`;
+  const [monthlyKey, setMonthlyKey] = useState(defaultMonthlyKey);
+  const [monthlyReport, setMonthlyReport] = useState(null);
+  const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [monthlyDownloading, setMonthlyDownloading] = useState(false);
+
+  useEffect(() => {
+    api
+      .get("/admin/weekly-report")
+      .then(({ data }) => setReport(data))
+      .catch((requestError) =>
+        setError(requestError.response?.data?.message || "Rapport financier indisponible."),
+      );
+  }, [api]);
+
+  useEffect(() => {
+    api
+      .get("/finance/monthly-transfers", { params: { month: monthlyKey } })
+      .then(({ data }) => setMonthlyReport(data))
+      .catch((requestError) =>
+        setError(requestError.response?.data?.message || "Rapport mensuel indisponible."),
+      );
+  }, [api, monthlyKey]);
+
+  const download = async () => {
+    setDownloading(true);
+    setError("");
+    try {
+      const response = await api.get("/admin/weekly-report.pdf", {
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(response.data);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `rapport-vinnht-${report?.period?.end || "hebdomadaire"}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Téléchargement impossible.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const downloadMonthly = async () => {
+    setMonthlyDownloading(true);
+    setError("");
+    try {
+      const response = await api.get("/finance/monthly-transfers.docx", {
+        params: { month: monthlyKey },
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(response.data);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `virements-vinnht-${monthlyKey}.docx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Téléchargement Word impossible.");
+    } finally {
+      setMonthlyDownloading(false);
+    }
+  };
+
+  const totals = report?.totals || {};
+  return (
+    <div className="wallet-flow finance-report-flow">
+      <WalletPageHeading
+        eyebrow="Contrôle financier"
+        title="Rapports financiers"
+        text="Consultez la synthèse hebdomadaire des ventes et archivez chaque mois les virements vendeurs dans un registre Word."
+      >
+        <button className="wallet-refresh" disabled={!report || downloading} onClick={download}>
+          <Download /> {downloading ? "Génération..." : "PDF hebdomadaire"}
+        </button>
+      </WalletPageHeading>
+      <WalletFeedback error={error} />
+      <section className="wallet-panel finance-monthly-panel">
+        <header>
+          <div>
+            <span><Download /></span>
+            <div>
+              <small>Archive mensuelle</small>
+              <h3>Registre Word des virements vendeurs</h3>
+            </div>
+          </div>
+          <div className="finance-monthly-actions">
+            <input
+              type="month"
+              value={monthlyKey}
+              max={`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`}
+              onChange={(event) => setMonthlyKey(event.target.value)}
+              aria-label="Mois du rapport"
+            />
+            <button
+              className="wallet-refresh"
+              disabled={!monthlyReport?.period?.available || monthlyDownloading}
+              onClick={downloadMonthly}
+            >
+              <Download /> {monthlyDownloading ? "Génération..." : "Télécharger le Word"}
+            </button>
+          </div>
+        </header>
+        <div className="finance-monthly-summary">
+          <span><small>Virements</small><b>{monthlyReport?.totals?.transfers || 0}</b></span>
+          <span><small>Boutiques payées</small><b>{monthlyReport?.totals?.shops || 0}</b></span>
+          <span><small>Total transféré</small><b>{money(monthlyReport?.totals?.amount)}</b></span>
+        </div>
+        <p>
+          {monthlyReport?.period?.available
+            ? `Le registre de ${monthlyReport.period.label} est prêt au téléchargement.`
+            : "Le registre du mois courant devient disponible automatiquement à partir du 30."}
+        </p>
+      </section>
+      <div className="finance-weekly-heading">
+        <div>
+          <small>Synthèse hebdomadaire</small>
+          <h2>Activité des marchands</h2>
+        </div>
+        {report?.period && (
+          <span>{shortDate(report.period.start)} – {shortDate(report.period.end)}</span>
+        )}
+      </div>
+      <section className="wallet-metric-grid finance-report-metrics">
+        <WalletMetric icon={Store} label="Marchands" value={totals.merchants} note="Actifs cette semaine" tone="blue" suffix="" />
+        <WalletMetric icon={ReceiptText} label="Commandes" value={totals.orders} note="Commandes encaissées" tone="gold" suffix="" />
+        <WalletMetric icon={CircleDollarSign} label="Ventes globales" value={totals.grossSales} note="Volume brut" tone="green" />
+        <WalletMetric icon={Wallet} label="Net vendeurs" value={totals.netSales} note="Avant demandes de transfert" tone="blue" />
+      </section>
+      <section className="wallet-panel finance-merchant-panel">
+        <header>
+          <div>
+            <span><ReceiptText /></span>
+            <div>
+              <small>Détail contrôlable</small>
+              <h3>Marchands de la période</h3>
+            </div>
+          </div>
+          {report?.period && <b>{shortDate(report.period.start)} – {shortDate(report.period.end)}</b>}
+        </header>
+        <div className="finance-merchant-list">
+          {(report?.merchants || []).map((merchant) => (
+            <article key={merchant.seller_id}>
+              <span><Store /></span>
+              <div><b>{merchant.merchant_name}</b><small>{merchant.order_count} commande(s)</small></div>
+              <strong>{money(merchant.net_sales)}</strong>
+            </article>
+          ))}
+          {report && !report.merchants?.length && <div className="wallet-empty">Aucune vente encaissée sur cette période.</div>}
+        </div>
+      </section>
     </div>
   );
 }

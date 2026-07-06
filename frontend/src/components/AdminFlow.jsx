@@ -70,6 +70,11 @@ import { assetUrl } from "../config/runtime.js";
 import { productAttributeEntries } from "../config/productAttributes.js";
 
 const money = (value) => `${Number(value || 0).toLocaleString("fr-HT")} HTG`;
+const staffRoleOptions = [
+  { value: "manager", label: "Manager opérations" },
+  { value: "support", label: "Agent support" },
+  { value: "finance", label: "Responsable finance" },
+];
 const shortDate = (value) =>
   value ? new Intl.DateTimeFormat("fr-HT", { dateStyle: "medium" }).format(new Date(value)) : "—";
 const saturdayFor = (value = new Date()) => {
@@ -848,7 +853,7 @@ export function AdminUsersContent({ api, currentUser }) {
       >
         <div className="admin-heading-actions">
           <button className="secondary" onClick={() => setShowStaffForm((current) => !current)}>
-            <UserPlus /> {showStaffForm ? "Fermer" : "Créer un manager"}
+            <UserPlus /> {showStaffForm ? "Fermer" : "Créer un membre"}
           </button>
           <button onClick={load}><RefreshCw /> Actualiser</button>
         </div>
@@ -860,7 +865,7 @@ export function AdminUsersContent({ api, currentUser }) {
           <span><UserPlus /></span>
           <div>
             <small>Équipe opérationnelle</small>
-            <h2>Créer un manager</h2>
+            <h2>Créer un compte équipe</h2>
             <p>Le compte sera actif immédiatement avec le rôle sélectionné.</p>
           </div>
         </header>
@@ -879,7 +884,9 @@ export function AdminUsersContent({ api, currentUser }) {
         <label>
           Rôle
           <select value={staffForm.role} onChange={(event) => setStaffForm({ ...staffForm, role: event.target.value })}>
-            <option value="manager">Manager</option>
+            {staffRoleOptions.map((role) => (
+              <option value={role.value} key={role.value}>{role.label}</option>
+            ))}
           </select>
         </label>
         <label className="full">
@@ -2087,7 +2094,7 @@ export function AdminProfileContent({
         role: "manager",
       });
     } catch (error) {
-      setMessage(error.response?.data?.message || "Impossible de créer ce manager.");
+      setMessage(error.response?.data?.message || "Impossible de créer ce membre d’équipe.");
     } finally {
       setCreatingManager(false);
     }
@@ -2120,8 +2127,8 @@ export function AdminProfileContent({
             <span><UserPlus /></span>
             <div>
               <small>Équipe VinnHT</small>
-              <h2>Créer un profil manager</h2>
-              <p>Le manager pourra traiter les demandes vendeurs, suivre les boutiques et coordonner les livraisons.</p>
+              <h2>Créer un profil d’équipe</h2>
+              <p>Attribuez uniquement l’espace nécessaire : opérations, support ou finance.</p>
             </div>
           </header>
           <label>
@@ -2159,16 +2166,27 @@ export function AdminProfileContent({
               onChange={(event) => setManagerForm({ ...managerForm, password: event.target.value })}
             />
           </label>
+          <label>
+            Espace de travail
+            <select
+              value={managerForm.role}
+              onChange={(event) => setManagerForm({ ...managerForm, role: event.target.value })}
+            >
+              {staffRoleOptions.map((role) => (
+                <option value={role.value} key={role.value}>{role.label}</option>
+              ))}
+            </select>
+          </label>
           <div className="admin-manager-permissions">
             <ShieldCheck />
             <span>
-              <b>Rôle manager sécurisé</b>
+              <b>Permissions limitées à cet espace</b>
               <small>Ce compte ne recevra pas les droits administrateur.</small>
             </span>
           </div>
           <button disabled={creatingManager}>
             <UserPlus />
-            {creatingManager ? "Création du profil..." : "Créer le profil manager"}
+            {creatingManager ? "Création du profil..." : "Créer le profil d’équipe"}
           </button>
         </form>
       )}
@@ -2261,7 +2279,7 @@ export function AdminSettingsContent({ api, role = "admin" }) {
   );
 }
 
-export function AdminContactRequestsContent({ api }) {
+export function AdminContactRequestsContent({ api, onMobileConversationChange }) {
   const [requests, setRequests] = useState([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -2271,6 +2289,7 @@ export function AdminContactRequestsContent({ api }) {
   const [thread, setThread] = useState([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [mobileRequestOpen, setMobileRequestOpen] = useState(false);
 
   const load = () =>
     api
@@ -2284,8 +2303,15 @@ export function AdminContactRequestsContent({ api }) {
     load();
   }, []);
 
+  useEffect(
+    () => () => onMobileConversationChange?.(false),
+    [onMobileConversationChange],
+  );
+
   const openRequest = async (request) => {
     setSelected(request);
+    setMobileRequestOpen(true);
+    onMobileConversationChange?.(true);
     setError("");
     try {
       const { data } = await api.get(`/support/requests/${request.id}/messages`);
@@ -2298,10 +2324,24 @@ export function AdminContactRequestsContent({ api }) {
     }
   };
 
+  const closeMobileRequest = () => {
+    setMobileRequestOpen(false);
+    onMobileConversationChange?.(false);
+  };
+
   const updateStatus = async (id, status) => {
     const { data } = await api.patch(`/admin/contact-requests/${id}`, { status });
     setMessage(data.message);
     setSelected((current) => current?.id === id ? { ...current, status } : current);
+    if (
+      statusFilter !== "all" &&
+      statusFilter !== "unread" &&
+      statusFilter !== status
+    ) {
+      setSelected(null);
+      setThread([]);
+      closeMobileRequest();
+    }
     load();
   };
 
@@ -2324,8 +2364,14 @@ export function AdminContactRequestsContent({ api }) {
     }
   };
 
+  const matchesStatusFilter = (request, filter = statusFilter) =>
+    filter === "all" ||
+    (filter === "unread"
+      ? Number(request.unread_count || 0) > 0
+      : request.status === filter);
+
   const visible = requests.filter((request) => {
-    const matchesStatus = statusFilter === "all" || request.status === statusFilter;
+    const matchesStatus = matchesStatusFilter(request);
     const matchesQuery = `${request.reference} ${request.name} ${request.email} ${request.phone || ""} ${request.subject}`
       .toLowerCase()
       .includes(query.toLowerCase());
@@ -2338,107 +2384,188 @@ export function AdminContactRequestsContent({ api }) {
     }),
     {},
   );
+  const unreadTotal = requests.reduce(
+    (total, item) => total + Number(item.unread_count || 0),
+    0,
+  );
+  const statusFilters = [
+    [Boxes, "Tous", "all", requests.length],
+    [MessageCircle, "Nouveaux", "new", counts.new],
+    [Clock3, "En traitement", "in_progress", counts.in_progress],
+    [CheckCircle2, "Résolus", "resolved", counts.resolved],
+    [Bell, "Non lus", "unread", unreadTotal],
+  ];
+  const applyStatusFilter = (filter) => {
+    setStatusFilter(filter);
+    if (selected && !matchesStatusFilter(selected, filter)) {
+      setSelected(null);
+      setThread([]);
+      closeMobileRequest();
+    }
+  };
+  const initialsFor = (name) =>
+    String(name || "Client")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase();
 
   return (
-    <div className="admin-flow">
-      <AdminHeading
-        eyebrow="Centre de support"
-        title="Support client"
-        text="Répondez aux clients, suivez les dossiers et conservez l’historique de chaque échange."
-      >
-        <button onClick={load}><RefreshCw /> Actualiser</button>
-      </AdminHeading>
+    <div
+      className={`admin-flow admin-support-dossiers ${
+        mobileRequestOpen ? "mobile-request-open" : ""
+      }`}
+    >
       {message && <div className="admin-message">{message}</div>}
       {error && <div className="admin-error">{error}</div>}
-      <section className="admin-category-summary">
-        {[
-          [MessageCircle, "Nouveaux", counts.new],
-          [Clock3, "En traitement", counts.in_progress],
-          [CheckCircle2, "Résolus", counts.resolved],
-          [Bell, "Réponses non lues", requests.reduce((total, item) => total + Number(item.unread_count || 0), 0)],
-        ].map(([Icon, label, value]) => (
-          <article key={label}><Icon /><span><small>{label}</small><b>{Number(value || 0)}</b></span></article>
+      <nav className="admin-support-status-filters" aria-label="Filtrer les dossiers support">
+        {statusFilters.map(([Icon, label, filter, value]) => (
+          <button
+            type="button"
+            className={statusFilter === filter ? "active" : ""}
+            aria-pressed={statusFilter === filter}
+            onClick={() => applyStatusFilter(filter)}
+            key={filter}
+          >
+            <Icon />
+            <span><small>{label}</small><b>{Number(value || 0)}</b></span>
+          </button>
         ))}
-      </section>
-      <section className="admin-filter-bar">
-        <label className="admin-search">
-          <Search />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, téléphone, email, référence ou sujet" />
-        </label>
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-          <option value="all">Tous les statuts</option>
-          <option value="new">Nouveaux</option>
-          <option value="in_progress">En traitement</option>
-          <option value="resolved">Résolus</option>
-        </select>
-      </section>
+      </nav>
       <div className="admin-support-layout">
         <aside className="admin-support-list">
-          {visible.map((request) => (
-            <button
-              className={`${selected?.id === request.id ? "active" : ""} ${request.unread_count ? "unread" : ""}`}
-              onClick={() => openRequest(request)}
-              key={request.id}
-            >
-              <span><MessageCircle /></span>
-              <p>
-                <b>{request.name}</b>
-                <strong>{request.subject}</strong>
-                <small>{request.phone || "Téléphone non renseigné"} · {request.reference}</small>
-                <small>{request.last_reply || request.message}</small>
-              </p>
-              <div>
-                <Status value={request.status} />
-                {request.unread_count > 0 && <i>{request.unread_count}</i>}
-              </div>
-            </button>
-          ))}
-          {!visible.length && <div className="admin-empty">Aucune demande ne correspond aux filtres.</div>}
+          <div className="admin-support-list-tools">
+            <label className="admin-search">
+              <Search />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Rechercher un dossier"
+              />
+            </label>
+            <div>
+              <select
+                value={statusFilter}
+                onChange={(event) => applyStatusFilter(event.target.value)}
+                aria-label="Statut des dossiers"
+              >
+                <option value="all">Tous les statuts</option>
+                <option value="new">Nouveaux</option>
+                <option value="in_progress">En traitement</option>
+                <option value="resolved">Résolus</option>
+                <option value="unread">Non lus</option>
+              </select>
+              <button type="button" onClick={load} aria-label="Actualiser les dossiers">
+                <RefreshCw />
+              </button>
+            </div>
+          </div>
+          <div className="admin-support-list-scroll">
+            {visible.map((request) => (
+              <button
+                className={`${selected?.id === request.id ? "active" : ""} ${request.unread_count ? "unread" : ""}`}
+                onClick={() => openRequest(request)}
+                key={request.id}
+              >
+                <span className="admin-support-avatar">{initialsFor(request.name)}</span>
+                <p>
+                  <b>{request.name}</b>
+                  <strong>{request.subject}</strong>
+                  <small>{request.phone || "Téléphone non renseigné"} · {request.reference}</small>
+                  <small>{request.last_reply || request.message}</small>
+                </p>
+                <div>
+                  <Status value={request.status} />
+                  {request.unread_count > 0 && <i>{request.unread_count}</i>}
+                </div>
+              </button>
+            ))}
+            {!visible.length && <div className="admin-empty">Aucune demande ne correspond aux filtres.</div>}
+          </div>
         </aside>
         <section className="admin-support-room">
           {selected ? (
             <>
               <header>
+                <button
+                  type="button"
+                  className="admin-support-mobile-back"
+                  onClick={closeMobileRequest}
+                  aria-label="Retour aux dossiers support"
+                >
+                  <ChevronLeft />
+                </button>
                 <div>
-                  <span><MessageCircle /></span>
+                  <span className="admin-support-avatar large">
+                    {initialsFor(selected.name)}
+                  </span>
                   <p>
-                    <small>{selected.reference} · {selected.category}</small>
+                    <small className="admin-support-reference">
+                      {selected.reference} · {selected.category}
+                    </small>
                     <b>{selected.name}</b>
                     <strong>{selected.subject}</strong>
-                    <small>{selected.email} · {selected.phone || "Téléphone non renseigné"}</small>
+                    <small className="admin-support-contact-line">
+                      {selected.email} · {selected.phone || "Téléphone non renseigné"}
+                    </small>
                   </p>
                 </div>
                 <Status value={selected.status} />
               </header>
               <div className="admin-support-history">
                 {thread.map((item) => (
-                  <article className={item.sender_role === "admin" ? "admin" : "client"} key={item.id}>
-                    <small>{item.sender_name || (item.sender_role === "admin" ? "Support VinnHT" : selected.name)}</small>
+                  <article className={["admin", "support"].includes(item.sender_role) ? "admin" : "client"} key={item.id}>
+                    <small>{item.sender_name || (["admin", "support"].includes(item.sender_role) ? "Support VinnHT" : selected.name)}</small>
                     <p>{item.body}</p>
                     <time>{new Date(item.created_at).toLocaleString("fr-HT")}</time>
                   </article>
                 ))}
               </div>
-              <form onSubmit={sendReply}>
-                <textarea
-                  required
-                  rows="3"
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder={selected.user_id ? "Écrire une réponse au client..." : "Cette demande publique ne peut pas recevoir de réponse dans VinnHT."}
-                  disabled={!selected.user_id}
-                />
-                <div>
+              <form className="admin-support-reply-form" onSubmit={sendReply}>
+                <div className="admin-support-status-actions">
                   <button type="button" onClick={() => updateStatus(selected.id, "in_progress")}>
                     <Clock3 /> En traitement
                   </button>
                   <button type="button" className="success" onClick={() => updateStatus(selected.id, "resolved")}>
                     <CheckCircle2 /> Résoudre
                   </button>
-                  <button className="send" disabled={sending || !selected.user_id}>
-                    <Send /> {sending ? "Envoi..." : "Répondre"}
-                  </button>
                 </div>
+                {selected.user_id ? (
+                  <div className="admin-support-composer">
+                    <textarea
+                      required
+                      rows="1"
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      placeholder="Écrire une réponse..."
+                    />
+                    <button
+                      className="send"
+                      disabled={sending}
+                      aria-label="Envoyer la réponse"
+                    >
+                      <Send />
+                      <span>{sending ? "Envoi..." : "Répondre"}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="admin-support-public-notice">
+                    <Mail />
+                    <div>
+                      <b>Demande publique</b>
+                      <span>Ce client n’était pas connecté à VinnHT.</span>
+                    </div>
+                    <a
+                      href={`mailto:${selected.email}?subject=${encodeURIComponent(
+                        `Réponse VinnHT · ${selected.subject}`,
+                      )}`}
+                    >
+                      Répondre par email
+                    </a>
+                  </div>
+                )}
               </form>
             </>
           ) : (

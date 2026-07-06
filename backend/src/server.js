@@ -31,6 +31,7 @@ import { clearSessionCookie, setSessionCookie } from "./utils/sessionCookie.js";
 import { storeImage, storeImages } from "./utils/imageStorage.js";
 import { cleanupExpiredMessages } from "./utils/messageRetention.js";
 import { deliveryHistoryCutoffSql } from "./utils/deliveryRetention.js";
+import { buildMonthlyTransferDocx } from "./utils/monthlyTransferReport.js";
 import {
   checkMonCashCustomer,
   createMonCashReference,
@@ -106,6 +107,10 @@ const DELIVERY_FEE_PER_SELLER = Number(
   process.env.DELIVERY_FEE_PER_SELLER || 500,
 );
 const PAYMENT_MODEL = process.env.PAYMENT_MODEL || "protected_vinnht";
+const PAYMENT_SIMULATION_ENABLED =
+  process.env.NODE_ENV !== "production" &&
+  process.env.PAYMENT_SIMULATION_ENABLED === "true" &&
+  (process.env.PAYMENT_PROVIDER || "simulated") === "simulated";
 const VINNHT_MONCASH_NUMBER = String(process.env.VINNHT_MONCASH_NUMBER || "").trim();
 const VINNHT_MONCASH_ACCOUNT_NAME =
   String(process.env.VINNHT_MONCASH_ACCOUNT_NAME || "VinnHT").trim() || "VinnHT";
@@ -903,7 +908,7 @@ const notifyUser = async (
       if (type.includes("assigned") || type.includes("invite")) return "sellerRequests";
       if (type.startsWith("delivery.")) return "paymentAlerts";
     }
-    if (["admin", "manager", "supervisor", "superviseur"].includes(role)) {
+    if (["admin", "manager", "support", "finance", "supervisor", "superviseur"].includes(role)) {
       if (type.startsWith("seller_request.")) return "sellerRequests";
       if (type.startsWith("weekly_report.")) return "weeklyReport";
       if (type.startsWith("payment.") || type.startsWith("order.")) return "paymentAlerts";
@@ -1175,7 +1180,7 @@ const settlePayoutRequest = async (
     "admin",
     "payout.paid",
     "Paiement vendeur terminé",
-    `La demande ${request.request_number} a été payée par le manager.`,
+    `La demande ${request.request_number} a été payée par l’équipe finance.`,
     "/admin/payout-requests",
     "payout_request",
     request.id,
@@ -1656,6 +1661,16 @@ app.post(
       "SELECT reference FROM contact_requests WHERE id=?",
       [result.insertId],
     );
+    await notifyRole(
+      pool,
+      "support",
+      "support.new_request",
+      `Nouveau dossier ${request.reference}`,
+      `${req.body.name} demande une assistance : ${req.body.subject}.`,
+      "/support",
+      "support_request",
+      result.insertId,
+    );
     res.status(201).json({
       id: result.insertId,
       reference: request.reference,
@@ -1719,6 +1734,16 @@ app.post(
         req.body.message,
       ],
     );
+    await notifyRole(
+      pool,
+      "support",
+      "support.new_request",
+      `Nouveau dossier ${reference}`,
+      `${req.user.name} demande une assistance : ${req.body.subject}.`,
+      "/support",
+      "support_request",
+      result.insertId,
+    );
     res.status(201).json({
       id: result.insertId,
       reference,
@@ -1731,12 +1756,14 @@ app.get(
   authenticate,
   noStore,
   asyncRoute(async (req, res) => {
-    const isAdmin = req.user.roles.includes("admin");
+    const isSupportStaff = req.user.roles.some((role) =>
+      ["admin", "support"].includes(role),
+    );
     const [[request]] = await pool.query(
       `SELECT cr.id,cr.user_id,cr.reference,cr.name,cr.subject,cr.message,cr.status,cr.created_at
        FROM contact_requests cr
        WHERE cr.id=? AND (?=1 OR cr.user_id=?)`,
-      [req.params.id, isAdmin ? 1 : 0, req.user.id],
+      [req.params.id, isSupportStaff ? 1 : 0, req.user.id],
     );
     if (!request) return res.status(404).json({ message: "Demande de support introuvable." });
     await pool.query(
@@ -1778,12 +1805,14 @@ app.post(
   [body("body").trim().isLength({ min: 1, max: 3000 })],
   validate,
   asyncRoute(async (req, res) => {
-    const isAdmin = req.user.roles.includes("admin");
+    const isSupportStaff = req.user.roles.some((role) =>
+      ["admin", "support"].includes(role),
+    );
     const [[request]] = await pool.query(
       `SELECT id,user_id,reference,status
        FROM contact_requests
        WHERE id=? AND (?=1 OR user_id=?)`,
-      [req.params.id, isAdmin ? 1 : 0, req.user.id],
+      [req.params.id, isSupportStaff ? 1 : 0, req.user.id],
     );
     if (!request) return res.status(404).json({ message: "Demande de support introuvable." });
     if (!request.user_id) {
@@ -1791,7 +1820,7 @@ app.post(
         message: "Cette demande publique ne possède pas de compte client pour recevoir une réponse.",
       });
     }
-    const senderRole = isAdmin ? "admin" : "client";
+    const senderRole = isSupportStaff ? "support" : "client";
     const [result] = await pool.query(
       `INSERT INTO support_request_messages (request_id,sender_id,sender_role,body)
        VALUES (?,?,?,?)`,
@@ -1803,7 +1832,7 @@ app.post(
        WHERE id=?`,
       [request.id],
     );
-    if (isAdmin) {
+    if (isSupportStaff) {
       await notifyUser(
         pool,
         request.user_id,
@@ -1818,11 +1847,11 @@ app.post(
     } else {
       await notifyRole(
         pool,
-        "admin",
+        "support",
         "support.client_reply",
         `Nouvelle réponse ${request.reference}`,
         "Le client a ajouté un message à sa demande de support.",
-        "/admin/contact-requests",
+        "/support",
         "support_request",
         request.id,
       );
@@ -4004,7 +4033,7 @@ app.post(
           );
         }
       }
-      const commissionRate = Number(process.env.COMMISSION_RATE || 0.1);
+      const commissionRate = Number(process.env.COMMISSION_RATE || 0.04);
       for (const [sellerId, gross] of sellerTotals) {
         const sellerFulfillmentOption = sellerFulfillment.find(
           (seller) => seller.seller_id === Number(sellerId),
@@ -5164,6 +5193,9 @@ app.patch(
   [body("status").isIn(["paid", "failed"])],
   validate,
   asyncRoute(async (req, res) => {
+    if (!PAYMENT_SIMULATION_ENABLED) {
+      return res.status(404).json({ message: "Route introuvable." });
+    }
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -6193,7 +6225,7 @@ app.get(
 app.get(
   "/api/admin/weekly-report",
   authenticate,
-  authorize("admin"),
+  authorize("admin", "finance"),
   noStore,
   asyncRoute(async (req, res) => {
     if (req.query.ending && !/^\d{4}-\d{2}-\d{2}$/.test(req.query.ending)) {
@@ -6213,7 +6245,7 @@ app.get(
 app.get(
   "/api/admin/weekly-report.pdf",
   authenticate,
-  authorize("admin"),
+  authorize("admin", "finance"),
   noStore,
   asyncRoute(async (req, res) => {
     if (req.query.ending && !/^\d{4}-\d{2}-\d{2}$/.test(req.query.ending)) {
@@ -6282,7 +6314,7 @@ app.post(
     body("email").isEmail().normalizeEmail(),
     body("phone").optional({ checkFalsy: true }).trim().isLength({ max: 30 }),
     body("password").isLength({ min: 10, max: 128 }),
-    body("role").isIn(["manager"]),
+    body("role").isIn(["manager", "support", "finance"]),
   ],
   validate,
   asyncRoute(async (req, res) => {
@@ -6309,7 +6341,7 @@ app.post(
       await audit(req, "staff.create", "user", result.insertId, { role: req.body.role });
       res.status(201).json({
         id: result.insertId,
-        message: "Manager créé avec succès.",
+        message: "Compte membre d’équipe créé avec succès.",
       });
     } catch (error) {
       await connection.rollback();
@@ -6492,7 +6524,7 @@ app.patch(
       .isArray({ min: 1 })
       .custom((roles) =>
         roles.every((role) =>
-          ["client", "seller", "delivery", "supervisor", "manager", "admin"].includes(role),
+          ["client", "seller", "delivery", "supervisor", "manager", "support", "finance", "admin"].includes(role),
         ),
       ),
   ],
@@ -6534,7 +6566,7 @@ app.patch(
         await connection.query("INSERT INTO user_roles (user_id,role) VALUES (?,?)", [userId, role]);
       }
       const primaryRole =
-        ["admin", "manager", "supervisor", "delivery", "seller", "client"].find((role) =>
+        ["admin", "finance", "manager", "support", "supervisor", "delivery", "seller", "client"].find((role) =>
           roles.includes(role),
         ) || "client";
       await connection.query("UPDATE users SET role=? WHERE id=?", [primaryRole, userId]);
@@ -7385,18 +7417,18 @@ app.patch(
           "seller",
           "payout.approved",
           "Demande de paiement approuvée",
-          `La demande ${request.request_number} est transmise au manager pour paiement.`,
+          `La demande ${request.request_number} est transmise à l’équipe finance pour paiement.`,
           "/seller/sales",
           "payout_request",
           request.id,
         );
         await notifyRole(
           connection,
-          "manager",
+          "finance",
           "payout.approved",
           "Transfert vendeur à effectuer",
           `${request.seller_name} attend un transfert de ${Number(request.amount).toLocaleString("fr-HT")} HTG.`,
-          "/manager/payouts",
+          "/finance/payouts",
           "payout_request",
           request.id,
         );
@@ -7409,7 +7441,7 @@ app.patch(
       res.json({
         message:
           req.body.decision === "approved"
-            ? "Demande approuvée et transmise au manager."
+            ? "Demande approuvée et transmise à l’équipe finance."
             : "Demande refusée et montant rendu au wallet vendeur.",
       });
     } catch (error) {
@@ -7422,9 +7454,9 @@ app.patch(
 );
 
 app.get(
-  "/api/manager/payout-requests",
+  ["/api/manager/payout-requests", "/api/finance/payout-requests"],
   authenticate,
-  authorize("manager"),
+  authorize("finance"),
   noStore,
   asyncRoute(async (_req, res) => {
     const [requests] = await pool.query(
@@ -7468,10 +7500,121 @@ app.get(
   }),
 );
 
+const monthlyTransferPeriod = (monthValue) => {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthValue || ""));
+  if (!match) throw new Error("Mois invalide. Utilisez le format AAAA-MM.");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) throw new Error("Mois invalide.");
+
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const next = new Date(Date.UTC(year, month, 1));
+  const end = new Date(next.getTime() - 1);
+  const now = new Date();
+  const isCurrent = now.getUTCFullYear() === year && now.getUTCMonth() + 1 === month;
+  const isFuture = start > now;
+  const available = !isFuture && (!isCurrent || now.getUTCDate() >= 30);
+
+  return {
+    key: `${year}-${String(month).padStart(2, "0")}`,
+    start,
+    next,
+    end,
+    isCurrent,
+    available,
+    label: start.toLocaleDateString("fr-HT", { month: "long", year: "numeric", timeZone: "UTC" }),
+  };
+};
+
+const getMonthlyTransfers = async (period) => {
+  const [transfers] = await pool.query(
+    `SELECT pr.*,u.email seller_email,
+      COALESCE(sp.shop_name,u.name) seller_name,
+      manager.name manager_name,
+      attempt.provider_transaction_id,
+      attempt.provider_reference
+     FROM payout_requests pr
+     JOIN users u ON u.id=pr.seller_id
+     LEFT JOIN seller_profiles sp ON sp.seller_id=pr.seller_id
+     LEFT JOIN users manager ON manager.id=pr.manager_id
+     LEFT JOIN payout_transfer_attempts attempt ON attempt.id=(
+       SELECT MAX(latest.id)
+       FROM payout_transfer_attempts latest
+       WHERE latest.payout_request_id=pr.id
+         AND latest.status='successful'
+     )
+     WHERE pr.status='paid'
+       AND pr.paid_at>=?
+       AND pr.paid_at<?
+     ORDER BY pr.paid_at,pr.id`,
+    [period.start, period.next],
+  );
+  return transfers;
+};
+
 app.get(
-  "/api/manager/moncash/status",
+  ["/api/finance/monthly-transfers", "/api/admin/monthly-transfers"],
   authenticate,
-  authorize("manager"),
+  authorize("finance"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    try {
+      const period = monthlyTransferPeriod(req.query.month);
+      const transfers = period.available ? await getMonthlyTransfers(period) : [];
+      res.json({
+        period: {
+          key: period.key,
+          label: period.label,
+          start: period.start,
+          end: period.end,
+          available: period.available,
+        },
+        totals: {
+          transfers: transfers.length,
+          shops: new Set(transfers.map((transfer) => transfer.seller_id)).size,
+          amount: transfers.reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0),
+        },
+      });
+    } catch (error) {
+      res.status(422).json({ message: error.message });
+    }
+  }),
+);
+
+app.get(
+  ["/api/finance/monthly-transfers.docx", "/api/admin/monthly-transfers.docx"],
+  authenticate,
+  authorize("finance"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    let period;
+    try {
+      period = monthlyTransferPeriod(req.query.month);
+    } catch (error) {
+      return res.status(422).json({ message: error.message });
+    }
+    if (!period.available) {
+      return res.status(409).json({
+        message: "Le rapport du mois courant sera disponible à partir du 30.",
+      });
+    }
+
+    const transfers = await getMonthlyTransfers(period);
+    const document = await buildMonthlyTransferDocx({ period, transfers });
+    const filename = `virements-vinnht-${period.key}.docx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+    res.send(document);
+  }),
+);
+
+app.get(
+  ["/api/manager/moncash/status", "/api/finance/moncash/status"],
+  authenticate,
+  authorize("finance"),
   noStore,
   asyncRoute(async (_req, res) => {
     const provider = publicMonCashConfiguration();
@@ -7493,9 +7636,9 @@ app.get(
 );
 
 app.patch(
-  "/api/manager/payout-requests/:id/processing",
+  ["/api/manager/payout-requests/:id/processing", "/api/finance/payout-requests/:id/processing"],
   authenticate,
-  authorize("manager"),
+  authorize("finance"),
   writeRateLimiter,
   asyncRoute(async (req, res) => {
     const connection = await pool.getConnection();
@@ -7527,7 +7670,7 @@ app.patch(
         "seller",
         "payout.processing",
         "Paiement en traitement",
-        `Le manager prépare le transfert MonCash de ${request.request_number}.`,
+        `L’équipe finance prépare le transfert MonCash de ${request.request_number}.`,
         "/seller/sales",
         "payout_request",
         request.id,
@@ -7545,9 +7688,9 @@ app.patch(
 );
 
 app.post(
-  "/api/manager/payout-requests/:id/beneficiary-check",
+  ["/api/manager/payout-requests/:id/beneficiary-check", "/api/finance/payout-requests/:id/beneficiary-check"],
   authenticate,
-  authorize("manager"),
+  authorize("finance"),
   writeRateLimiter,
   asyncRoute(async (req, res) => {
     const [[request]] = await pool.query(
@@ -7580,9 +7723,9 @@ app.post(
 );
 
 app.post(
-  "/api/manager/payout-requests/:id/transfer",
+  ["/api/manager/payout-requests/:id/transfer", "/api/finance/payout-requests/:id/transfer"],
   authenticate,
-  authorize("manager"),
+  authorize("finance"),
   writeRateLimiter,
   asyncRoute(async (req, res) => {
     let attemptId = null;
@@ -7754,9 +7897,9 @@ app.post(
 );
 
 app.post(
-  "/api/manager/payout-requests/:id/reconcile",
+  ["/api/manager/payout-requests/:id/reconcile", "/api/finance/payout-requests/:id/reconcile"],
   authenticate,
-  authorize("manager"),
+  authorize("finance"),
   writeRateLimiter,
   asyncRoute(async (req, res) => {
     const [[attempt]] = await pool.query(
@@ -7852,9 +7995,9 @@ app.post(
 );
 
 app.patch(
-  "/api/manager/payout-requests/:id/complete",
+  ["/api/manager/payout-requests/:id/complete", "/api/finance/payout-requests/:id/complete"],
   authenticate,
-  authorize("manager"),
+  authorize("finance"),
   writeRateLimiter,
   [body("reference").trim().isLength({ min: 3, max: 120 })],
   validate,
@@ -7938,7 +8081,7 @@ app.patch(
         "admin",
         "payout.paid",
         "Paiement vendeur terminé",
-        `La demande ${request.request_number} a été payée par le manager.`,
+        `La demande ${request.request_number} a été payée par l’équipe finance.`,
         "/admin/payout-requests",
         "payout_request",
         request.id,
@@ -7959,9 +8102,9 @@ app.patch(
 );
 
 app.patch(
-  "/api/manager/payout-requests/:id/fail",
+  ["/api/manager/payout-requests/:id/fail", "/api/finance/payout-requests/:id/fail"],
   authenticate,
-  authorize("manager"),
+  authorize("finance"),
   writeRateLimiter,
   [body("reason").trim().isLength({ min: 8, max: 500 })],
   validate,
@@ -8052,7 +8195,7 @@ app.patch(
     if (PAYMENT_MODEL === "protected_vinnht") {
       return res.status(409).json({
         message:
-          "Utilisez une demande vendeur approuvée puis la file de transfert du manager.",
+          "Utilisez une demande vendeur approuvée puis la file de transfert finance.",
       });
     }
     const connection = await pool.getConnection();
@@ -8229,7 +8372,7 @@ app.get(
 app.get(
   "/api/admin/contact-requests",
   authenticate,
-  authorize("admin"),
+  authorize("admin", "support"),
   noStore,
   asyncRoute(async (_req, res) => {
     const [rows] = await pool.query(
@@ -8251,7 +8394,7 @@ app.get(
 app.patch(
   "/api/admin/contact-requests/:id",
   authenticate,
-  authorize("admin"),
+  authorize("admin", "support"),
   writeRateLimiter,
   [body("status").isIn(["new", "in_progress", "resolved"])],
   validate,
@@ -8330,7 +8473,7 @@ app.patch(
   "/api/notifications/read-all",
   authenticate,
   writeRateLimiter,
-  [body("role").optional({ checkFalsy: true }).isIn(["client", "seller", "delivery", "supervisor", "manager", "admin"])],
+  [body("role").optional({ checkFalsy: true }).isIn(["client", "seller", "delivery", "supervisor", "manager", "support", "finance", "admin"])],
   validate,
   asyncRoute(async (req, res) => {
     const role = req.body.role || null;
@@ -8371,15 +8514,18 @@ app.get(
   "/api/messages/conversations",
   authenticate,
   asyncRoute(async (req, res) => {
+    const sharedSupportAccess = req.user.roles.some((role) =>
+      ["support", "admin"].includes(role),
+    );
     const [rows] = await pool.query(
       `SELECT c.id,c.client_id,c.seller_id,c.updated_at,
         CASE
-          WHEN c.client_id=? AND seller.role='admin' THEN 'Support VinnHT'
+          WHEN c.client_id=? AND seller.role IN ('admin','support') THEN 'Support VinnHT'
           WHEN c.client_id=? THEN COALESCE(sp.shop_name,seller.name)
           ELSE client.name
         END name,
         CASE
-          WHEN c.client_id=? AND seller.role='admin' THEN '/vinnht-logo.png'
+          WHEN c.client_id=? AND seller.role IN ('admin','support') THEN '/vinnht-logo.png'
           WHEN c.client_id=? THEN COALESCE(sp.shop_logo_url,seller.profile_image_url)
           ELSE client.profile_image_url
         END image_url,
@@ -8391,6 +8537,11 @@ app.get(
        JOIN users seller ON seller.id=c.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=c.seller_id
        WHERE c.client_id=? OR c.seller_id=?
+         OR (?=1 AND EXISTS(
+           SELECT 1 FROM user_roles support_role
+           WHERE support_role.user_id=c.seller_id
+             AND support_role.role IN ('support','admin')
+         ))
        ORDER BY COALESCE(last_message_at,c.updated_at) DESC`,
       [
         req.user.id,
@@ -8400,6 +8551,7 @@ app.get(
         req.user.id,
         req.user.id,
         req.user.id,
+        sharedSupportAccess ? 1 : 0,
       ],
     );
     res.json(rows);
@@ -8434,7 +8586,12 @@ app.post(
   authenticate,
   asyncRoute(async (req, res) => {
     const [[support]] = await pool.query(
-      "SELECT id FROM users WHERE role='admin' AND status='active' ORDER BY id LIMIT 1",
+      `SELECT u.id
+       FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id
+       WHERE ur.role IN ('support','admin') AND u.status='active'
+       ORDER BY (ur.role='support') DESC,u.id
+       LIMIT 1`,
     );
     if (!support) return res.status(404).json({ message: "Support VinnHT indisponible." });
     await pool.query(
@@ -8452,9 +8609,20 @@ app.get(
   "/api/messages/conversations/:id",
   authenticate,
   asyncRoute(async (req, res) => {
+    const sharedSupportAccess = req.user.roles.some((role) =>
+      ["support", "admin"].includes(role),
+    );
     const [[conversation]] = await pool.query(
-      "SELECT id FROM conversations WHERE id=? AND (client_id=? OR seller_id=?)",
-      [req.params.id, req.user.id, req.user.id],
+      `SELECT c.id FROM conversations c
+       WHERE c.id=? AND (
+         c.client_id=? OR c.seller_id=?
+         OR (?=1 AND EXISTS(
+           SELECT 1 FROM user_roles support_role
+           WHERE support_role.user_id=c.seller_id
+             AND support_role.role IN ('support','admin')
+         ))
+       )`,
+      [req.params.id, req.user.id, req.user.id, sharedSupportAccess ? 1 : 0],
     );
     if (!conversation) return res.status(404).json({ message: "Conversation introuvable." });
     await pool.query(
@@ -8476,11 +8644,21 @@ app.post(
   [body("body").trim().isLength({ min: 1, max: 2000 })],
   validate,
   asyncRoute(async (req, res) => {
+    const sharedSupportAccess = req.user.roles.some((role) =>
+      ["support", "admin"].includes(role),
+    );
     const [[conversation]] = await pool.query(
       `SELECT id,client_id,seller_id
        FROM conversations
-       WHERE id=? AND (client_id=? OR seller_id=?)`,
-      [req.params.id, req.user.id, req.user.id],
+       WHERE id=? AND (
+         client_id=? OR seller_id=?
+         OR (?=1 AND EXISTS(
+           SELECT 1 FROM user_roles support_role
+           WHERE support_role.user_id=conversations.seller_id
+             AND support_role.role IN ('support','admin')
+         ))
+       )`,
+      [req.params.id, req.user.id, req.user.id, sharedSupportAccess ? 1 : 0],
     );
     if (!conversation) return res.status(404).json({ message: "Conversation introuvable." });
     const [result] = await pool.query(
@@ -8499,27 +8677,41 @@ app.post(
       [recipientId],
     );
     const recipientRole =
-      recipientAccount?.role === "admin"
-        ? "admin"
+      ["admin", "support"].includes(recipientAccount?.role)
+        ? recipientAccount.role
         : recipientIsClient
           ? "client"
           : "seller";
     const notificationLink = {
       admin: "/admin/contact-requests",
+      support: "/support",
       seller: "/seller/messages",
       client: "/messages",
     }[recipientRole];
-    await notifyUser(
-      pool,
-      recipientId,
-      recipientRole,
-      "message.received",
-      "Nouveau message",
-      `${req.user.name} vous a envoyé un message.`,
-      notificationLink,
-      "conversation",
-      conversation.id,
-    );
+    if (recipientRole === "support") {
+      await notifyRole(
+        pool,
+        "support",
+        "message.received",
+        "Nouveau message client",
+        `${req.user.name} a écrit au support VinnHT.`,
+        "/support",
+        "conversation",
+        conversation.id,
+      );
+    } else {
+      await notifyUser(
+        pool,
+        recipientId,
+        recipientRole,
+        "message.received",
+        "Nouveau message",
+        `${req.user.name} vous a envoyé un message.`,
+        notificationLink,
+        "conversation",
+        conversation.id,
+      );
+    }
     res.status(201).json({ id: result.insertId, message: "Message envoyé." });
   }),
 );

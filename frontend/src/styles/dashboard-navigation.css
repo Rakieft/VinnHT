@@ -768,6 +768,17 @@
     opacity: 0.9;
   }
 
+  .mobile-dashboard-nav-support a,
+  .mobile-dashboard-nav-finance a {
+    min-width: 84px;
+    flex-basis: 84px;
+  }
+
+  .mobile-dashboard-nav-support small,
+  .mobile-dashboard-nav-finance small {
+    max-width: 104px;
+  }
+
   @keyframes mobile-active-icon-pulse {
     0%,
     100% {

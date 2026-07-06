@@ -4643,7 +4643,7 @@ body.client-order-modal-open {
   }
 
   .dashboard-messages-view .client-messages-shell.conversation-open .conversation-room {
-    padding-bottom: 0;
+    padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px));
   }
 }
 

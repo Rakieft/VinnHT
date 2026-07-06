@@ -164,6 +164,8 @@ const runFlow = async () => {
   const suffix = Date.now();
   const adminEmail = `smoke.admin.${suffix}@vinnht.test`;
   const managerEmail = `smoke.manager.${suffix}@vinnht.test`;
+  const supportEmail = `smoke.support.${suffix}@vinnht.test`;
+  const financeEmail = `smoke.finance.${suffix}@vinnht.test`;
   const sellerEmail = `smoke.seller.${suffix}@vinnht.test`;
   const secondSellerEmail = `smoke.seller.second.${suffix}@vinnht.test`;
   const buyerEmail = `smoke.buyer.${suffix}@vinnht.test`;
@@ -195,6 +197,37 @@ const runFlow = async () => {
     "INSERT INTO user_roles (user_id,role) VALUES (?,'admin')",
     [adminResult.insertId],
   );
+  const admin = await login(adminEmail);
+  await request("/admin/staff", {
+    method: "POST",
+    cookie: admin.cookie,
+    body: {
+      name: "Support Smoke",
+      email: supportEmail,
+      phone: "37000008",
+      password,
+      role: "support",
+    },
+  });
+  await request("/admin/staff", {
+    method: "POST",
+    cookie: admin.cookie,
+    body: {
+      name: "Finance Smoke",
+      email: financeEmail,
+      phone: "37000009",
+      password,
+      role: "finance",
+    },
+  });
+  const support = await login(supportEmail);
+  const finance = await login(financeEmail);
+  assert(support.data.user.roles.includes("support"));
+  assert(finance.data.user.roles.includes("finance"));
+  const financeReport = await request("/admin/weekly-report", {
+    cookie: finance.cookie,
+  });
+  assert(financeReport.data.totals);
 
   const sellerRegistration = await register({
     name: "Vendeur Smoke",
@@ -432,7 +465,6 @@ const runFlow = async () => {
     cookie: buyer.cookie,
     body: { body: "Bonjour Support VinnHT, ceci est un test." },
   });
-  const admin = await login(adminEmail);
   await request("/contact", {
     method: "POST",
     body: {
@@ -445,7 +477,7 @@ const runFlow = async () => {
     },
   });
   const supportRequests = await request("/admin/contact-requests", {
-    cookie: admin.cookie,
+    cookie: support.cookie,
   });
   const publicContact = supportRequests.data.find(
     (item) => item.name === "Contact Public Smoke",
@@ -455,7 +487,7 @@ const runFlow = async () => {
   assert.equal(publicContact.subject, "Question avant achat");
 
   const adminConversations = await request("/messages/conversations", {
-    cookie: admin.cookie,
+    cookie: support.cookie,
   });
   const receivedSupportConversation = adminConversations.data.find(
     (conversation) => Number(conversation.id) === Number(supportConversation.data.id),
@@ -463,8 +495,8 @@ const runFlow = async () => {
   assert(receivedSupportConversation);
   assert.equal(receivedSupportConversation.name, "Client Smoke");
   assert.equal(Number(receivedSupportConversation.unread_count), 1);
-  const adminNotifications = await request("/notifications?role=admin", {
-    cookie: admin.cookie,
+  const adminNotifications = await request("/notifications?role=support", {
+    cookie: support.cookie,
   });
   const supportNotification = adminNotifications.data.find(
     (notification) =>
@@ -472,7 +504,7 @@ const runFlow = async () => {
       Number(notification.entity_id) === Number(supportConversation.data.id),
   );
   assert(supportNotification);
-  assert.equal(supportNotification.link, "/admin/contact-requests");
+  assert.equal(supportNotification.link, "/support");
 
   await request(`/cart/${createdProduct.data.id}`, {
     method: "PUT",
@@ -626,11 +658,13 @@ const runFlow = async () => {
   );
   assert(deliveryPayout);
   assert.equal(deliveryPayout.status, "processing");
-  await request(`/admin/payouts/${deliveryPayout.id}/paid`, {
+  const protectedPayoutBypass = await request(`/admin/payouts/${deliveryPayout.id}/paid`, {
     method: "PATCH",
     cookie: admin.cookie,
     body: { reference: "MONCASH-SMOKE-DELIVERY" },
+    expectedStatus: 409,
   });
+  assert.match(protectedPayoutBypass.data.message, /demande vendeur approuvée/i);
 
   const [[productAfterOrder]] = await database.query(
     "SELECT stock FROM products WHERE id=?",

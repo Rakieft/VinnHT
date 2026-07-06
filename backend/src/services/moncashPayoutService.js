@@ -175,17 +175,46 @@ export const createMonCashReference = (requestId) =>
     .toString("hex")
     .toUpperCase()}`.slice(0, 120);
 
+export const parseMonCashCustomerStatus = (payload = {}) => {
+  const customer = payload.customerStatus || payload.customer_status || payload;
+  const statuses = Array.isArray(customer.status)
+    ? customer.status.map((value) => String(value).toLowerCase())
+    : [customer.status, customer.active, customer.registered]
+        .filter((value) => value !== undefined && value !== null)
+        .map((value) => String(value).toLowerCase());
+  return {
+    type: customer.type || null,
+    statuses,
+    registered: statuses.includes("registered") || statuses.includes("true"),
+    active: statuses.includes("active") || statuses.includes("true"),
+  };
+};
+
+export const parseMonCashPrefundedBalance = (payload = {}) => {
+  const rawBalance = payload.balance?.balance ?? payload.balance ??
+    payload.prefunded_balance ?? payload.amount;
+  return Number.isFinite(Number(rawBalance)) ? Number(rawBalance) : null;
+};
+
+export const parseMonCashTransfer = (payload = {}) => {
+  const transfer = payload.transfer || payload;
+  const transactionId = transfer.transaction_id ?? transfer.transactionId ?? null;
+  const status = String(
+    transfer.message || transfer.transStatus || transfer.status || "",
+  ).toLowerCase();
+  return {
+    transactionId: transactionId ? String(transactionId) : null,
+    successful: status.includes("success"),
+    status: status || "unknown",
+  };
+};
+
 export const checkMonCashCustomer = async (receiver) => {
   const payload = await authorizedRequest(endpoint("MONCASH_CUSTOMER_STATUS_PATH", "/v1/CustomerStatus"), {
     body: { account: normalizeMonCashReceiver(receiver) },
   });
-  const statusValues = Object.entries(payload || {})
-    .filter(([key]) => /(status|active|registered)/i.test(key))
-    .map(([, value]) => String(value).toLowerCase());
-  const explicitlyIneligible = statusValues.some((value) =>
-    ["false", "inactive", "blocked", "suspended", "unregistered", "not registered"].includes(value),
-  );
-  if (explicitlyIneligible) {
+  const customer = parseMonCashCustomerStatus(payload);
+  if (!customer.registered || !customer.active) {
     throw new MonCashProviderError("Le compte MonCash du vendeur n’est pas admissible au transfert.", {
       code: "MONCASH_BENEFICIARY_INELIGIBLE",
       status: 422,
@@ -200,9 +229,8 @@ export const getMonCashPrefundedBalance = async () => {
     endpoint("MONCASH_PREFUNDED_BALANCE_PATH", "/v1/PrefundedBalance"),
     { method: "GET" },
   );
-  const rawBalance = payload.balance ?? payload.prefunded_balance ?? payload.amount;
   return {
-    balance: Number.isFinite(Number(rawBalance)) ? Number(rawBalance) : null,
+    balance: parseMonCashPrefundedBalance(payload),
     providerResponse: payload,
   };
 };
@@ -216,16 +244,15 @@ export const sendMonCashTransfer = async ({ amount, receiver, description, refer
       reference,
     },
   });
-  const transactionId = payload.transaction_id ?? payload.transactionId ?? null;
-  const status = String(payload.transStatus || payload.status || payload.message || "").toLowerCase();
-  if (!transactionId && !status.includes("success")) {
+  const transfer = parseMonCashTransfer(payload);
+  if (!transfer.transactionId && !transfer.successful) {
     throw new MonCashProviderError("MonCash n’a pas confirmé le transfert.", {
       code: "MONCASH_UNCONFIRMED_TRANSFER",
       ambiguous: true,
       details: payload,
     });
   }
-  return { transactionId: transactionId ? String(transactionId) : null, providerResponse: payload };
+  return { transactionId: transfer.transactionId, providerResponse: payload };
 };
 
 export const getMonCashTransferStatus = async (reference) => {

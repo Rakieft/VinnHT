@@ -147,6 +147,7 @@ const ManagerPayoutOperationsContent = lazyNamed(
   loadWalletFlow,
   "ManagerPayoutOperationsContent",
 );
+const FinanceReportContent = lazyNamed(loadWalletFlow, "FinanceReportContent");
 
 const BecomeSellerPage = React.lazy(() => import("./pages/client/BecomeSeller.jsx"));
 const MarketplaceMessages = React.lazy(() => import("./components/MarketplaceMessages.jsx"));
@@ -293,6 +294,8 @@ const roleHome = {
   seller: "/seller",
   delivery: "/delivery",
   manager: "/manager",
+  support: "/support",
+  finance: "/finance",
   admin: "/admin",
 };
 const switchableAccountRoles = ["client", "seller", "delivery"];
@@ -1546,8 +1549,8 @@ function Contact() {
               </header>
               <div>
                 {supportMessages.map((item) => (
-                  <article className={item.sender_role === "admin" ? "support" : "client"} key={item.id}>
-                    <small>{item.sender_role === "admin" ? "Support VinnHT" : "Vous"}</small>
+                  <article className={["admin", "support"].includes(item.sender_role) ? "support" : "client"} key={item.id}>
+                    <small>{["admin", "support"].includes(item.sender_role) ? "Support VinnHT" : "Vous"}</small>
                     <p>{item.body}</p>
                     <time>{new Date(item.created_at).toLocaleString("fr-HT")}</time>
                   </article>
@@ -3359,9 +3362,19 @@ const menus = {
     ["Rapports opérationnels", "/manager/sales-reports", BarChart3],
     ["Gestion vendeurs", "/manager/sellers", Store],
     ["Gestion livraison", "/manager/deliveries", Truck],
-    ["Transferts vendeurs", "/manager/payouts", Wallet],
     ["Profil", "/manager/profile", CircleUserRound],
     ["Paramètres", "/manager/settings", Settings],
+  ],
+  support: [
+    ["Centre de support", "/support", Headphones],
+    ["Profil", "/support/profile", CircleUserRound],
+    ["Paramètres", "/support/settings", Settings],
+  ],
+  finance: [
+    ["Transferts vendeurs", "/finance", Wallet],
+    ["Rapport hebdomadaire", "/finance/reports", BarChart3],
+    ["Profil", "/finance/profile", CircleUserRound],
+    ["Paramètres", "/finance/settings", Settings],
   ],
   admin: [
     ["Vue d’ensemble", "/admin", LayoutDashboard],
@@ -3655,6 +3668,10 @@ function DashboardLayout({ children, className = "" }) {
       ? "delivery"
       : location.pathname.startsWith("/manager")
         ? "manager"
+        : location.pathname.startsWith("/support")
+          ? "support"
+          : location.pathname.startsWith("/finance")
+            ? "finance"
         : location.pathname.startsWith("/admin")
           ? "admin"
           : "client";
@@ -4593,8 +4610,12 @@ function AdminContactRequestsPage() {
   const [supportView, setSupportView] = useState("messages");
   const [mobileDiscussionOpen, setMobileDiscussionOpen] = useState(false);
 
+  useEffect(() => {
+    loadAdminFlow();
+  }, []);
+
   return (
-    <DashboardLayout>
+    <DashboardLayout className="dashboard-messages-view">
       <div
         className={`admin-support-page ${
           mobileDiscussionOpen ? "mobile-discussion-open" : ""
@@ -4612,13 +4633,19 @@ function AdminContactRequestsPage() {
           <nav>
             <button
               className={supportView === "messages" ? "active" : ""}
-              onClick={() => setSupportView("messages")}
+              onClick={() => {
+                setSupportView("messages");
+                setMobileDiscussionOpen(false);
+              }}
             >
               <MessageCircle /> Discussions directes
             </button>
             <button
               className={supportView === "requests" ? "active" : ""}
-              onClick={() => setSupportView("requests")}
+              onClick={() => {
+                setSupportView("requests");
+                setMobileDiscussionOpen(false);
+              }}
             >
               <Headphones /> Dossiers support
             </button>
@@ -4632,7 +4659,10 @@ function AdminContactRequestsPage() {
             onMobileConversationChange={setMobileDiscussionOpen}
           />
         ) : (
-          <AdminContactRequestsContent api={api} />
+          <AdminContactRequestsContent
+            api={api}
+            onMobileConversationChange={setMobileDiscussionOpen}
+          />
         )}
       </div>
     </DashboardLayout>
@@ -4655,10 +4685,18 @@ function AdminPayoutRequestsPage() {
   );
 }
 
-function ManagerPayoutsPage() {
+function FinancePayoutsPage() {
   return (
     <DashboardLayout>
       <ManagerPayoutOperationsContent api={api} />
+    </DashboardLayout>
+  );
+}
+
+function FinanceReportsPage() {
+  return (
+    <DashboardLayout>
+      <FinanceReportContent api={api} />
     </DashboardLayout>
   );
 }
@@ -4986,11 +5024,7 @@ function AppRoutes() {
       />
       <Route
         path="/manager/payouts"
-        element={
-          <Protected roles={["manager"]}>
-            <ManagerPayoutsPage />
-          </Protected>
-        }
+        element={<Navigate to="/manager" replace />}
       />
       <Route
         path="/manager/profile"
@@ -5041,6 +5075,66 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/support"
+        element={
+          <Protected roles={["support"]}>
+            <AdminContactRequestsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/support/profile"
+        element={
+          <Protected roles={["support"]}>
+            <StaffProfilePage role="Support" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/support/settings"
+        element={
+          <Protected roles={["support"]}>
+            <StaffSettingsPage role="support" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/finance"
+        element={
+          <Protected roles={["finance"]}>
+            <FinancePayoutsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/finance/payouts"
+        element={<Navigate to="/finance" replace />}
+      />
+      <Route
+        path="/finance/reports"
+        element={
+          <Protected roles={["finance"]}>
+            <FinanceReportsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/finance/profile"
+        element={
+          <Protected roles={["finance"]}>
+            <StaffProfilePage role="Finance" />
+          </Protected>
+        }
+      />
+      <Route
+        path="/finance/settings"
+        element={
+          <Protected roles={["finance"]}>
+            <StaffSettingsPage role="finance" />
+          </Protected>
+        }
+      />
+      <Route
         path="/admin/payout-requests"
         element={
           <Protected roles={["admin"]}>
@@ -5087,7 +5181,7 @@ function AppRoutes() {
       <Route path="/supervisor/profile" element={<Navigate to="/manager/profile" replace />} />
       <Route path="/supervisor/settings" element={<Navigate to="/manager/settings" replace />} />
       {Object.keys(menus)
-        .filter((role) => !["client", "seller", "delivery", "admin", "manager"].includes(role))
+        .filter((role) => !["client", "seller", "delivery", "admin", "manager", "support", "finance"].includes(role))
         .map((role) => (
           <Route
             key={role}

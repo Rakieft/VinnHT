@@ -14,6 +14,9 @@ import {
 import {
   createMonCashReference,
   normalizeMonCashReceiver,
+  parseMonCashCustomerStatus,
+  parseMonCashPrefundedBalance,
+  parseMonCashTransfer,
   publicMonCashConfiguration,
 } from "../services/moncashPayoutService.js";
 
@@ -55,6 +58,20 @@ test("authorize bloque un rôle non autorisé", () => {
   authorize("admin")(req, res, () => {});
 
   assert.equal(res.code, 403);
+});
+
+test("les espaces support et finance restent séparés", () => {
+  const financeRequest = { user: { roles: ["finance"] } };
+  const financeResponse = response();
+  let financeAllowed = false;
+  authorize("finance")(financeRequest, financeResponse, () => {
+    financeAllowed = true;
+  });
+  assert.equal(financeAllowed, true);
+
+  const supportResponse = response();
+  authorize("support")(financeRequest, supportResponse, () => {});
+  assert.equal(supportResponse.code, 403);
 });
 
 test("le limiteur bloque après le nombre autorisé", () => {
@@ -136,4 +153,28 @@ test("chaque tentative MonCash reçoit une référence VinnHT bornée", () => {
   assert.match(first, /^VHTPAY-42-/);
   assert.notEqual(first, second);
   assert.ok(first.length <= 120);
+});
+
+test("les réponses officielles imbriquées MonCash sont interprétées", () => {
+  assert.deepEqual(
+    parseMonCashCustomerStatus({
+      customerStatus: { type: "fullkyc", status: ["registered", "active"] },
+    }),
+    {
+      type: "fullkyc",
+      statuses: ["registered", "active"],
+      registered: true,
+      active: true,
+    },
+  );
+  assert.equal(
+    parseMonCashPrefundedBalance({ balance: { balance: 1250, message: "successful" } }),
+    1250,
+  );
+  assert.deepEqual(
+    parseMonCashTransfer({
+      transfer: { transaction_id: "MC-42", message: "successful" },
+    }),
+    { transactionId: "MC-42", successful: true, status: "successful" },
+  );
 });

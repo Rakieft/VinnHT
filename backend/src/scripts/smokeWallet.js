@@ -4,7 +4,7 @@ import pool from "../config/database.js";
 
 const apiBase = process.env.API_URL || "http://localhost:5056/api";
 const requestAmount = 500;
-const managerEmail = `wallet.manager.${Date.now()}@vinnht.test`;
+const managerEmail = `wallet.finance.${Date.now()}@vinnht.test`;
 const managerPassword = "VinnHT-Wallet-Smoke!2026";
 
 const sessions = {};
@@ -67,12 +67,12 @@ try {
   const passwordHash = await bcrypt.hash(managerPassword, 12);
   const [manager] = await pool.query(
     `INSERT INTO users (name,email,password_hash,role,status)
-     VALUES ('Manager Wallet Smoke',?,?,'manager','active')`,
+     VALUES ('Finance Wallet Smoke',?,?,'finance','active')`,
     [managerEmail, passwordHash],
   );
   managerId = manager.insertId;
   await pool.query(
-    "INSERT INTO user_roles (user_id,role) VALUES (?,'manager')",
+    "INSERT INTO user_roles (user_id,role) VALUES (?,'finance')",
     [managerId],
   );
 
@@ -110,7 +110,7 @@ try {
 
   await login("seller", payout.seller_email, "VinnHT-Test02!2026");
   await login("admin", "admin@vinnht.ht", "VinnHTAdmin2026!");
-  await login("manager", managerEmail, managerPassword);
+  await login("finance", managerEmail, managerPassword);
 
   const created = await api("/seller/wallet/requests", {
     session: "seller",
@@ -124,12 +124,12 @@ try {
     method: "PATCH",
     body: { decision: "approved", note: "Demande vérifiée par le test." },
   });
-  await api(`/manager/payout-requests/${requestId}/processing`, {
-    session: "manager",
+  await api(`/finance/payout-requests/${requestId}/processing`, {
+    session: "finance",
     method: "PATCH",
   });
-  await api(`/manager/payout-requests/${requestId}/complete`, {
-    session: "manager",
+  await api(`/finance/payout-requests/${requestId}/complete`, {
+    session: "finance",
     method: "PATCH",
     body: { reference: `SMOKE-${Date.now()}` },
   });
@@ -151,7 +151,7 @@ try {
     throw new Error("Le total payé du wallet est incorrect.");
   }
 
-  console.log("Parcours wallet validé : vendeur → admin → manager → payé.");
+  console.log("Parcours wallet validé : vendeur → admin → finance → payé.");
 } finally {
   if (requestId) {
     await pool.query(
