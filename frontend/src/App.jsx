@@ -78,7 +78,7 @@ import {
   getTaxonomyTypeLabel,
 } from "./config/marketplaceTaxonomy.js";
 import { shopPublicPath, shopSellerIdFromParam } from "./utils/shopUrl.js";
-import sousHeroImage from "./assets/images/sous-hero-vinnht-student.jpg";
+import sousHeroImage from "./assets/images/sous-hero-vinnht-marketplace.png";
 import contactSupportImage from "./assets/images/contact-support-hands-vinnht.jpg";
 import "./styles/responsive-overrides.css";
 import "./styles/auth-search.css";
@@ -439,12 +439,34 @@ const demoProducts = [
   },
 ];
 const boutiques = [
-  "Marché Lakay",
+  "MarchÃ© Lakay",
   "Tech Ayiti",
   "Kreyol Chic",
   "Kay Design",
   "Mobile Plus",
   "Soleil Market",
+];
+const howItWorksSteps = [
+  {
+    title: "Cr\u00E9ez votre compte",
+    text: "Ouvrez votre espace en quelques instants pour acheter, suivre vos commandes ou lancer votre activit\u00E9 sur VinnHT.",
+    tone: "blue",
+  },
+  {
+    title: "Explorez les rayons",
+    text: "Parcourez les cat\u00E9gories, comparez les boutiques et rep\u00E9rez plus vite les vendeurs avec un profil complet.",
+    tone: "gold",
+  },
+  {
+    title: "Commandez ou vendez",
+    text: "Le client choisit avec confiance, pendant que le vendeur g\u00E8re ses produits, ses commandes et ses paiements.",
+    tone: "navy",
+  },
+  {
+    title: "Suivez la livraison",
+    text: "Chaque \u00E9tape reste visible jusqu\u2019\u00E0 la remise finale pour rassurer le client et structurer le travail de la boutique.",
+    tone: "success",
+  },
 ];
 
 function Providers({ children }) {
@@ -1110,18 +1132,23 @@ function Home() {
         >
           <img
             src={sousHeroImage}
-            alt="Jeune étudiante VinnHT invitant à découvrir les rayons"
+            alt="Jeune cliente VinnHT présentant les rayons du marché numérique d'Haïti"
             loading="lazy"
             decoding="async"
           />
         </motion.div>
       </AnimatedSection>
-      <AnimatedSection className="section">
-        <SectionHead
-          eyebrow="Rayons populaires"
-          title="Un grand marché organisé pour Haïti"
-          link="/categories"
-        />
+      <AnimatedSection className="section rayons-spotlight">
+        <div className="rayons-spotlight-shell">
+          <SectionHead
+            eyebrow="Rayons populaires"
+            title="Un grand marché organisé pour Haïti"
+            link="/categories"
+          />
+          <p className="rayons-spotlight-copy">
+            Explorez les univers les plus visités sur VinnHT dans une vitrine pensée pour donner envie de découvrir le marché.
+          </p>
+        </div>
         <Swiper
           modules={[Autoplay, Pagination]}
           autoplay={{ delay: 2600 }}
@@ -1143,7 +1170,7 @@ function Home() {
       <AnimatedSection className="section soft">
         <SectionHead
           eyebrow="Produits tendance"
-          title="Les offres qui donnent envie de remplir son panier"
+          title="Que cherchez-vous aujourd'hui ?"
         />
         <div className="product-grid">
           {products.map((p) => (
@@ -1175,27 +1202,27 @@ function Home() {
         ))}
       </AnimatedSection>
       <AnimatedSection className="section timeline-section">
-        <SectionHead eyebrow="Comment ça marche" title="Acheter ou vendre en quelques étapes" />
+        <SectionHead eyebrow="Comment Ã§a marche" title={"Un parcours clair, fiable et pens\u00E9 pour Ha\u00EFti"} />
         <div className="timeline">
-          {[
-            "Créez votre compte",
-            "Explorez les rayons",
-            "Commandez ou vendez",
-            "Suivez la livraison",
-          ].map((step, i) => (
-            <div key={step}>
+          {howItWorksSteps.map((step, i) => (
+            <div className={`timeline-card ${step.tone}`} key={step.title}>
               <span>{i + 1}</span>
-              <h3>{step}</h3>
-              <p>Une étape simple, claire et pensée pour avancer vite.</p>
+              <h3>{step.title}</h3>
+              <p>{step.text}</p>
             </div>
           ))}
         </div>
       </AnimatedSection>
-      <AnimatedSection className="section boutiques">
-        <SectionHead
-          eyebrow="Boutiques professionnelles"
-          title="Des vendeurs prêts pour le commerce numérique"
-        />
+      <AnimatedSection className="section boutiques boutiques-spotlight">
+        <div className="boutiques-spotlight-shell">
+          <SectionHead
+            eyebrow="Boutiques professionnelles"
+            title="Des vendeurs prêts pour le commerce numérique"
+          />
+          <p className="boutiques-spotlight-copy">
+            Découvrez des boutiques vérifiées, mieux présentées et prêtes à servir leurs clients partout en Haïti.
+          </p>
+        </div>
         <Swiper
           modules={[Autoplay]}
           autoplay={{ delay: 2200 }}
@@ -1209,7 +1236,11 @@ function Home() {
         >
           {shops.map((shop) => (
             <SwiperSlide key={shop.seller_id}>
-              <div className="shop-card">
+              <Link
+                className="shop-card shop-card-link"
+                to={shopPublicPath(shop)}
+                aria-label={`Ouvrir la boutique ${shop.shop_name || "VinnHT"}`}
+              >
                 <span className="shop-card-logo">
                   {shop.shop_logo_url ? (
                     <img src={assetUrl(shop.shop_logo_url)} alt={`Logo ${shop.shop_name}`} />
@@ -1219,7 +1250,7 @@ function Home() {
                 </span>
                 <h3>{shop.shop_name}</h3>
                 <p>{shop.category || "Boutique VinnHT"}</p>
-              </div>
+              </Link>
             </SwiperSlide>
           ))}
         </Swiper>
@@ -2987,6 +3018,13 @@ function ShopDetails() {
 }
 
 function AuthPage({ register = false }) {
+  const clientRegistrationRules = [
+    "Achetez de préférence dans des boutiques qui ont un profil complet et vérifié sur VinnHT.",
+    "Vous payez toujours directement VinnHT selon les instructions de la commande.",
+    "Après votre confirmation de réception, l'argent est ensuite débloqué pour le vendeur.",
+    "Si un vendeur vous demande d'envoyer l'argent sur son compte personnel, refusez et signalez-le.",
+    "Confirmez votre commande uniquement après avoir bien reçu le produit ou le retrait convenu.",
+  ];
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -3046,6 +3084,17 @@ function AuthPage({ register = false }) {
           };
 
       const { data } = await api.post(register ? "/auth/register" : "/auth/login", payload);
+
+      if (register) {
+        navigate("/login", {
+          state: {
+            successMessage:
+              "Compte créé avec succès. Connectez-vous maintenant à votre espace VinnHT.",
+          },
+        });
+        return;
+      }
+
       login(data);
       navigate(roleHome[data.user.role] || "/client");
     } catch (err) {
@@ -3200,6 +3249,15 @@ function AuthPage({ register = false }) {
                     />
                   </motion.label>
                 )}
+
+                <div className="client-terms-card">
+                  <span>5 règles simples pour acheter en sécurité</span>
+                  <ol>
+                    {clientRegistrationRules.map((rule) => (
+                      <li key={rule}>{rule}</li>
+                    ))}
+                  </ol>
+                </div>
               </>
             )}
             <label className="line-field">
@@ -3251,8 +3309,7 @@ function AuthPage({ register = false }) {
                     onChange={(e) => setForm({ ...form, acceptedTerms: e.target.checked })}
                   />
                   <span>
-                    J’accepte les <Link to="/terms" target="_blank">conditions d’utilisation</Link>
-                    {" "}et la politique de confidentialité.
+                    J'ai lu et j'accepte ces 5 conditions d'utilisation client.
                   </span>
                 </label>
               </>
@@ -5335,4 +5392,14 @@ export default function App() {
     </Providers>
   );
 }
+
+
+
+
+
+
+
+
+
+
 

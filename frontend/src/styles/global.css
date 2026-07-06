@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2family=Manrope:wght@400;500;600;700;800&display=swap");
+﻿@import url("https://fonts.googleapis.com/css2family=Manrope:wght@400;500;600;700;800&display=swap");
 :root {
   --navy: #0f172a;
   --blue: #2563eb;
@@ -20,7 +20,10 @@ html {
 }
 body {
   margin: 0;
-  background: #fff;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.05), transparent 24%),
+    radial-gradient(circle at left 18%, rgba(245, 158, 11, 0.05), transparent 18%),
+    #f8fafc;
   color: var(--navy);
   font-family: Manrope, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -632,6 +635,110 @@ main {
   display: flex;
   align-items: center;
 }
+
+.rayons-spotlight {
+  position: relative;
+  overflow: hidden;
+}
+
+.rayons-spotlight:before,
+.rayons-spotlight:after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.rayons-spotlight:before {
+  top: 34px;
+  left: max(5vw, 22px);
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(173, 235, 255, 0.95), transparent 72%);
+  opacity: 0.95;
+}
+
+.rayons-spotlight:after {
+  right: 28px;
+  bottom: 46px;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.14), transparent 70%);
+}
+
+.rayons-spotlight-shell {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 28px;
+  padding: 26px 28px;
+  border: 1px solid rgba(173, 235, 255, 0.95);
+  border-radius: 30px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(240, 249, 255, 0.96)),
+    #adebff;
+  box-shadow:
+    0 24px 60px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.rayons-spotlight-shell .section-head {
+  margin-bottom: 10px;
+}
+
+.rayons-spotlight-copy {
+  max-width: 760px;
+  margin: 0;
+  color: #475569;
+  line-height: 1.75;
+  font-size: 15px;
+}
+
+.rayons-spotlight .swiper {
+  position: relative;
+  z-index: 1;
+}
+
+.rayons-spotlight .category-card {
+  min-height: 255px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.96)),
+    #ffffff;
+  border: 1px solid rgba(173, 235, 255, 0.92);
+  box-shadow:
+    0 18px 42px rgba(15, 23, 42, 0.07),
+    0 0 0 1px rgba(173, 235, 255, 0.18);
+}
+
+.rayons-spotlight .category-card:before {
+  width: 190px;
+  height: 190px;
+  background:
+    radial-gradient(circle, rgba(173, 235, 255, 0.95), rgba(219, 234, 254, 0.48) 48%, transparent 74%);
+}
+
+.rayons-spotlight .category-card:hover {
+  transform: translateY(-8px) scale(1.01);
+  box-shadow:
+    0 24px 52px rgba(37, 99, 235, 0.12),
+    0 0 0 1px rgba(173, 235, 255, 0.35);
+}
+
+.rayons-spotlight .category-icon {
+  background:
+    linear-gradient(145deg, #0f172a, #2563eb);
+  box-shadow:
+    0 16px 30px rgba(37, 99, 235, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.rayons-spotlight .category-card h3 {
+  letter-spacing: -0.03em;
+}
+
+.rayons-spotlight .category-card > span {
+  gap: 4px;
+}
 .category-grid,
 .product-grid,
 .stats-grid {
@@ -943,22 +1050,83 @@ main {
   grid-template-columns: repeat(4, 1fr);
   gap: 18px;
 }
-.timeline > div {
-  padding: 25px;
+.timeline-card {
+  position: relative;
+  overflow: hidden;
+  padding: 26px;
   border-radius: 23px;
-  background: #fff;
   border: 1px solid var(--line);
   box-shadow: 0 12px 35px rgba(15, 23, 42, 0.06);
 }
-.timeline span {
+.timeline-card:before {
+  content: "";
+  position: absolute;
+  inset: auto -24px -32px auto;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  opacity: 0.28;
+}
+.timeline-card span {
   width: 42px;
   height: 42px;
   border-radius: 15px;
-  background: var(--gold);
   color: #fff;
   display: grid;
   place-items: center;
   font-weight: 900;
+  position: relative;
+  z-index: 1;
+}
+.timeline-card h3 {
+  margin: 14px 0 10px;
+  font-size: 20px;
+  letter-spacing: -0.5px;
+  position: relative;
+  z-index: 1;
+}
+.timeline-card p {
+  margin: 0;
+  color: var(--gray);
+  line-height: 1.7;
+  position: relative;
+  z-index: 1;
+}
+.timeline-card.blue {
+  background: linear-gradient(180deg, #eef5ff, #ffffff);
+}
+.timeline-card.blue span {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+.timeline-card.blue:before {
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.45), transparent 70%);
+}
+.timeline-card.gold {
+  background: linear-gradient(180deg, #fff7ed, #ffffff);
+}
+.timeline-card.gold span {
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+}
+.timeline-card.gold:before {
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.4), transparent 70%);
+}
+.timeline-card.navy {
+  background: linear-gradient(180deg, #eef2ff, #ffffff);
+}
+.timeline-card.navy span {
+  background: linear-gradient(135deg, #0f172a, #1e3a8a);
+}
+.timeline-card.navy:before {
+  background: radial-gradient(circle, rgba(15, 23, 42, 0.32), transparent 70%);
+}
+.timeline-card.success {
+  background: linear-gradient(180deg, #ecfdf5, #ffffff);
+}
+.timeline-card.success span {
+  background: linear-gradient(135deg, #22c55e, #15803d);
+}
+.timeline-card.success:before {
+  background: radial-gradient(circle, rgba(34, 197, 94, 0.28), transparent 70%);
 }
 .shop-card span {
   width: 54px;
@@ -986,6 +1154,22 @@ main {
   min-height: 170px;
   padding: 22px;
 }
+.shop-card-link {
+  display: block;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+.shop-card-link:hover {
+  transform: translateY(-4px);
+  border-color: rgba(37, 99, 235, 0.24);
+  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.12);
+}
+.shop-card-link:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  outline-offset: 3px;
+}
 .boutiques .shop-card span {
   width: 50px;
   height: 50px;
@@ -996,6 +1180,92 @@ main {
 }
 .boutiques .shop-card p {
   margin-bottom: 0;
+}
+.boutiques-spotlight {
+  position: relative;
+  overflow: hidden;
+  margin-top: 14px;
+}
+.boutiques-spotlight:before,
+.boutiques-spotlight:after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.boutiques-spotlight:before {
+  top: 10px;
+  left: max(4vw, 16px);
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.28), transparent 68%);
+  filter: blur(6px);
+}
+.boutiques-spotlight:after {
+  right: 24px;
+  bottom: 34px;
+  width: 260px;
+  height: 260px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.2), transparent 70%);
+}
+.boutiques-spotlight-shell {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 26px;
+  padding: 28px 30px;
+  border-radius: 28px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  background:
+    linear-gradient(135deg, rgba(173, 235, 255, 0.92), rgba(255, 255, 255, 0.9) 44%, rgba(254, 240, 138, 0.78)),
+    rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 22px 60px rgba(37, 99, 235, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.boutiques-spotlight-shell .section-head {
+  margin-bottom: 10px;
+}
+.boutiques-spotlight-copy {
+  max-width: 760px;
+  margin: 0;
+  color: #334155;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.boutiques-spotlight .swiper {
+  position: relative;
+  z-index: 1;
+}
+.boutiques-spotlight .shop-card {
+  min-height: 198px;
+  padding: 24px;
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.94)),
+    #ffffff;
+  box-shadow:
+    0 24px 48px rgba(15, 23, 42, 0.1),
+    0 8px 22px rgba(37, 99, 235, 0.08);
+}
+.boutiques-spotlight .shop-card-link:hover {
+  transform: translateY(-8px) scale(1.01);
+  border-color: rgba(245, 158, 11, 0.28);
+  box-shadow:
+    0 26px 56px rgba(15, 23, 42, 0.14),
+    0 10px 26px rgba(245, 158, 11, 0.12);
+}
+.boutiques-spotlight .shop-card span {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #0f172a, #2563eb);
+  box-shadow: 0 18px 34px rgba(37, 99, 235, 0.18);
+}
+.boutiques-spotlight .shop-card h3 {
+  margin-bottom: 8px;
+}
+.boutiques-spotlight .shop-card p {
+  color: #475569;
 }
 .mobile-app {
   position: relative;
@@ -3173,7 +3443,8 @@ th {
   .contact-hero,
   .contact-form-wrap,
   .auth-wrap,
-  .mobile-app {
+  
+.mobile-app {
     grid-template-columns: 1fr;
   }
   .stats-strip,
@@ -3209,7 +3480,8 @@ th {
   .sidebar {
     padding-inline: 12px;
   }
-  .mobile-app {
+  
+.mobile-app {
     margin-inline: 22px;
   }
   .phone-mock {
@@ -3557,6 +3829,16 @@ th {
   .section {
     padding: 58px 18px;
   }
+
+  .rayons-spotlight-shell {
+    padding: 22px 18px;
+    border-radius: 24px;
+  }
+
+  .rayons-spotlight-copy {
+    font-size: 14px;
+    line-height: 1.65;
+  }
   .section-head {
     align-items: flex-start;
   }
@@ -3617,7 +3899,8 @@ th {
   .toolbar {
     margin: 0 0 18px;
   }
-  .mobile-app {
+  
+.mobile-app {
     margin: 25px 12px 88px;
     padding: 29px 18px;
     gap: 24px;
@@ -7994,3 +8277,9 @@ th {
   }
 
 }
+
+
+
+
+
+
