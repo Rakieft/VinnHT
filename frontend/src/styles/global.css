@@ -5335,6 +5335,80 @@ th {
     linear-gradient(180deg, #ffffff, #f8fafc);
 }
 
+.departments-hero-premium {
+  background:
+    radial-gradient(circle at 0% 100%, rgba(37, 99, 235, 0.2), transparent 30%),
+    radial-gradient(circle at 100% 0%, rgba(245, 158, 11, 0.18), transparent 28%),
+    linear-gradient(135deg, #0f172a, #1e3a8a 62%, #2563eb);
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.22);
+}
+
+.departments-hero-copy p {
+  margin: 0;
+  max-width: 620px;
+}
+
+.departments-hero-search-card {
+  min-height: 100%;
+}
+
+.departments-hero-search-card h2 {
+  font-size: 28px;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.departments-hero-search-card label {
+  margin-top: 10px;
+}
+
+.departments-premium-grid-v2 article {
+  height: 100%;
+  gap: 18px;
+}
+
+.departments-premium-grid-v2 article header {
+  align-items: flex-start;
+}
+
+.departments-premium-grid-v2 article header > div {
+  min-width: 0;
+}
+
+.departments-premium-grid-v2 article h2 {
+  line-height: 1.1;
+}
+
+.department-tags {
+  gap: 8px;
+}
+
+.department-tags span {
+  padding: 8px 11px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.department-preview {
+  min-height: 92px;
+  gap: 8px;
+}
+
+.department-preview img {
+  height: 92px;
+  border-radius: 14px;
+  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.08);
+}
+
+.departments-premium-grid article > a {
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.category-popular-premium a {
+  min-height: 122px;
+  border-radius: 22px;
+}
 .departments-premium-grid-v2 article:hover {
   border-color: rgba(37, 99, 235, 0.28);
   box-shadow: 0 24px 62px rgba(15, 23, 42, 0.11);
@@ -5543,11 +5617,20 @@ th {
     padding: 12px;
   }
 
+  .departments-hero-copy p {
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
   .category-popular-premium > div,
   .departments-premium-grid,
   .departments-premium-grid-v2,
   .category-product-filters-premium {
     grid-template-columns: 1fr;
+  }
+
+  .departments-hero-search-card h2 {
+    font-size: 24px;
   }
 
   .category-products-hero aside {
@@ -8277,6 +8360,7 @@ th {
   }
 
 }
+
 
 
 

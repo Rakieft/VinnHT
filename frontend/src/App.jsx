@@ -2069,9 +2069,6 @@ function Categories() {
   const visible = categoryData.filter((category) =>
     `${category.name} ${category.slug}`.toLowerCase().includes(query.toLowerCase()),
   );
-  const popular = categoryData
-    .filter((category) => Number(category.available_product_count) > 0)
-    .slice(0, 6);
   const totalProducts = categoryData.reduce(
     (sum, category) => sum + Number(category.available_product_count || 0),
     0,
@@ -2084,10 +2081,26 @@ function Categories() {
         <div className="departments-hero-copy">
           <Badge tone="gold">Grand marché VinnHT</Badge>
           <h1>Choisissez votre rayon et trouvez plus vite.</h1>
+          <p>Explorez les univers les plus actifs du marketplace et repérez rapidement les rayons qui ont déjà des produits disponibles.</p>
+          <div className="departments-hero-stats">
+            <span>
+              <b>{activeRayons}</b>
+              <small>Rayons actifs</small>
+            </span>
+            <span>
+              <b>{totalProducts}</b>
+              <small>Produits visibles</small>
+            </span>
+            <span>
+              <b>{visible.length}</b>
+              <small>Univers à explorer</small>
+            </span>
+          </div>
         </div>
         <div className="departments-hero-search-card">
           <span><Search /></span>
           <h2>Que cherchez-vous ?</h2>
+          <p>Filtrez les rayons en quelques secondes pour arriver plus vite vers les produits qui vous intéressent.</p>
           <label>
             <Search />
             <input
@@ -2099,26 +2112,6 @@ function Categories() {
         </div>
       </section>
 
-      {!!popular.length && (
-        <section className="section category-popular category-popular-premium">
-          <SectionHead eyebrow="Les plus actifs" title="Rayons qui bougent maintenant" />
-          <div>
-            {popular.map((category, index) => {
-              const [Icon] = categoryVisuals[category.slug] || [ShoppingBag];
-              return (
-                <Link to={`/categories/${category.slug}`} key={category.id}>
-                  <span className="popular-rank">#{index + 1}</span>
-                  <span className="popular-icon"><Icon /></span>
-                  <span>
-                    <b>{category.name}</b>
-                  </span>
-                  <ArrowRight />
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      )}
 
       <section className="section departments-section">
         <SectionHead eyebrow="Tous les univers" title={`${visible.length} rayon(s) à explorer`} />
@@ -5392,6 +5385,8 @@ export default function App() {
     </Providers>
   );
 }
+
+
 
 
 
