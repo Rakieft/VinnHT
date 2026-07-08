@@ -78,6 +78,9 @@ import {
   getTaxonomyTypeLabel,
 } from "./config/marketplaceTaxonomy.js";
 import { shopPublicPath, shopSellerIdFromParam } from "./utils/shopUrl.js";
+import heroElectronicsImage from "./assets/images/hero-electronique-vinnht.png";
+import heroFashionImage from "./assets/images/hero-mode-vinnht.png";
+import heroHomeImage from "./assets/images/hero-maison-vinnht.png";
 import sousHeroImage from "./assets/images/sous-hero-vinnht-marketplace.png";
 import contactSupportImage from "./assets/images/contact-support-hands-vinnht.jpg";
 import "./styles/responsive-overrides.css";
@@ -871,7 +874,6 @@ function Footer() {
     ["tiktok", "TikTok", "https://www.tiktok.com"],
     ["whatsapp", "WhatsApp", "/contact"],
   ];
-
   return (
     <footer className="footer footer-premium">
       <div className="footer-main">
@@ -1070,59 +1072,127 @@ function Home() {
     });
   }, []);
 
+  const heroSlides = [
+    {
+      key: "electronique",
+      eyebrow: "Électronique",
+      title: "Trouvez les appareils qu'il vous faut auprès de boutiques vérifiées",
+      text: "Smartphones, accessoires, ordinateurs et bien plus dans un rayon pensé pour comparer plus vite sur VinnHT.",
+      cta: "Explorer l'électronique",
+      href: "/categories/electronique",
+      image: heroElectronicsImage,
+      imageAlt: "Univers électronique premium sur VinnHT",
+      trust: ["Comparaison plus rapide", "Boutiques vérifiées", "Paiement plus encadré"],
+      stats: [
+        { label: "+12 rayons", value: "Marché complet" },
+        { label: "Produits tech", value: "Sélection visible" },
+      ],
+    },
+    {
+      key: "mode",
+      eyebrow: "Mode",
+      title: "Découvrez la mode qui vous ressemble sur VinnHT",
+      text: "Vêtements, chaussures et accessoires visibles plus clairement pour acheter avec plus de confiance.",
+      cta: "Explorer la mode",
+      href: "/categories/mode",
+      image: heroFashionImage,
+      imageAlt: "Univers mode premium sur VinnHT",
+      trust: ["Styles plus visibles", "Boutiques vérifiées", "Achat plus rassurant"],
+      stats: [
+        { label: "Tendances", value: "Nouveautés mode" },
+        { label: "Accessoires", value: "Collections prêtes" },
+      ],
+    },
+    {
+      key: "maison-meubles",
+      eyebrow: "Maison & Meubles",
+      title: "Aménagez votre espace avec des articles choisis pour votre maison",
+      text: "Meubles, déco et essentiels du quotidien dans un univers plus inspirant et plus pratique.",
+      cta: "Explorer la maison",
+      href: "/categories/maison-meubles",
+      image: heroHomeImage,
+      imageAlt: "Univers maison et meubles premium sur VinnHT",
+      trust: ["Boutiques plus claires", "Livraison suivie", "Sélection inspirante"],
+      stats: [
+        { label: "Maison", value: "Univers premium" },
+        { label: "Meubles", value: "Ambiances prêtes" },
+      ],
+    },
+  ];
+
   return (
     <PublicLayout>
-      <section className="hero premium-bg">
-        <div className="hero-content">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <Badge tone="gold">
-              <Sparkles size={15} /> Startup marketplace premium
-            </Badge>
-            <h1>
-              Achetez, vendez et trouvez tout en Haïti avec <em>VinnHT</em>
-            </h1>
-            <div className="hero-trust-row">
-              <span><ShieldCheck /> Paiement sécurisé</span>
-              <span><Store /> Vendeurs vérifiés</span>
-              <span><Headphones /> Support local</span>
-            </div>
-            <div className="hero-actions">
-              <Button to="/categories">
-                Explorer les rayons <ArrowRight size={18} />
-              </Button>
-            </div>
-          </motion.div>
-        </div>
-        <motion.div
-          className="hero-visual-3d"
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.7, delay: 0.15 }}
+      <section className="hero premium-bg hero-slider-shell">
+        <Swiper
+          className="hero-swiper"
+          modules={[Autoplay, Pagination]}
+          autoplay={{ delay: 4200, disableOnInteraction: false }}
+          pagination={{ clickable: true }}
+          slidesPerView={1}
+          spaceBetween={0}
+          loop
         >
-          <div className="orb orb-one" />
-          <div className="orb orb-two" />
-          <div className="hero-orbit-animation" aria-hidden="true">
-            <span className="hero-orbit-ring" />
-            <ShoppingBag />
-          </div>
-          <div className="hero-card floating-a">
-            <b>+12 rayons</b>
-            <span>Marché complet</span>
-          </div>
-          <div className="hero-card floating-b">
-            <b>Livraison suivie</b>
-            <span>Commandes en temps réel</span>
-          </div>
-          <div className="hero-live-card">
-            <span>En direct sur VinnHT</span>
-            <b>{Number(stats.products || 0)} produit(s) disponibles</b>
-            <small>{Number(stats.sellers || 0)} boutique(s) validée(s)</small>
-          </div>
-        </motion.div>
+          {heroSlides.map((slide) => (
+            <SwiperSlide key={slide.key}>
+              <div className="hero-slide">
+                <div className="hero-content hero-slide-copy">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6 }}
+                  >
+                    <Badge tone="gold">
+                      <Sparkles size={15} /> {slide.eyebrow}
+                    </Badge>
+                    <h1>{slide.title}</h1>
+                    <p className="hero-slide-text">{slide.text}</p>
+                    <div className="hero-trust-row hero-trust-row-slider">
+                      {slide.trust.map((item) => (
+                        <span key={item}><ShieldCheck /> {item}</span>
+                      ))}
+                    </div>
+                    <div className="hero-actions">
+                      <Button to={slide.href}>
+                        {slide.cta} <ArrowRight size={18} />
+                      </Button>
+                      <Link className="hero-ghost-link" to="/categories">
+                        Tous les rayons
+                      </Link>
+                    </div>
+                    <div className="hero-slide-stats">
+                      {slide.stats.map((item) => (
+                        <div className="hero-slide-stat" key={item.label}>
+                          <b>{item.label}</b>
+                          <span>{item.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                </div>
+                <motion.div
+                  className="hero-visual-3d hero-slide-media"
+                  initial={{ opacity: 0, scale: 0.94 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.7, delay: 0.12 }}
+                >
+                  <div className="orb orb-one" />
+                  <div className="orb orb-two" />
+                  <div className="hero-slide-image-card">
+                    <img src={slide.image} alt={slide.imageAlt} loading="eager" decoding="async" />
+                  </div>
+                  <div className="hero-slide-chip hero-slide-chip-top">
+                    <b>{slide.stats[0].label}</b>
+                    <span>{slide.stats[0].value}</span>
+                  </div>
+                  <div className="hero-slide-chip hero-slide-chip-bottom">
+                    <b>{Number(stats.products || 0)} produits</b>
+                    <span>{Number(stats.sellers || 0)} boutiques validées</span>
+                  </div>
+                </motion.div>
+              </div>
+            </SwiperSlide>
+          ))}
+        </Swiper>
       </section>
       <AnimatedSection className="home-sous-hero">
         <motion.div
@@ -1463,11 +1533,17 @@ function Contact() {
     [Phone, "Téléphone", config.supportPhone || "À configurer", config.supportHours || "Assistance client", config.supportPhone ? `tel:${config.supportPhone}` : null],
     [MapPin, "Adresse", config.supportAddress || "Port-au-Prince, Haïti", config.supportHours || "Bureau opérationnel", null],
   ];
+  const contactChecklist = [
+    "Choisissez la bonne catégorie pour accélérer le traitement.",
+    "Ajoutez votre commande si la demande concerne un achat précis.",
+    "Décrivez le besoin en quelques phrases simples et directes.",
+  ];
+  const contactChannelsSummary = channels.filter(([, , value]) => value && value !== "À configurer").slice(0, 3);
 
   return (
     <PublicLayout>
       <section className="contact-hero premium-bg">
-        <div>
+        <div className="contact-hero-copy">
           <Badge tone="gold">Support VinnHT</Badge>
           <h1>Une équipe locale pour accompagner votre expérience.</h1>
           <p>
@@ -1505,12 +1581,19 @@ function Contact() {
       </section>
       <section className="section contact-grid">
         {channels.map(([Icon, title, value, note, href]) => (
-          <motion.article className="contact-card" whileHover={{ y: -8 }} key={title}>
-            <Icon />
+          <motion.article className="contact-card contact-channel-card" whileHover={{ y: -8 }} key={title}>
+            <div className="contact-card-top">
+              <span className="contact-card-icon"><Icon /></span>
+              <small>{href ? "Canal direct" : "Information"}</small>
+            </div>
             <h3>{title}</h3>
             <b>{value}</b>
             <p>{note}</p>
-            {href && <a href={href} target={href.startsWith("http") ? "_blank" : undefined}>Ouvrir <ArrowRight /></a>}
+            <div className="contact-card-bottom">
+              {href ? (
+                <a href={href} target={href.startsWith("http") ? "_blank" : undefined}>Ouvrir <ArrowRight /></a>
+              ) : null}
+            </div>
           </motion.article>
         ))}
       </section>
@@ -1519,6 +1602,31 @@ function Contact() {
           <Badge>Contact</Badge>
           <h2>Envoyez-nous un message.</h2>
           <p>Votre demande sera enregistrée directement dans le centre de support VinnHT.</p>
+          <div className="contact-copy-panel">
+            <div className="contact-copy-panel-head">
+              <span><FileSignature /></span>
+              <div>
+                <strong>Avant d'envoyer</strong>
+                <small>Quelques repères utiles pour gagner du temps</small>
+              </div>
+            </div>
+            <ul>
+              {contactChecklist.map((item) => (
+                <li key={item}><CheckCircle2 /> <span>{item}</span></li>
+              ))}
+            </ul>
+          </div>
+          <div className="contact-copy-channels">
+            {contactChannelsSummary.map(([Icon, title, value]) => (
+              <article key={title}>
+                <span><Icon /></span>
+                <div>
+                  <small>{title}</small>
+                  <strong>{value}</strong>
+                </div>
+              </article>
+            ))}
+          </div>
         </div>
         <form className="glass-form" onSubmit={submitContact}>
           {!user && <label>Nom complet<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Votre nom" /></label>}
@@ -1555,6 +1663,12 @@ function Contact() {
       {user && (
         <section className="section support-tracking-section">
           <SectionHead eyebrow="Suivi personnel" title="Mes demandes de support" />
+          <div className="support-tracking-intro">
+            <p>
+              Retrouvez ici vos dossiers, ouvrez la discussion liée à chaque demande et continuez l'échange
+              directement avec l'équipe VinnHT.
+            </p>
+          </div>
           <div className="support-request-grid">
             {requests.map((request) => (
               <article id={`support-${request.id}`} key={request.id}>
@@ -1628,6 +1742,15 @@ function Contact() {
             )}
           </div>
         ))}
+        {!visibleFaq.length && (
+          <div className="contact-faq-empty">
+            <Search />
+            <div>
+              <strong>Aucune réponse trouvée</strong>
+              <p>Essayez un autre mot-clé ou une autre catégorie.</p>
+            </div>
+          </div>
+        )}
       </section>
       <section className="map-section">
         <div><MapPin /><h2>VinnHT opère depuis Haïti</h2><p>{config.supportAddress || "Port-au-Prince, Haïti"} · {config.supportHours || "Lundi au samedi"}</p><a href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(config.supportAddress || "Port-au-Prince, Haiti")}`} target="_blank">Voir sur OpenStreetMap <ArrowRight /></a></div>
@@ -5385,6 +5508,9 @@ export default function App() {
     </Providers>
   );
 }
+
+
+
 
 
 

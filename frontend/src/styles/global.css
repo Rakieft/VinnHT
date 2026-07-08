@@ -8367,3 +8367,226 @@ th {
 
 
 
+
+.hero-slider-shell {
+  min-height: 0;
+  display: block;
+  padding: 52px max(5vw, 22px) 34px;
+}
+
+.hero-swiper {
+  overflow: visible;
+}
+
+.hero-swiper .swiper-pagination {
+  position: static;
+  margin-top: 18px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.hero-swiper .swiper-pagination-bullet {
+  width: 10px;
+  height: 10px;
+  background: rgba(37, 99, 235, 0.22);
+  opacity: 1;
+}
+
+.hero-swiper .swiper-pagination-bullet-active {
+  width: 28px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2563eb, #f59e0b);
+}
+
+.hero-slide {
+  min-height: 720px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.96fr);
+  gap: clamp(28px, 5vw, 72px);
+  align-items: center;
+}
+
+.hero-slide-copy {
+  align-self: center;
+}
+
+.hero-slide-text {
+  margin: 0;
+}
+
+.hero-trust-row-slider {
+  margin-top: 22px;
+}
+
+.hero-ghost-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: 0 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--navy);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(16px);
+  font-weight: 900;
+}
+
+.hero-slide-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 24px;
+  max-width: 620px;
+}
+
+.hero-slide-stat {
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(16px);
+}
+
+.hero-slide-stat b,
+.hero-slide-stat span {
+  display: block;
+}
+
+.hero-slide-stat b {
+  color: var(--navy);
+  font-size: 15px;
+}
+
+.hero-slide-stat span {
+  margin-top: 4px;
+  color: var(--gray);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.hero-slide-media {
+  position: relative;
+  min-height: 540px;
+}
+
+.hero-slide-image-card {
+  position: relative;
+  width: min(540px, 100%);
+  margin-inline: auto;
+  padding: 14px;
+  border-radius: 34px;
+  background: rgba(255, 255, 255, 0.54);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 36px 86px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(24px);
+}
+
+.hero-slide-image-card img {
+  width: 100%;
+  height: clamp(360px, 38vw, 520px);
+  display: block;
+  object-fit: cover;
+  border-radius: 24px;
+}
+
+.hero-slide-chip {
+  position: absolute;
+  z-index: 2;
+  padding: 15px 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(16px);
+}
+
+.hero-slide-chip b,
+.hero-slide-chip span {
+  display: block;
+}
+
+.hero-slide-chip b {
+  color: var(--navy);
+  font-size: 14px;
+}
+
+.hero-slide-chip span {
+  margin-top: 4px;
+  color: var(--gray);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.hero-slide-chip-top {
+  top: 52px;
+  right: 10px;
+}
+
+.hero-slide-chip-bottom {
+  left: 8px;
+  bottom: 34px;
+}
+
+@media (max-width: 900px) {
+  .hero-slider-shell {
+    padding: 34px 17px 24px;
+  }
+
+  .hero-slide {
+    min-height: auto;
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .hero-ghost-link,
+  .hero-actions .button {
+    min-height: 46px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  .hero-slide-stats {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .hero-slide-media {
+    min-height: 0;
+  }
+
+  .hero-slide-image-card {
+    padding: 10px;
+    border-radius: 24px;
+  }
+
+  .hero-slide-image-card img {
+    height: clamp(240px, 58vw, 340px);
+    border-radius: 18px;
+  }
+
+  .hero-slide-chip {
+    padding: 12px 14px;
+    border-radius: 18px;
+  }
+}
+
+@media (max-width: 620px) {
+  .hero-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-slide-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-slide-chip-top,
+  .hero-slide-chip-bottom {
+    position: static;
+    margin-top: 12px;
+  }
+}
