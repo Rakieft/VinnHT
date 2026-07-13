@@ -102,7 +102,7 @@ const validate = (req, res, next) => {
 const asyncRoute = (handler) => (req, res, next) =>
   Promise.resolve(handler(req, res, next)).catch(next);
 
-const SELLER_TERMS_VERSION = "2026-06-28-v5";
+const SELLER_TERMS_VERSION = "2026-07-10-v6";
 const DELIVERY_FEE_PER_SELLER = Number(
   process.env.DELIVERY_FEE_PER_SELLER || 500,
 );
@@ -131,6 +131,10 @@ const SELLER_TERMS = [
   "J’accepte que VinnHT vérifie mon profil avant l’approbation de mon espace vendeur.",
   "J’accepte que ma photo de profil soit obligatoire et visible par les acheteurs.",
   "J’accepte que mon nom, ma ville et le nom de ma boutique soient visibles publiquement sur VinnHT.",
+  "Je confirme que le numéro MonCash déclaré est mon vrai numéro ou celui officiellement utilisé par ma boutique.",
+  "Je confirme que le nom du titulaire MonCash déclaré correspond exactement au nom réel affiché sur ce compte.",
+  "Je comprends qu’une erreur, un faux nom ou un faux numéro MonCash peut bloquer ma demande, mes paiements ou entraîner la suspension de mon espace vendeur.",
+  "J’accepte qu’une commission VinnHT de 4% soit retenue sur mes revenus validés par la plateforme.",
   "Je m’engage à vendre uniquement des produits légaux, authentiques et conformes aux règles de VinnHT.",
   "Je m’engage à publier des photos réelles, des prix exacts et des descriptions honnêtes.",
   "Je m’engage à maintenir mes stocks à jour et à préparer les commandes dans les délais annoncés.",
@@ -2595,6 +2599,19 @@ app.post(
       [categoryId],
     );
     if (!category) return res.status(422).json({ message: "Rayon invalide." });
+    const [[driverSummary]] = await pool.query(
+      `SELECT COUNT(*) total
+       FROM seller_delivery_drivers sdd
+       JOIN users u ON u.id=sdd.delivery_user_id
+       WHERE sdd.seller_id=? AND sdd.status='active' AND u.status='active'`,
+      [req.user.id],
+    );
+    if (!Number(driverSummary?.total || 0)) {
+      return res.status(422).json({
+        message:
+          "Ajoutez d'abord au moins un livreur actif a votre boutique avant de publier un produit sur VinnHT.",
+      });
+    }
     const attributes = sanitizeProductAttributes(req.body.attributes, category.slug);
     const packOptions = sanitizeProductPackOptions(req.body.packOptions);
     const uploadedImages = await storeImages(req.files, "products");
@@ -8536,12 +8553,30 @@ app.get(
        JOIN users client ON client.id=c.client_id
        JOIN users seller ON seller.id=c.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=c.seller_id
-       WHERE c.client_id=? OR c.seller_id=?
+       WHERE (
+         c.client_id=? OR c.seller_id=?
          OR (?=1 AND EXISTS(
            SELECT 1 FROM user_roles support_role
            WHERE support_role.user_id=c.seller_id
              AND support_role.role IN ('support','admin')
          ))
+       )
+       AND (
+         c.client_id<>?
+         OR seller.role NOT IN ('admin','support')
+         OR c.id=(
+           SELECT c2.id
+           FROM conversations c2
+           JOIN users seller2 ON seller2.id=c2.seller_id
+           WHERE c2.client_id=? AND seller2.role IN ('admin','support')
+           ORDER BY COALESCE(
+             (SELECT created_at FROM messages WHERE conversation_id=c2.id ORDER BY created_at DESC LIMIT 1),
+             c2.updated_at
+           ) DESC,
+           c2.id DESC
+           LIMIT 1
+         )
+       )
        ORDER BY COALESCE(last_message_at,c.updated_at) DESC`,
       [
         req.user.id,
@@ -8552,6 +8587,8 @@ app.get(
         req.user.id,
         req.user.id,
         sharedSupportAccess ? 1 : 0,
+        req.user.id,
+        req.user.id,
       ],
     );
     res.json(rows);
@@ -8594,6 +8631,22 @@ app.post(
        LIMIT 1`,
     );
     if (!support) return res.status(404).json({ message: "Support VinnHT indisponible." });
+    const [[existingConversation]] = await pool.query(
+      `SELECT c.id
+       FROM conversations c
+       JOIN users seller ON seller.id=c.seller_id
+       WHERE c.client_id=? AND seller.role IN ('support','admin')
+       ORDER BY COALESCE(
+         (SELECT created_at FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1),
+         c.updated_at
+       ) DESC,
+       c.id DESC
+       LIMIT 1`,
+      [req.user.id],
+    );
+    if (existingConversation) {
+      return res.status(201).json(existingConversation);
+    }
     await pool.query(
       "INSERT IGNORE INTO conversations (client_id,seller_id) VALUES (?,?)",
       [req.user.id, support.id],
@@ -8933,3 +8986,6 @@ server.listen(port, () => {
   );
   sundayDeliveryReportTimer.unref();
 });
+
+
+

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle2,
@@ -14,12 +14,16 @@ import {
 import { apiOrigin } from "../../config/runtime.js";
 import "../../styles/seller-flow.css";
 
-const SELLER_TERMS_VERSION = "2026-06-28-v5";
+const SELLER_TERMS_VERSION = "2026-07-10-v6";
 const terms = [
   "Je certifie que toutes les informations fournies sont exactes et à jour.",
   "J’accepte que VinnHT vérifie mon profil avant l’approbation de mon espace vendeur.",
   "J’accepte que ma photo de profil soit obligatoire et visible par les acheteurs.",
   "J’accepte que mon nom, ma ville et le nom de ma boutique soient visibles publiquement sur VinnHT.",
+  "Je confirme que le numéro MonCash déclaré est mon vrai numéro ou celui officiellement utilisé par ma boutique.",
+  "Je confirme que le nom du titulaire MonCash déclaré correspond exactement au nom réel affiché sur ce compte.",
+  "Je comprends qu’une erreur, un faux nom ou un faux numéro MonCash peut bloquer ma demande, mes paiements ou entraîner la suspension de mon espace vendeur.",
+  "J’accepte qu’une commission VinnHT de 4% soit retenue sur mes revenus validés par la plateforme.",
   "Je m’engage à vendre uniquement des produits légaux, authentiques et conformes aux règles de VinnHT.",
   "Je m’engage à publier des photos réelles, des prix exacts et des descriptions honnêtes.",
   "Je m’engage à maintenir mes stocks à jour et à préparer les commandes dans les délais annoncés.",
@@ -448,9 +452,19 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
             errors={errors}
             onChange={setField}
           />
+          <div className="seller-vendor-principles full">
+            <article>
+              <b>MonCash réel obligatoire</b>
+              <p>Le numéro MonCash et le nom du titulaire doivent être vrais, exacts et utilisables pour recevoir vos paiements.</p>
+            </article>
+            <article>
+              <b>Commission VinnHT · 4%</b>
+              <p>VinnHT retiendra une commission de 4% sur les revenus validés avant tout transfert vers votre compte MonCash.</p>
+            </article>
+          </div>
           <p className="seller-moncash-help full">
             Vérifiez attentivement ces informations. VinnHT les utilisera pour transférer vos fonds
-            après confirmation de la réception par le client.
+            après confirmation de la réception par le client. Un faux nom ou un faux numéro MonCash peut bloquer votre demande ou suspendre votre espace vendeur.
           </p>
         </FormSection>
 
@@ -484,6 +498,16 @@ export default function BecomeSellerPage({ api, user, updateUser }) {
                 Votre formulaire est prêt. Lisez et acceptez toutes les conditions avant son envoi
                 définitif. Version {SELLER_TERMS_VERSION}.
               </p>
+              <div className="seller-terms-alert">
+                <article>
+                  <b>Compte MonCash vérifiable</b>
+                  <span>Le numéro et le nom déclarés doivent correspondre à un vrai compte pouvant recevoir vos transferts.</span>
+                </article>
+                <article>
+                  <b>Commission plateforme</b>
+                  <span>VinnHT appliquera une commission fixe de 4% sur vos revenus validés.</span>
+                </article>
+              </div>
               <div className="terms-checklist">
                 {terms.map((term, index) => (
                   <label key={term}>
@@ -572,3 +596,4 @@ function FileField({ label, field, errors, previews, onChange, optional = false,
     </label>
   );
 }
+

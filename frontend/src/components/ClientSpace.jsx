@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import CountUp from "react-countup";
 import { motion, useReducedMotion } from "framer-motion";
 import {
@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronRight,
+  ChevronDown,
   CircleUserRound,
   Clock3,
   CreditCard,
@@ -1562,8 +1563,12 @@ export function ClientCheckoutContent({
         opening_hours: item.seller_opening_hours || "",
         has_delivery_driver: Boolean(Number(item.seller_has_delivery_driver || 0)),
         amount: 0,
+        line_count: 0,
+        unit_count: 0,
       };
       current.amount += Number(item.price || 0) * Number(item.quantity || 0);
+      current.line_count += 1;
+      current.unit_count += Number(item.quantity || 0) * Number(item.pack_size || 1);
       if (!current.moncash_number && item.seller_moncash) current.moncash_number = item.seller_moncash;
       rows.set(sellerKey, current);
     }
@@ -1616,6 +1621,8 @@ export function ClientCheckoutContent({
     });
   }, [sellerInstructions]);
 
+  const [expandedSellerId, setExpandedSellerId] = useState(null);
+
   const selectSellerMethod = (sellerId, method) => {
     setForm((current) => ({
       ...current,
@@ -1625,6 +1632,18 @@ export function ClientCheckoutContent({
       },
     }));
   };
+
+  useEffect(() => {
+    if (!sellerInstructions.length) {
+      setExpandedSellerId(null);
+      return;
+    }
+    setExpandedSellerId((current) =>
+      sellerInstructions.some((seller) => Number(seller.seller_id) === Number(current))
+        ? current
+        : sellerInstructions[0].seller_id,
+    );
+  }, [sellerInstructions]);
 
   if (result) {
     const proofSent = Boolean(result.proofUrl || result.reference);
@@ -1767,9 +1786,27 @@ export function ClientCheckoutContent({
       <section className="checkout-fulfillment-choice">
         <header>
           <span>Étape 1 · Réception</span>
-          <h2>Comment voulez-vous recevoir vos articles ?</h2>
-          <p>Faites un choix pour chaque boutique. Vous pouvez combiner retrait et livraison.</p>
+          <h2>Choisissez comment chaque boutique vous remettra vos produits.</h2>
+          <p>
+            Sélectionnez l’option la plus simple pour vous. Vous pouvez mélanger retrait en boutique et livraison dans une seule commande.
+          </p>
         </header>
+        <div className="checkout-fulfillment-guides" aria-hidden="true">
+          <article className="pickup-guide">
+            <span><Store /></span>
+            <div>
+              <b>Retrait en boutique</b>
+              <small>Vous passez récupérer vos articles à l’adresse indiquée par la boutique. Aucun frais ajouté.</small>
+            </div>
+          </article>
+          <article className="delivery-guide">
+            <span><Truck /></span>
+            <div>
+              <b>Livraison locale</b>
+              <small>Le livreur de la boutique vous apporte la commande. 500 HTG sont ajoutés par boutique livrée.</small>
+            </div>
+          </article>
+        </div>
         <div className="checkout-selection-summary" role="status">
           <span className="pickup">
             <Store />
@@ -1782,60 +1819,77 @@ export function ClientCheckoutContent({
             livraison{deliverySellers.length > 1 ? "s" : ""}
           </span>
           <strong>
-            Frais : {deliveryFee.toLocaleString("fr-HT")} HTG
+            Frais de livraison : {deliveryFee.toLocaleString("fr-HT")} HTG
           </strong>
         </div>
         <div className="checkout-shop-fulfillment-list">
           {sellerInstructions.map((seller) => {
             const selectedMethod = getSellerMethod(seller);
+            const isExpanded = Number(expandedSellerId) === Number(seller.seller_id);
             return (
-              <article className="checkout-shop-fulfillment" key={seller.seller_id}>
-                <header>
+              <article className={`checkout-shop-fulfillment ${isExpanded ? "expanded" : "collapsed"}`} key={seller.seller_id}>
+                <button
+                  type="button"
+                  className="checkout-shop-fulfillment-toggle"
+                  onClick={() =>
+                    setExpandedSellerId((current) =>
+                      Number(current) === Number(seller.seller_id) ? null : seller.seller_id,
+                    )
+                  }
+                  aria-expanded={isExpanded}
+                >
                   <span><Store /></span>
                   <div>
                     <b>{seller.seller_name}</b>
-                    <small>{seller.amount.toLocaleString("fr-HT")} HTG d’articles</small>
+                    <small>
+                      {seller.amount.toLocaleString("fr-HT")} HTG · {seller.line_count} article{seller.line_count > 1 ? "s" : ""} · {seller.unit_count} unité{seller.unit_count > 1 ? "s" : ""}
+                    </small>
                   </div>
                   <em className={`checkout-shop-choice-status ${selectedMethod}`}>
-                    {selectedMethod === "delivery" ? "Livraison · +500 HTG" : "Retrait · Gratuit"}
+                    {selectedMethod === "delivery" ? "Choix actuel · Livraison" : "Choix actuel · Retrait"}
                   </em>
-                </header>
-                <div>
-                  <button
-                    type="button"
-                    className={`pickup-option ${selectedMethod === "pickup" ? "active" : ""}`}
-                    disabled={!seller.pickup_address}
-                    onClick={() => selectSellerMethod(seller.seller_id, "pickup")}
-                  >
-                    <Store />
-                    <span>
-                      <b>Retrait</b>
-                      <small>
-                        {seller.pickup_address ? "Gratuit en boutique" : "Adresse indisponible"}
-                      </small>
-                    </span>
-                    {selectedMethod === "pickup" && <CheckCircle2 />}
-                  </button>
-                  <button
-                    type="button"
-                    className={`delivery-option ${selectedMethod === "delivery" ? "active" : ""}`}
-                    disabled={!seller.delivery_zones || !seller.has_delivery_driver}
-                    onClick={() => selectSellerMethod(seller.seller_id, "delivery")}
-                  >
-                    <Truck />
-                    <span>
-                      <b>Livraison</b>
-                      <small>
-                        {!seller.delivery_zones
-                          ? "Zone indisponible"
-                          : !seller.has_delivery_driver
-                            ? "Aucun livreur"
-                            : "+ 500 HTG"}
-                      </small>
-                    </span>
-                    {selectedMethod === "delivery" && <CheckCircle2 />}
-                  </button>
-                </div>
+                  <i className={`checkout-shop-toggle-icon ${isExpanded ? "open" : ""}`}>
+                    <ChevronDown />
+                  </i>
+                </button>
+                {isExpanded && (
+                  <div className="checkout-shop-fulfillment-options">
+                    <button
+                      type="button"
+                      className={`pickup-option ${selectedMethod === "pickup" ? "active" : ""}`}
+                      disabled={!seller.pickup_address}
+                      onClick={() => selectSellerMethod(seller.seller_id, "pickup")}
+                    >
+                      <Store />
+                      <span>
+                        <b>Retrait en boutique</b>
+                        <small>
+                          {seller.pickup_address ? "Gratuit · vous passez récupérer" : "Adresse de retrait indisponible"}
+                        </small>
+                      </span>
+                      {selectedMethod === "pickup" && <CheckCircle2 />}
+                    </button>
+                    <button
+                      type="button"
+                      className={`delivery-option ${selectedMethod === "delivery" ? "active" : ""}`}
+                      disabled={!seller.delivery_zones || !seller.has_delivery_driver}
+                      onClick={() => selectSellerMethod(seller.seller_id, "delivery")}
+                    >
+                      <Truck />
+                      <span>
+                        <b>Livraison à votre adresse</b>
+                        <small>
+                          {!seller.delivery_zones
+                            ? "Zone de livraison indisponible"
+                            : !seller.has_delivery_driver
+                              ? "Aucun livreur actif"
+                              : "+ 500 HTG · livreur de la boutique"}
+                        </small>
+                      </span>
+                      {selectedMethod === "delivery" && <CheckCircle2 />}
+                    </button>
+                  </div>
+                )}
               </article>
             );
           })}
@@ -1899,8 +1953,8 @@ export function ClientCheckoutContent({
           </label>
           <div className="checkout-reception-plan">
             <header>
-              <b>Votre choix par boutique</b>
-              <small>Tout est regroupé ici.</small>
+              <b>Récapitulatif de réception</b>
+              <small>Vérifiez rapidement ce que vous récupérez et ce qui sera livré.</small>
             </header>
             {sellerInstructions.map((instruction) => {
               const method = getSellerMethod(instruction);
@@ -1913,12 +1967,12 @@ export function ClientCheckoutContent({
                   <div>
                     <b>{instruction.seller_name}</b>
                     <strong>
-                      {method === "delivery" ? "Livraison · 500 HTG" : "Retrait gratuit"}
+                      {method === "delivery" ? "La boutique vous livre · 500 HTG" : "Vous passez récupérer · Gratuit"}
                     </strong>
                     <small>
                       {method === "delivery"
-                        ? `Zone : ${instruction.delivery_zones || "non renseignée"}`
-                        : instruction.pickup_address || "Adresse de retrait non renseignée"}
+                        ? `Zone couverte : ${instruction.delivery_zones || "non renseignée"}`
+                        : `Adresse de retrait : ${instruction.pickup_address || "non renseignée"}`}
                     </small>
                     {method === "pickup" && instruction.opening_hours && (
                       <small>{instruction.opening_hours}</small>
@@ -2329,3 +2383,6 @@ function ClientPageFrame({ eyebrow, title, text, children }) {
     </div>
   );
 }
+
+
+

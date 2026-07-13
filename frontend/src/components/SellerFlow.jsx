@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import {
@@ -740,6 +740,8 @@ export function SellerProductsContent({ api }) {
 
 export function AddSellerProductContent({ api, embedded = false, onCreated }) {
   const [categories, setCategories] = useState([]);
+  const [deliveryDrivers, setDeliveryDrivers] = useState([]);
+  const [driversReady, setDriversReady] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [form, setForm] = useState({
@@ -759,12 +761,27 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
   const [previews, setPreviews] = useState([]);
 
   useEffect(() => {
-    api.get("/categories").then(({ data }) => setCategories(data));
-  }, []);
+    Promise.all([api.get("/categories"), api.get("/seller/delivery-drivers")])
+      .then(([categoriesResponse, driversResponse]) => {
+        setCategories(Array.isArray(categoriesResponse.data) ? categoriesResponse.data : []);
+        const drivers = Array.isArray(driversResponse.data) ? driversResponse.data : [];
+        setDeliveryDrivers(drivers);
+        setDriversReady(drivers.some((driver) => driver.status === "active"));
+      })
+      .catch(() => {
+        setCategories([]);
+        setDeliveryDrivers([]);
+        setDriversReady(false);
+      });
+  }, [api]);
 
   const submit = async (event) => {
     event.preventDefault();
     setError("");
+    if (!driversReady) {
+      setError("Ajoutez d'abord un livreur actif a votre boutique avant de publier un produit.");
+      return;
+    }
     try {
       const data = new FormData();
       Object.entries(form).forEach(([key, value]) => data.append(key, value));
@@ -796,6 +813,7 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
       setPackOptions([]);
       setImages([]);
       setPreviews([]);
+      setError("");
       onCreated?.();
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Impossible d'ajouter le produit.");
@@ -816,7 +834,35 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
     <>
       {message && <div className="flow-success">{message}</div>}
       {error && <div className="flow-error">{error}</div>}
-      <form className="seller-product-studio" onSubmit={submit}>
+      {!driversReady && (
+        <section className="seller-publication-lock">
+          <div className="seller-publication-lock-copy">
+            <span>
+              <Truck /> Publication verrouillee
+            </span>
+            <h3>Ajoutez d'abord un livreur a votre boutique.</h3>
+            <p>
+              Sur VinnHT, une boutique doit disposer d'au moins un livreur actif avant de mettre des produits en ligne.
+              Cela garantit qu'une commande pourra reellement etre traitee.
+            </p>
+            <div>
+              <Link className="seller-lock-action primary" to="/seller/orders">
+                Ajouter un livreur
+              </Link>
+              <small>
+                {deliveryDrivers.length
+                  ? "Aucun livreur actif n'est disponible pour le moment."
+                  : "Aucun livreur n'est encore enregistre sur cette boutique."}
+              </small>
+            </div>
+          </div>
+          <div className="seller-publication-lock-visual">
+            <b>0</b>
+            <span>livreur actif</span>
+          </div>
+        </section>
+      )}
+      <form className={`seller-product-studio ${!driversReady ? "is-locked" : ""}`} onSubmit={submit}>
         <div className="seller-product-studio-main">
           <header className="seller-product-studio-heading">
             <span>
@@ -1055,8 +1101,8 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
             <p>
               <ShieldCheck /> Vous pourrez modifier ou desactiver ce produit a tout moment.
             </p>
-            <button>
-              <Plus /> Publier le produit
+            <button disabled={!driversReady}>
+              <Plus /> {driversReady ? "Publier le produit" : "Ajoutez un livreur pour publier"}
             </button>
           </footer>
         </div>
@@ -1177,6 +1223,8 @@ function ProductAttributeField({ field, value, onChange }) {
 
 function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
   const [categories, setCategories] = useState([]);
+  const [deliveryDrivers, setDeliveryDrivers] = useState([]);
+  const [driversReady, setDriversReady] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [form, setForm] = useState({
@@ -1192,12 +1240,27 @@ function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
   const [previews, setPreviews] = useState([]);
 
   useEffect(() => {
-    api.get("/categories").then(({ data }) => setCategories(data));
-  }, []);
+    Promise.all([api.get("/categories"), api.get("/seller/delivery-drivers")])
+      .then(([categoriesResponse, driversResponse]) => {
+        setCategories(Array.isArray(categoriesResponse.data) ? categoriesResponse.data : []);
+        const drivers = Array.isArray(driversResponse.data) ? driversResponse.data : [];
+        setDeliveryDrivers(drivers);
+        setDriversReady(drivers.some((driver) => driver.status === "active"));
+      })
+      .catch(() => {
+        setCategories([]);
+        setDeliveryDrivers([]);
+        setDriversReady(false);
+      });
+  }, [api]);
 
   const submit = async (event) => {
     event.preventDefault();
     setError("");
+    if (!driversReady) {
+      setError("Ajoutez d'abord un livreur actif a votre boutique avant de publier un produit.");
+      return;
+    }
     try {
       const data = new FormData();
       Object.entries(form).forEach(([key, value]) => data.append(key, value));
@@ -2966,6 +3029,10 @@ export function ClientSellerRequestContent({ api }) {
   const submit = async (event) => {
     event.preventDefault();
     setError("");
+    if (!driversReady) {
+      setError("Ajoutez d'abord un livreur actif a votre boutique avant de publier un produit.");
+      return;
+    }
     try {
       await api.post("/seller/requests", {
         businessName: form.businessName,
@@ -3053,3 +3120,4 @@ function SellerPageHeader({ eyebrow, title, text, children }) {
     </div>
   );
 }
+
