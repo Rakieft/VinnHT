@@ -78,10 +78,10 @@ import {
   getTaxonomyTypeLabel,
 } from "./config/marketplaceTaxonomy.js";
 import { shopPublicPath, shopSellerIdFromParam } from "./utils/shopUrl.js";
-import heroElectronicsImage from "./assets/images/hero-electronique-vinnht.png";
-import heroFashionImage from "./assets/images/hero-mode-vinnht.png";
-import heroHomeImage from "./assets/images/hero-maison-vinnht.png";
-import sousHeroImage from "./assets/images/sous-hero-vinnht-marketplace.png";
+import heroElectronicsImage from "./assets/images/hero-electronique-vinnht.jpg";
+import heroFashionImage from "./assets/images/hero-mode-vinnht.jpg";
+import heroHomeImage from "./assets/images/hero-maison-vinnht.jpg";
+import sousHeroImage from "./assets/images/sous-hero-vinnht-annonce.jpg";
 import contactSupportImage from "./assets/images/contact-support-hands-vinnht.jpg";
 import "./styles/responsive-overrides.css";
 import "./styles/auth-search.css";
@@ -1134,7 +1134,10 @@ function Home() {
         >
           {heroSlides.map((slide) => (
             <SwiperSlide key={slide.key}>
-              <div className="hero-slide">
+              <div
+                className="hero-slide"
+                style={{ "--hero-slide-image": `url(${slide.image})` }}
+              >
                 <div className="hero-content hero-slide-copy">
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -1152,8 +1155,13 @@ function Home() {
                       ))}
                     </div>
                     <div className="hero-actions">
-                      <Button to={slide.href}>
-                        {slide.cta} <ArrowRight size={18} />
+                      <Button to={slide.href} className="hero-mobile-explore-button">
+                        <span className="hero-cta-desktop">
+                          {slide.cta} <ArrowRight size={18} />
+                        </span>
+                        <span className="hero-cta-mobile">
+                          Explorer <ArrowRight size={18} />
+                        </span>
                       </Button>
                       <Link className="hero-ghost-link" to="/categories">
                         Tous les rayons
@@ -1177,9 +1185,6 @@ function Home() {
                 >
                   <div className="orb orb-one" />
                   <div className="orb orb-two" />
-                  <div className="hero-slide-image-card">
-                    <img src={slide.image} alt={slide.imageAlt} loading="eager" decoding="async" />
-                  </div>
                   <div className="hero-slide-chip hero-slide-chip-top">
                     <b>{slide.stats[0].label}</b>
                     <span>{slide.stats[0].value}</span>
@@ -1202,7 +1207,7 @@ function Home() {
         >
           <img
             src={sousHeroImage}
-            alt="Jeune cliente VinnHT présentant les rayons du marché numérique d'Haïti"
+            alt="Annonce VinnHT avec un client tenant un mégaphone pour promouvoir les achats en Haïti"
             loading="lazy"
             decoding="async"
           />
@@ -1261,7 +1266,7 @@ function Home() {
         {[
           [ShieldCheck, "Vendeurs vérifiés", "Des boutiques mieux présentées et plus fiables."],
           [Truck, "Livraison structurée", "Les livreurs peuvent suivre leurs missions."],
-          [Wallet, "Payouts vendeur", "Une base claire pour payer chaque vendeur."],
+          [Wallet, "Paiements protégés", "Les fonds restent sécurisés jusqu’à la confirmation de réception."],
           [BarChart3, "Pilotage complet", "Managers et admins gardent la visibilité."],
         ].map(([Icon, t, d]) => (
           <div className="why-card" key={t}>
@@ -1415,28 +1420,38 @@ function Contact() {
   const [faqCategory, setFaqCategory] = useState("all");
   const faq = [
     [
-      "Comment devenir vendeur ",
-      "Connectez-vous à votre espace client, ouvrez Devenir vendeur puis envoyez votre dossier. Un superviseur VinnHT vérifiera ensuite votre demande.",
+      "Comment devenir vendeur ?",
+      "Connectez-vous à votre espace client, ouvrez Devenir vendeur puis envoyez votre dossier complet. L’équipe VinnHT vérifie ensuite votre profil, votre boutique, vos coordonnées MonCash et vos informations d’activité avant validation.",
       "seller",
     ],
     [
-      "Comment suivre une commande ",
-      "Ouvrez Mes commandes depuis votre espace client pour consulter le paiement, la préparation et la livraison.",
+      "Comment suivre une commande ?",
+      "Ouvrez Mes commandes depuis votre espace client pour suivre le paiement, la validation, la préparation, l’assignation du livreur et la remise finale.",
       "order",
     ],
     [
-      "Comment fonctionne le paiement ",
-      "Le client paie le compte MonCash VinnHT. Les fonds restent protégés jusqu’à la confirmation de réception.",
+      "Comment fonctionne le paiement protégé VinnHT ?",
+      "Le client paie uniquement le compte MonCash VinnHT affiché au checkout. Les fonds restent protégés par VinnHT et ne sont débloqués pour le vendeur qu’après confirmation de réception sur le compte client.",
       "payment",
     ],
     [
-      "Comment contacter directement le support ",
+      "Puis-je choisir entre retrait et livraison ?",
+      "Oui. Selon les options activées par chaque boutique, vous pouvez choisir le retrait en boutique ou la livraison à votre adresse. Le checkout affiche clairement l’option disponible pour chaque produit ou groupe de produits.",
+      "delivery",
+    ],
+    [
+      "Que faire si un vendeur me demande d’envoyer l’argent sur son compte personnel ?",
+      "Refusez immédiatement et signalez la situation au support VinnHT. Les paiements protégés passent uniquement par les instructions officielles affichées sur VinnHT.",
+      "payment",
+    ],
+    [
+      "Comment contacter directement le support ?",
       "Utilisez ce formulaire ou ouvrez une conversation support depuis votre espace client.",
       "general",
     ],
     [
-      "Comment signaler un problème de livraison ",
-      "Choisissez Livraison comme sujet et associez la commande concernée pour accélérer le traitement.",
+      "Comment signaler un problème de livraison ou de retrait ?",
+      "Choisissez le sujet Livraison, Retrait ou Commande, puis associez la commande concernée. Ajoutez un message clair pour aider l’équipe support à traiter plus vite votre dossier.",
       "delivery",
     ],
   ];
@@ -1787,7 +1802,7 @@ function About() {
   const journey = [
     ["01", "Découvrir", "Explorer les rayons et trouver des produits selon ses besoins et son département."],
     ["02", "Échanger", "Contacter directement une boutique dans VinnHT ou par WhatsApp avant l’achat."],
-    ["03", "Commander", "Payer le vendeur, transmettre la preuve et suivre la préparation de la commande."],
+    ["03", "Commander", "Payer VinnHT, transmettre la preuve puis suivre la validation et la préparation."],
     ["04", "Recevoir", "Identifier le livreur, suivre la livraison puis confirmer la réception en toute clarté."],
   ];
 
@@ -3154,6 +3169,7 @@ function AuthPage({ register = false }) {
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showClientTerms, setShowClientTerms] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -3175,6 +3191,7 @@ function AuthPage({ register = false }) {
     }
 
     if (register && !form.acceptedTerms) {
+      setShowClientTerms(true);
       setError("Vous devez accepter les conditions d’utilisation.");
       return;
     }
@@ -3365,15 +3382,6 @@ function AuthPage({ register = false }) {
                     />
                   </motion.label>
                 )}
-
-                <div className="client-terms-card">
-                  <span>5 règles simples pour acheter en sécurité</span>
-                  <ol>
-                    {clientRegistrationRules.map((rule) => (
-                      <li key={rule}>{rule}</li>
-                    ))}
-                  </ol>
-                </div>
               </>
             )}
             <label className="line-field">
@@ -3424,7 +3432,17 @@ function AuthPage({ register = false }) {
                     checked={form.acceptedTerms}
                     onChange={(e) => setForm({ ...form, acceptedTerms: e.target.checked })}
                   />
-                  <span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setShowClientTerms(true)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setShowClientTerms(true);
+                      }
+                    }}
+                  >
                     J'ai lu et j'accepte ces 5 conditions d'utilisation client.
                   </span>
                 </label>
@@ -3452,6 +3470,65 @@ function AuthPage({ register = false }) {
             </p>
           </form>
         </motion.div>
+        {register && showClientTerms && (
+          <div
+            className="client-terms-modal-backdrop"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setShowClientTerms(false);
+            }}
+          >
+            <motion.section
+              className="client-terms-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="client-terms-title"
+              initial={{ opacity: 0, y: 14, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.22 }}
+            >
+              <header>
+                <div>
+                  <small>Avant de créer votre compte</small>
+                  <h2 id="client-terms-title">5 règles simples pour acheter en sécurité</h2>
+                </div>
+                <button
+                  type="button"
+                  className="client-terms-close"
+                  onClick={() => setShowClientTerms(false)}
+                  aria-label="Fermer"
+                >
+                  <X />
+                </button>
+              </header>
+              <ol>
+                {clientRegistrationRules.map((rule) => (
+                  <li key={rule}>{rule}</li>
+                ))}
+              </ol>
+              <footer>
+                <button
+                  type="button"
+                  className="client-terms-secondary"
+                  onClick={() => setShowClientTerms(false)}
+                >
+                  Fermer
+                </button>
+                <button
+                  type="button"
+                  className="client-terms-primary"
+                  onClick={() => {
+                    setForm((current) => ({ ...current, acceptedTerms: true }));
+                    setShowClientTerms(false);
+                    setError("");
+                  }}
+                >
+                  J'accepte les 5 conditions
+                </button>
+              </footer>
+            </motion.section>
+          </div>
+        )}
       </section>
     </PublicLayout>
   );
@@ -3518,7 +3595,7 @@ const menus = {
     ["Vue d’ensemble", "/seller", LayoutDashboard],
     ["Mes produits", "/seller/products", ShoppingBag],
     ["Commandes", "/seller/orders", Package],
-    ["Ventes & wallet", "/seller/sales", Wallet],
+    ["Wallet & paiements", "/seller/payouts", Wallet],
     ["Ma boutique", "/seller/shop", Store],
     ["Messages", "/seller/messages", MessageCircle],
     ["Paramètres", "/seller/settings", Settings],
@@ -4138,7 +4215,7 @@ function LegacyBecomeSeller() {
               <div className="seller-request-status">
                 <small>Statut de la demande</small>
                 <strong>En attente</strong>
-                <p>Votre dossier sera examiné par un superviseur VinnHT.</p>
+                <p>Votre dossier sera examiné par l’équipe VinnHT.</p>
               </div>
             </article>
 
@@ -4780,7 +4857,7 @@ function AdminProductsPage() {
 
 function AdminContactRequestsPage() {
   const { user } = useAuth();
-  const [supportView, setSupportView] = useState("messages");
+  const [supportView, setSupportView] = useState("requests");
   const [mobileDiscussionOpen, setMobileDiscussionOpen] = useState(false);
 
   useEffect(() => {
@@ -5063,7 +5140,7 @@ function AppRoutes() {
         path="/seller/sales"
         element={
           <Protected roles={["seller"]}>
-            <SellerSalesPage />
+            <Navigate to="/seller/payouts" replace />
           </Protected>
         }
       />
@@ -5071,7 +5148,7 @@ function AppRoutes() {
         path="/seller/payouts"
         element={
           <Protected roles={["seller"]}>
-            <Navigate to="/seller/sales" replace />
+            <SellerSalesPage />
           </Protected>
         }
       />
@@ -5508,17 +5585,6 @@ export default function App() {
     </Providers>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
 
 
 

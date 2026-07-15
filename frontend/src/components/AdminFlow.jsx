@@ -2395,6 +2395,8 @@ export function AdminContactRequestsContent({ api, onMobileConversationChange })
     [CheckCircle2, "Résolus", "resolved", counts.resolved],
     [Bell, "Non lus", "unread", unreadTotal],
   ];
+  const activeFilterLabel =
+    statusFilters.find(([, , filter]) => filter === statusFilter)?.[1] || "Tous";
   const applyStatusFilter = (filter) => {
     setStatusFilter(filter);
     if (selected && !matchesStatusFilter(selected, filter)) {
@@ -2434,6 +2436,16 @@ export function AdminContactRequestsContent({ api, onMobileConversationChange })
           </button>
         ))}
       </nav>
+      <section className="admin-support-mobile-summary" aria-label="Résumé des dossiers visibles">
+        <span>
+          <small>Filtre actif</small>
+          <b>{activeFilterLabel}</b>
+        </span>
+        <span>
+          <small>Dossiers visibles</small>
+          <b>{visible.length}</b>
+        </span>
+      </section>
       <div className="admin-support-layout">
         <aside className="admin-support-list">
           <div className="admin-support-list-tools">

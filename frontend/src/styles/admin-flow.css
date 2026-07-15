@@ -416,6 +416,34 @@
   color: #ffffff;
 }
 
+.admin-support-mobile-summary {
+  display: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-support-mobile-summary > span {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ffffff, #eff6ff);
+}
+
+.admin-support-mobile-summary small {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-support-mobile-summary b {
+  color: #0f172a;
+  font-size: 15px;
+}
+
 .admin-support-page {
   display: grid;
   gap: 20px;
@@ -3720,6 +3748,11 @@
     display: none;
   }
 
+  .admin-support-mobile-summary {
+    display: grid;
+    flex: 0 0 auto;
+  }
+
   .admin-support-dossiers .admin-filter-bar {
     flex: 0 0 auto;
     gap: 8px;
@@ -3803,6 +3836,7 @@
 
   .admin-support-dossiers.mobile-request-open > .admin-filter-bar,
   .admin-support-dossiers.mobile-request-open > .admin-support-status-filters,
+  .admin-support-dossiers.mobile-request-open > .admin-support-mobile-summary,
   .admin-support-dossiers.mobile-request-open > .admin-message,
   .admin-support-dossiers.mobile-request-open > .admin-error,
   .admin-support-dossiers.mobile-request-open .admin-support-list {

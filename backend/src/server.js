@@ -1175,7 +1175,7 @@ const settlePayoutRequest = async (
     "payout.paid",
     "Transfert MonCash effectué",
     `${Number(request.amount).toLocaleString("fr-HT")} HTG ont été transférés. Référence : ${paymentReference}.`,
-    "/seller/sales",
+    "/seller/payouts",
     "payout_request",
     request.id,
   );
@@ -2958,6 +2958,7 @@ app.get(
         ON drc_seller.seller_delivery_assignment_id=sda.id
       LEFT JOIN users du ON du.id=sda.delivery_user_id
       WHERE ss.seller_id=?
+        AND ss.payment_status='paid'
       ORDER BY ss.created_at DESC`,
       [req.user.id],
     );
@@ -3379,8 +3380,13 @@ app.get(
         [req.user.id],
       ),
       pool.query(
-        `SELECT COALESCE(SUM(amount),0) held_balance,COUNT(*) held_sales
-         FROM payouts WHERE seller_id=? AND status='pending'`,
+        `SELECT COALESCE(SUM(po.amount),0) held_balance,COUNT(*) held_sales
+         FROM payouts po
+         JOIN seller_sales ss ON ss.id=po.seller_sale_id
+         JOIN payments pay ON pay.order_id=ss.order_id
+         WHERE po.seller_id=?
+           AND po.status='pending'
+           AND pay.status='paid'`,
         [req.user.id],
       ),
       pool.query(
@@ -3550,15 +3556,15 @@ app.post(
         type: "withdrawal_reserved",
         amount,
         actorId: req.user.id,
-        note: `Demande ${requestNumber} envoyée pour approbation.`,
+        note: `Demande ${requestNumber} envoyée à l’équipe finance.`,
       });
       await notifyRole(
         connection,
-        "admin",
+        "finance",
         "payout.requested",
         "Nouvelle demande de paiement",
         `${profile.shop_name || req.user.name} demande ${amount.toLocaleString("fr-HT")} HTG.`,
-        "/admin/payout-requests",
+        "/finance/payouts",
         "payout_request",
         created.insertId,
       );
@@ -3568,7 +3574,7 @@ app.post(
         requestNumber,
       });
       res.status(201).json({
-        message: "Votre demande a été envoyée à l’administration VinnHT.",
+        message: "Votre demande a été envoyée à l’équipe finance VinnHT.",
         requestId: created.insertId,
         requestNumber,
       });
@@ -4742,10 +4748,6 @@ app.patch(
         [proofUrl, req.body.note || null, reference, order.id],
       );
 
-      const [sellers] = await connection.query(
-        "SELECT DISTINCT seller_id FROM seller_sales WHERE order_id=?",
-        [order.id],
-      );
       await logOrderEvent(connection, {
         orderId: order.id,
         actorId: req.user.id,
@@ -4776,19 +4778,6 @@ app.patch(
         "payment",
         order.id,
       );
-      for (const seller of sellers) {
-        await notifyUser(
-          connection,
-          seller.seller_id,
-          "seller",
-          "payment.proof_received",
-          "Paiement en vérification",
-          `VinnHT vérifie le paiement protégé de la commande ${order.order_number}.`,
-          "/seller/orders",
-          "payment",
-          order.id,
-        );
-      }
 
       await connection.commit();
       res.json({
@@ -7326,13 +7315,20 @@ app.get(
       `SELECT pr.*,u.email seller_email,u.phone seller_phone,
         COALESCE(sp.shop_name,u.name) seller_name,sp.shop_logo_url,
         reviewer.name reviewed_by_name,manager.name manager_name,
-        COUNT(pri.id) payout_count
+        COUNT(DISTINCT pri.payout_id) payout_count,
+        COALESCE(SUM(ss.gross_amount),0) gross_sales_amount,
+        COALESCE(SUM(ss.delivery_fee),0) delivery_total_amount,
+        COALESCE(SUM(ss.commission_amount),0) commission_total_amount,
+        COALESCE(SUM(ss.net_amount),0) net_sales_amount,
+        COALESCE(SUM(pri.amount),0) allocated_amount
        FROM payout_requests pr
        JOIN users u ON u.id=pr.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=pr.seller_id
        LEFT JOIN users reviewer ON reviewer.id=pr.reviewed_by
        LEFT JOIN users manager ON manager.id=pr.manager_id
        LEFT JOIN payout_request_items pri ON pri.payout_request_id=pr.id
+       LEFT JOIN payouts linked_payout ON linked_payout.id=pri.payout_id
+       LEFT JOIN seller_sales ss ON ss.id=linked_payout.seller_sale_id
        GROUP BY pr.id,u.email,u.phone,sp.shop_name,u.name,sp.shop_logo_url,
          reviewer.name,manager.name
        ORDER BY FIELD(pr.status,'pending','approved','processing','failed','paid','rejected','cancelled'),
@@ -7352,9 +7348,9 @@ app.get(
 );
 
 app.patch(
-  "/api/admin/payout-requests/:id/review",
+  ["/api/admin/payout-requests/:id/review", "/api/finance/payout-requests/:id/review"],
   authenticate,
-  authorize("admin"),
+  authorize("admin", "finance"),
   writeRateLimiter,
   [
     body("decision").isIn(["approved", "rejected"]),
@@ -7423,7 +7419,7 @@ app.patch(
           "payout.rejected",
           "Demande de paiement refusée",
           `La demande ${request.request_number} a été refusée. Motif : ${req.body.note}`,
-          "/seller/sales",
+          "/seller/payouts",
           "payout_request",
           request.id,
         );
@@ -7433,9 +7429,9 @@ app.patch(
           request.seller_id,
           "seller",
           "payout.approved",
-          "Demande de paiement approuvée",
-          `La demande ${request.request_number} est transmise à l’équipe finance pour paiement.`,
-          "/seller/sales",
+          "Demande de paiement validée",
+          `La demande ${request.request_number} a été validée par l’équipe finance et passe en préparation de transfert.`,
+          "/seller/payouts",
           "payout_request",
           request.id,
         );
@@ -7458,7 +7454,7 @@ app.patch(
       res.json({
         message:
           req.body.decision === "approved"
-            ? "Demande approuvée et transmise à l’équipe finance."
+            ? "Demande validée et prête pour le transfert finance."
             : "Demande refusée et montant rendu au wallet vendeur.",
       });
     } catch (error) {
@@ -7484,7 +7480,12 @@ app.get(
         attempt.provider_transaction_id,
         attempt.status provider_transfer_status,
         attempt.error_message provider_error_message,
-        COUNT(pri.id) payout_count
+        COUNT(DISTINCT pri.payout_id) payout_count,
+        COALESCE(SUM(ss.gross_amount),0) gross_sales_amount,
+        COALESCE(SUM(ss.delivery_fee),0) delivery_total_amount,
+        COALESCE(SUM(ss.commission_amount),0) commission_total_amount,
+        COALESCE(SUM(ss.net_amount),0) net_sales_amount,
+        COALESCE(SUM(pri.amount),0) allocated_amount
        FROM payout_requests pr
        JOIN users u ON u.id=pr.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=pr.seller_id
@@ -7496,20 +7497,26 @@ app.get(
          WHERE latest_attempt.payout_request_id=pr.id
        )
        LEFT JOIN payout_request_items pri ON pri.payout_request_id=pr.id
-       WHERE pr.status IN ('approved','processing','verification_required','paid','failed')
+       LEFT JOIN payouts linked_payout ON linked_payout.id=pri.payout_id
+       LEFT JOIN seller_sales ss ON ss.id=linked_payout.seller_sale_id
+       WHERE pr.status IN ('pending','approved','processing','verification_required','paid','failed','rejected')
        GROUP BY pr.id,u.email,u.phone,sp.shop_name,u.name,sp.shop_logo_url,
          reviewer.name,manager.name,attempt.provider_reference,
          attempt.provider_transaction_id,attempt.status,attempt.error_message
-       ORDER BY FIELD(pr.status,'verification_required','processing','approved','failed','paid'),
+       ORDER BY FIELD(pr.status,'pending','verification_required','processing','approved','failed','paid','rejected'),
          COALESCE(pr.processing_at,pr.reviewed_at,pr.created_at) DESC
        LIMIT 300`,
     );
     const [[stats]] = await pool.query(
       `SELECT
+        SUM(status='pending') pending_count,
+        COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) pending_amount,
         SUM(status='approved') approved_count,
         COALESCE(SUM(CASE WHEN status='approved' THEN amount ELSE 0 END),0) approved_amount,
         COALESCE(SUM(CASE WHEN status='processing' THEN amount ELSE 0 END),0) processing_amount,
         COALESCE(SUM(CASE WHEN status='verification_required' THEN amount ELSE 0 END),0) verification_amount,
+        SUM(status='failed') failed_count,
+        COALESCE(SUM(CASE WHEN status='failed' THEN amount ELSE 0 END),0) failed_amount,
         COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END),0) paid_amount
        FROM payout_requests`,
     );
@@ -7688,7 +7695,7 @@ app.patch(
         "payout.processing",
         "Paiement en traitement",
         `L’équipe finance prépare le transfert MonCash de ${request.request_number}.`,
-        "/seller/sales",
+        "/seller/payouts",
         "payout_request",
         request.id,
       );
@@ -8089,7 +8096,7 @@ app.patch(
         "payout.paid",
         "Transfert MonCash effectué",
         `${Number(request.amount).toLocaleString("fr-HT")} HTG ont été transférés. Référence : ${req.body.reference}.`,
-        "/seller/sales",
+        "/seller/payouts",
         "payout_request",
         request.id,
       );
@@ -8174,7 +8181,7 @@ app.patch(
         "payout.failed",
         "Transfert MonCash non abouti",
         `Le montant est revenu dans votre solde disponible. Motif : ${req.body.reason}`,
-        "/seller/sales",
+        "/seller/payouts",
         "payout_request",
         request.id,
       );

@@ -22,7 +22,7 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { assetUrl } from "../config/runtime.js";
 import "../styles/wallet-flow.css";
 
@@ -42,7 +42,7 @@ const shortDate = (value) =>
     : "—";
 
 const statusMeta = {
-  pending: { label: "En attente admin", tone: "warning", Icon: Clock3 },
+  pending: { label: "En attente finance", tone: "warning", Icon: Clock3 },
   approved: { label: "Approuvée", tone: "approved", Icon: ShieldCheck },
   rejected: { label: "Refusée", tone: "danger", Icon: X },
   processing: { label: "Transfert en cours", tone: "processing", Icon: RefreshCw },
@@ -152,7 +152,32 @@ function WalletLoading() {
   );
 }
 
+function FinanceBreakdown({ request }) {
+  return (
+    <div className="finance-breakdown-grid">
+      <article>
+        <small>Ventes brutes</small>
+        <strong>{money(request.gross_sales_amount)}</strong>
+      </article>
+      <article>
+        <small>Livraison incluse</small>
+        <strong>{money(request.delivery_total_amount)}</strong>
+      </article>
+      <article className="warning">
+        <small>Commission VinnHT</small>
+        <strong>- {money(request.commission_total_amount)}</strong>
+      </article>
+      <article className="success">
+        <small>Net vendeur</small>
+        <strong>{money(request.allocated_amount || request.amount)}</strong>
+      </article>
+    </div>
+  );
+}
+
 export function SellerWalletContent({ api }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [showRequest, setShowRequest] = useState(false);
   const [amount, setAmount] = useState("");
@@ -190,6 +215,34 @@ export function SellerWalletContent({ api }) {
     payoutAccount?.moncash_number &&
     payoutAccount?.moncash_account_name &&
     !activeRequest;
+
+  useEffect(() => {
+    if (!data) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("request") !== "1") return;
+
+    if (canRequest) {
+      setAmount(String(wallet.available_balance || ""));
+      setShowRequest(true);
+    }
+
+    params.delete("request");
+    const nextSearch = params.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : "",
+      },
+      { replace: true },
+    );
+  }, [
+    canRequest,
+    data,
+    location.pathname,
+    location.search,
+    navigate,
+    wallet.available_balance,
+  ]);
 
   const submitRequest = async (event) => {
     event.preventDefault();
@@ -306,7 +359,7 @@ export function SellerWalletContent({ api }) {
           icon={LockKeyhole}
           label="Fonds bloqués"
           value={wallet.held_balance}
-          note={`${wallet.held_sales || 0} vente(s) attendent la réception`}
+          note={`${wallet.held_sales || 0} vente(s) payée(s) attendent la réception`}
           tone="navy"
         />
         <WalletMetric
@@ -453,7 +506,7 @@ export function SellerWalletContent({ api }) {
             </label>
             <div className="wallet-modal-notice">
               <ShieldCheck />
-              <p>Le montant sera réservé pendant l’approbation admin et le transfert de l’équipe finance.</p>
+              <p>Le montant sera réservé pendant la validation et le transfert de l’équipe finance.</p>
             </div>
             <footer>
               <button type="button" onClick={() => setShowRequest(false)}>Retour</button>
@@ -517,6 +570,10 @@ function PayoutDeskCard({ request, onOpen, actionLabel }) {
       <div className="payout-desk-amount">
         <span>Montant demandé</span>
         <strong>{money(request.amount)}</strong>
+      </div>
+      <div className="payout-desk-summary">
+        <span>Commission retenue</span>
+        <b>{money(request.commission_total_amount)}</b>
       </div>
       <dl>
         <div><dt>MonCash</dt><dd>{request.moncash_number}</dd></div>
@@ -591,7 +648,7 @@ export function AdminPayoutApprovalContent({ api }) {
       <WalletFeedback message={message} error={error} />
       <section className="wallet-metric-grid wallet-desk-metrics">
         <WalletMetric icon={Clock3} label="À examiner" value={data.stats.pending_amount} note={`${data.stats.pending_count || 0} demande(s)`} tone="gold" />
-        <WalletMetric icon={ShieldCheck} label="Transmises" value={data.stats.approved_amount} note="Au manager" tone="blue" />
+        <WalletMetric icon={ShieldCheck} label="Transmises" value={data.stats.approved_amount} note="À la finance" tone="blue" />
         <WalletMetric icon={CheckCircle2} label="Déjà payées" value={data.stats.paid_amount} note="Historique confirmé" tone="green" />
       </section>
       <section className="payout-desk-toolbar">
@@ -629,6 +686,7 @@ export function AdminPayoutApprovalContent({ api }) {
               <span><small>Ventes libérées</small><b>{selected.payout_count || 0}</b></span>
               <span><small>Date</small><b>{shortDate(selected.created_at)}</b></span>
             </div>
+            <FinanceBreakdown request={selected} />
             {selected.seller_note && <blockquote>{selected.seller_note}</blockquote>}
             {selected.status === "pending" ? (
               <>
@@ -664,17 +722,51 @@ export function ManagerPayoutOperationsContent({ api }) {
   const [transferConfirmed, setTransferConfirmed] = useState(false);
   const [providerBalance, setProviderBalance] = useState(null);
   const provider = data.provider || {};
+  const activeFilterLabel =
+    filter === "ready"
+      ? "À traiter"
+      : filter === "all"
+        ? "Toutes les demandes"
+        : statusMeta[filter]?.label || filter;
 
   const requests = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return data.requests.filter((request) => {
       const matchesStatus =
         filter === "all" ||
-        (filter === "ready" && ["approved", "processing", "verification_required"].includes(request.status)) ||
+        (filter === "ready" &&
+          ["pending", "approved", "processing", "verification_required"].includes(request.status)) ||
         request.status === filter;
       return matchesStatus && `${request.request_number} ${request.seller_name} ${request.moncash_number}`.toLowerCase().includes(normalized);
     });
   }, [data.requests, filter, query]);
+
+  const review = async (decision) => {
+    if (decision === "rejected" && failureReason.trim().length < 3) {
+      setError("Ajoutez un motif clair avant le refus.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const { data: response } = await api.patch(
+        `/finance/payout-requests/${selected.id}/review`,
+        {
+          decision,
+          note: decision === "rejected" ? failureReason.trim() : undefined,
+        },
+      );
+      setMessage(response.message);
+      setFailureReason("");
+      setSelected(null);
+      await load();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Décision impossible.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const runAction = async (action, payload) => {
     setBusy(true);
@@ -772,25 +864,48 @@ export function ManagerPayoutOperationsContent({ api }) {
         )}
       </section>
       <section className="wallet-metric-grid wallet-desk-metrics">
+        <WalletMetric icon={Clock3} label="À valider" value={data.stats.pending_amount} note={`${data.stats.pending_count || 0} demande(s)`} tone="gold" />
         <WalletMetric icon={PlayCircle} label="Prêtes" value={data.stats.approved_amount} note={`${data.stats.approved_count || 0} transfert(s)`} tone="blue" />
         <WalletMetric icon={RefreshCw} label="En traitement" value={data.stats.processing_amount} note="Pris en charge" tone="gold" />
+        <WalletMetric icon={AlertTriangle} label="À revoir" value={data.stats.failed_amount} note={`${data.stats.failed_count || 0} incident(s)`} tone="rose" />
         <WalletMetric icon={CheckCircle2} label="Transféré" value={data.stats.paid_amount} note="Références enregistrées" tone="green" />
       </section>
       <section className="payout-desk-toolbar">
         <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Boutique, demande ou MonCash" /></label>
         <nav>
-          {["ready", "approved", "processing", "verification_required", "paid", "failed", "all"].map((status) => (
+          {["ready", "pending", "approved", "processing", "verification_required", "paid", "failed", "rejected", "all"].map((status) => (
             <button className={filter === status ? "active" : ""} onClick={() => setFilter(status)} key={status}>
               {status === "ready" ? "À traiter" : status === "all" ? "Toutes" : statusMeta[status]?.label || status}
             </button>
           ))}
         </nav>
       </section>
+      <section className="finance-mobile-summary">
+        <span>
+          <small>Filtre actif</small>
+          <b>{activeFilterLabel}</b>
+        </span>
+        <span>
+          <small>Demandes visibles</small>
+          <b>{requests.length}</b>
+        </span>
+      </section>
       <section className="payout-desk-grid">
         {requests.map((request) => (
-          <PayoutDeskCard request={request} onOpen={openRequest} actionLabel={request.status === "approved" ? "Prendre en charge" : "Ouvrir le suivi"} key={request.id} />
+          <PayoutDeskCard
+            request={request}
+            onOpen={openRequest}
+            actionLabel={
+              request.status === "pending"
+                ? "Valider"
+                : request.status === "approved"
+                  ? "Prendre en charge"
+                  : "Ouvrir le suivi"
+            }
+            key={request.id}
+          />
         ))}
-        {!requests.length && <div className="wallet-empty desk"><Landmark /><h3>Aucun transfert dans cette file</h3><p>Les demandes approuvées par l’admin apparaîtront ici.</p></div>}
+        {!requests.length && <div className="wallet-empty desk"><Landmark /><h3>Aucun transfert dans cette file</h3><p>Les demandes vendeurs validables ou en cours apparaîtront ici.</p></div>}
       </section>
 
       {selected && (
@@ -809,8 +924,35 @@ export function ManagerPayoutOperationsContent({ api }) {
               <span><small>Boutique</small><b>{selected.seller_name}</b></span>
               <span><small>Numéro MonCash</small><b>{selected.moncash_number}</b></span>
               <span><small>Titulaire</small><b>{selected.moncash_account_name}</b></span>
-              <span><small>Approuvé par</small><b>{selected.reviewed_by_name || "Admin VinnHT"}</b></span>
+              <span><small>Validé par</small><b>{selected.reviewed_by_name || (selected.status === "pending" ? "En attente" : "Finance VinnHT")}</b></span>
             </div>
+            <FinanceBreakdown request={selected} />
+            {selected.seller_note && <blockquote>{selected.seller_note}</blockquote>}
+            {selected.status === "pending" && (
+              <div className="manager-transfer-actions">
+                <div className="wallet-modal-notice">
+                  <ShieldCheck />
+                  <p>Vérifiez le titulaire MonCash et le montant demandé. La somme reste réservée dans le wallet vendeur tant que la décision n’est pas prise.</p>
+                </div>
+                <label>
+                  Motif en cas de refus
+                  <textarea
+                    rows="2"
+                    value={failureReason}
+                    onChange={(event) => setFailureReason(event.target.value)}
+                    placeholder="Optionnel si vous validez, requis si vous refusez."
+                  />
+                </label>
+                <div className="manager-transfer-actions-row">
+                  <button className="danger" disabled={busy} onClick={() => review("rejected")}>
+                    <X /> Refuser
+                  </button>
+                  <button disabled={busy} onClick={() => review("approved")}>
+                    <ShieldCheck /> Valider la demande
+                  </button>
+                </div>
+              </div>
+            )}
             {selected.status === "approved" && (
               <button className="manager-start-transfer" disabled={busy} onClick={() => runAction("processing")}>
                 <PlayCircle /> Prendre en charge ce transfert

@@ -749,6 +749,18 @@
 }
 .payout-desk-amount span { color: #64748b; font-size: 10px; }
 .payout-desk-amount strong { font-size: 24px; }
+.payout-desk-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: #92400e;
+  background: #fffbeb;
+  font-size: 10px;
+}
+.payout-desk-summary b { font-size: 12px; }
 .payout-desk-card dl { display: grid; gap: 7px; margin: 0; }
 .payout-desk-card dl > div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 7px; font-size: 10px; }
 .payout-desk-card dt { color: #64748b; }
@@ -768,12 +780,46 @@
 .payout-review-facts > span { display: grid; gap: 3px; border: 1px solid #e2e8f0; border-radius: 15px; padding: 12px; }
 .payout-review-facts small { color: #64748b; font-size: 9px; text-transform: uppercase; }
 .payout-review-modal blockquote { margin: 0; border-left: 3px solid #f59e0b; border-radius: 0 12px 12px 0; padding: 11px 14px; color: #475569; background: #fffbeb; font-size: 12px; }
+.finance-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.finance-breakdown-grid article {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 13px;
+  background: #ffffff;
+}
+.finance-breakdown-grid article small {
+  color: #64748b;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.finance-breakdown-grid article strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+.finance-breakdown-grid article.warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.finance-breakdown-grid article.warning strong { color: #92400e; }
+.finance-breakdown-grid article.success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+.finance-breakdown-grid article.success strong { color: #047857; }
 
 .manager-transfer-amount { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-radius: 20px; padding: 17px; color: #ffffff; background: linear-gradient(135deg, #0f172a, #1e3a8a); }
 .manager-transfer-amount small { width: 100%; color: #bfdbfe; }
 .manager-transfer-amount strong { font-size: 30px; }
 .manager-transfer-actions { display: grid; gap: 13px; }
 .manager-transfer-actions > button { width: 100%; }
+.manager-transfer-actions-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.manager-transfer-actions-row button { width: 100%; }
 .manager-failure-box { display: grid; gap: 10px; border-top: 1px solid #e2e8f0; padding-top: 14px; }
 .manager-failure-box button { min-height: 44px; border: 0; border-radius: 14px; color: #b91c1c; background: #fee2e2; font-weight: 900; cursor: pointer; }
 .wallet-transfer-result { display: flex; align-items: center; gap: 13px; border-radius: 18px; padding: 16px; color: #047857; background: #f0fdf4; }
@@ -896,6 +942,30 @@
 .finance-merchant-list article b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .finance-merchant-list article small { color: #64748b; }
 .finance-merchant-list article strong { color: #0f172a; }
+.finance-mobile-summary {
+  display: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.finance-mobile-summary span {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ffffff, #eff6ff);
+}
+.finance-mobile-summary small {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.finance-mobile-summary b {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
 
 @media (max-width: 1120px) {
   .finance-report-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -910,7 +980,18 @@
   .seller-wallet-hero,
   .seller-wallet-columns,
   .payout-desk-toolbar { grid-template-columns: minmax(0, 1fr); }
-  .payout-desk-toolbar nav { justify-content: flex-start; }
+  .payout-desk-toolbar nav {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .payout-desk-toolbar nav::-webkit-scrollbar { display: none; }
+  .payout-desk-toolbar nav button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }
 
 @media (max-width: 620px) {
@@ -929,6 +1010,19 @@
   .wallet-metric { min-height: 150px; align-content: start; padding: 15px; }
   .wallet-metric > span { width: 39px; height: 39px; }
   .wallet-metric strong { font-size: 18px; }
+  .manager-payout-flow .wallet-desk-metrics {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(180px, 72%);
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .manager-payout-flow .wallet-desk-metrics::-webkit-scrollbar { display: none; }
+  .manager-payout-flow .wallet-desk-metrics .wallet-metric {
+    min-height: 136px;
+  }
+  .finance-mobile-summary { display: grid; }
   .wallet-panel { border-radius: 24px; }
   .wallet-transaction-list > article { grid-template-columns: auto minmax(0, 1fr); }
   .wallet-transaction-list > article > strong { grid-column: 2; justify-self: start; }
@@ -936,12 +1030,35 @@
   .wallet-request-modal,
   .payout-review-modal { width: 100%; max-height: 94dvh; overflow-y: auto; border-radius: 27px 27px 0 0; padding: 19px 16px calc(20px + env(safe-area-inset-bottom)); }
   .payout-desk-grid { grid-template-columns: minmax(0, 1fr); }
+  .payout-desk-card { border-radius: 22px; padding: 16px; }
   .payout-review-shop { grid-template-columns: auto minmax(0, 1fr); }
   .payout-review-shop > strong { grid-column: 1 / -1; }
   .payout-review-facts { grid-template-columns: minmax(0, 1fr); }
+  .finance-breakdown-grid { grid-template-columns: minmax(0, 1fr); }
+  .moncash-provider-strip { gap: 12px; border-radius: 20px; }
+  .moncash-provider-strip > span { width: 42px; height: 42px; border-radius: 14px; }
+  .moncash-provider-strip b { font-size: 14px; }
+  .finance-report-flow .finance-report-metrics {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(170px, 72%);
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .finance-report-flow .finance-report-metrics::-webkit-scrollbar { display: none; }
+  .finance-merchant-list article {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+  .finance-merchant-list article strong {
+    grid-column: 2;
+    justify-self: start;
+  }
   .wallet-request-modal > footer,
   .payout-review-modal > footer { grid-template-columns: minmax(0, 1fr); }
   .manager-transfer-amount { align-items: flex-start; flex-direction: column; }
+  .manager-transfer-actions-row { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

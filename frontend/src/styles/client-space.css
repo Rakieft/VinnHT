@@ -2425,6 +2425,15 @@ body.client-order-modal-open {
   font-weight: 800;
 }
 
+.checkout-shop-product-preview {
+  display: block;
+  max-width: 100%;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .checkout-shop-fulfillment-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2528,6 +2537,12 @@ body.client-order-modal-open {
 .checkout-fulfillment-choice button small {
   color: var(--gray);
   line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.checkout-pickup-address-highlight {
+  color: #16a34a;
+  font-weight: 900;
 }
 
 .checkout-pickup-list,
@@ -4766,5 +4781,6 @@ body.client-order-modal-open {
     min-width: 0;
   }
 }
+
 
 

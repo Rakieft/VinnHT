@@ -295,6 +295,22 @@ export function SellerProductsContent({ api }) {
     };
   }, [editing]);
 
+  useEffect(() => {
+    if (!adding) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setAdding(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [adding]);
+
   const toggle = async (product) => {
     setError("");
     try {
@@ -421,15 +437,42 @@ export function SellerProductsContent({ api }) {
         </div>
       </div>
       {adding && (
-        <AddSellerProductContent
-          api={api}
-          embedded
-          onCreated={() => {
-            setAdding(false);
-            setMessage("Produit ajoute avec succes.");
-            load();
-          }}
-        />
+        <div
+          className="seller-edit-overlay seller-form-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ajouter un produit"
+        >
+          <button
+            className="seller-edit-backdrop"
+            type="button"
+            aria-label="Fermer l’ajout de produit"
+            onClick={() => setAdding(false)}
+          />
+          <section className="seller-form-modal-panel seller-form-modal-panel-product">
+            <header>
+              <div>
+                <span>Nouveau produit</span>
+                <h2>Ajouter un produit</h2>
+                <p>Créez votre fiche produit sans quitter la page catalogue.</p>
+              </div>
+              <button type="button" onClick={() => setAdding(false)} aria-label="Fermer">
+                <X />
+              </button>
+            </header>
+            <div className="seller-form-modal-content">
+              <AddSellerProductContent
+                api={api}
+                embedded
+                onCreated={() => {
+                  setAdding(false);
+                  setMessage("Produit ajoute avec succes.");
+                  load();
+                }}
+              />
+            </div>
+          </section>
+        </div>
       )}
       <div className="seller-product-grid">
         {visibleProducts.map((product) => (
@@ -1415,6 +1458,12 @@ export function SellerDashboardContent({ api, user }) {
           <span>Performance de votre boutique</span>
           <h2>{money(stats.net_sales)}</h2>
           <p>Revenu net estimé, suivi et payable depuis votre wallet VinnHT.</p>
+          <div className="seller-dashboard-hero-actions">
+            <Link className="seller-dashboard-wallet-link" to="/seller/payouts?request=1">
+              <Wallet />
+              Demander mon paiement
+            </Link>
+          </div>
         </div>
         <Wallet />
       </section>
@@ -1507,6 +1556,23 @@ export function SellerOrdersContent({ api }) {
     };
   }, [selected]);
 
+  useEffect(() => {
+    if (!showDriverForm) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setShowDriverForm(false);
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [showDriverForm]);
+
   const updateStatus = async (saleId, status) => {
     const { data } = await api.patch(`/seller/sales/${saleId}/status`, { status });
     setMessage(data.message);
@@ -1583,8 +1649,8 @@ export function SellerOrdersContent({ api }) {
   return (
     <SellerPageHeader
       eyebrow="Operations boutique"
-      title="Commandes recues"
-      text="Preparez uniquement les produits vendus par votre boutique."
+      title="Commandes payees recues"
+      text="Seules les commandes dont le paiement est validé par VinnHT apparaissent ici."
     >
       {message && <div className="flow-success">{message}</div>}
       <div className="seller-catalog-toolbar seller-orders-toolbar">
@@ -1617,47 +1683,74 @@ export function SellerOrdersContent({ api }) {
         </button>
       </div>
       {showDriverForm && (
-        <form className="seller-driver-form seller-driver-form-compact" onSubmit={createDriver}>
-          <input
-            value={driverForm.name}
-            onChange={(event) => setDriverForm({ ...driverForm, name: event.target.value })}
-            placeholder="Nom complet"
-            required
+        <div
+          className="seller-edit-overlay seller-form-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ajouter un livreur"
+        >
+          <button
+            className="seller-edit-backdrop"
+            type="button"
+            aria-label="Fermer l’ajout de livreur"
+            onClick={() => setShowDriverForm(false)}
           />
-          <input
-            value={driverForm.email}
-            onChange={(event) => setDriverForm({ ...driverForm, email: event.target.value })}
-            placeholder="Email livreur"
-            type="email"
-            required
-          />
-          <input
-            value={driverForm.phone}
-            onChange={(event) => setDriverForm({ ...driverForm, phone: event.target.value })}
-            placeholder="Telephone"
-          />
-          <input
-            value={driverForm.password}
-            onChange={(event) => setDriverForm({ ...driverForm, password: event.target.value })}
-            placeholder="Mot de passe temporaire"
-            type="password"
-            minLength={8}
-            required
-          />
-          <input
-            value={driverForm.zones}
-            onChange={(event) => setDriverForm({ ...driverForm, zones: event.target.value })}
-            placeholder="Zones couvertes"
-          />
-          <input
-            value={driverForm.vehicleType}
-            onChange={(event) => setDriverForm({ ...driverForm, vehicleType: event.target.value })}
-            placeholder="Moto, voiture, camion..."
-          />
-          <button type="submit">
-            <Plus /> Enregistrer le livreur
-          </button>
-        </form>
+          <section className="seller-form-modal-panel seller-form-modal-panel-driver">
+            <header>
+              <div>
+                <span>Livraison boutique</span>
+                <h2>Ajouter un livreur</h2>
+                <p>Ajoutez un livreur rattaché à votre boutique sans quitter la page commandes.</p>
+              </div>
+              <button type="button" onClick={() => setShowDriverForm(false)} aria-label="Fermer">
+                <X />
+              </button>
+            </header>
+            <div className="seller-form-modal-content">
+              <form className="seller-driver-form seller-driver-form-compact" onSubmit={createDriver}>
+                <input
+                  value={driverForm.name}
+                  onChange={(event) => setDriverForm({ ...driverForm, name: event.target.value })}
+                  placeholder="Nom complet"
+                  required
+                />
+                <input
+                  value={driverForm.email}
+                  onChange={(event) => setDriverForm({ ...driverForm, email: event.target.value })}
+                  placeholder="Email livreur"
+                  type="email"
+                  required
+                />
+                <input
+                  value={driverForm.phone}
+                  onChange={(event) => setDriverForm({ ...driverForm, phone: event.target.value })}
+                  placeholder="Telephone"
+                />
+                <input
+                  value={driverForm.password}
+                  onChange={(event) => setDriverForm({ ...driverForm, password: event.target.value })}
+                  placeholder="Mot de passe temporaire"
+                  type="password"
+                  minLength={8}
+                  required
+                />
+                <input
+                  value={driverForm.zones}
+                  onChange={(event) => setDriverForm({ ...driverForm, zones: event.target.value })}
+                  placeholder="Zones couvertes"
+                />
+                <input
+                  value={driverForm.vehicleType}
+                  onChange={(event) => setDriverForm({ ...driverForm, vehicleType: event.target.value })}
+                  placeholder="Moto, voiture, camion..."
+                />
+                <button type="submit">
+                  <Plus /> Enregistrer le livreur
+                </button>
+              </form>
+            </div>
+          </section>
+        </div>
       )}
       <section className="seller-order-list">
         {visible.map((order) => (

@@ -13,6 +13,8 @@ const databaseName = `vinnht_smoke_${Date.now()}`;
 const port = 5067;
 const apiOrigin = `http://localhost:${port}/api`;
 const password = "VinnHTSmoke2026!";
+const USER_TERMS_VERSION = "2026-06-28-v5";
+const SELLER_TERMS_VERSION = "2026-07-10-v6";
 let server;
 let database;
 let serverError = "";
@@ -94,7 +96,7 @@ const register = async ({ name, email, phone }) =>
       activityStatus: "other",
       activityDetails: "Compte de simulation VinnHT",
       termsAccepted: true,
-      termsVersion: "2026-06-28-v5",
+      termsVersion: USER_TERMS_VERSION,
     },
   });
 
@@ -176,7 +178,7 @@ const runFlow = async () => {
   const anonymousSession = await request("/auth/me");
   assert.equal(anonymousSession.data.user, null);
   const legalTerms = await request("/legal/terms");
-  assert.equal(legalTerms.data.version, "2026-06-28-v5");
+  assert.equal(legalTerms.data.version, USER_TERMS_VERSION);
   assert(legalTerms.data.sections.length >= 20);
 
   const [managerResult] = await database.query(
@@ -240,7 +242,7 @@ const runFlow = async () => {
   sellerRequest.append("moncashAccountName", "Vendeur Smoke");
   sellerRequest.append("description", "Boutique temporaire pour la validation finale.");
   sellerRequest.append("termsAccepted", "true");
-  sellerRequest.append("termsVersion", "2026-06-28-v5");
+  sellerRequest.append("termsVersion", SELLER_TERMS_VERSION);
   await request("/seller/requests", {
     method: "POST",
     cookie: sellerRegistration.cookie,
@@ -311,6 +313,27 @@ const runFlow = async () => {
   );
   assert(category?.id, "Aucune catégorie disponible après les migrations.");
 
+  await request("/seller/delivery-drivers", {
+    method: "POST",
+    cookie: seller.cookie,
+    body: {
+      name: "Livreur Smoke",
+      email: driverEmail,
+      phone: "37000002",
+      password,
+      zones: "Ouest",
+      vehicleType: "Moto",
+    },
+  });
+  const [[driverUser]] = await database.query(
+    "SELECT id FROM users WHERE email=?",
+    [driverEmail],
+  );
+  await database.query(
+    "UPDATE users SET profile_image_url='/uploads/profiles/smoke-driver.png' WHERE id=?",
+    [driverUser.id],
+  );
+
   const createdProduct = await request("/products", {
     method: "POST",
     cookie: seller.cookie,
@@ -350,6 +373,41 @@ const runFlow = async () => {
     ),
     "Le filtrage par sous-rayon et type de produit ne retourne pas le produit créé.",
   );
+  const blockedProductWithoutDriver = await request("/products", {
+    method: "POST",
+    cookie: secondSeller.cookie,
+    expectedStatus: 422,
+    body: {
+      name: "Produit bloque sans livreur",
+      categoryId: category.id,
+      description: "Ce produit ne doit pas pouvoir etre publie sans livreur actif.",
+      price: 1800,
+      stock: 4,
+      attributes: {
+        condition: "Neuf",
+      },
+      department: "Ouest",
+      city: "Pétion-Ville",
+      imageUrl: "https://images.unsplash.com/photo-1542291026-7eec264c27ff",
+    },
+  });
+  assert.match(blockedProductWithoutDriver.data.message, /livreur actif/i);
+  await request("/seller/delivery-drivers", {
+    method: "POST",
+    cookie: secondSeller.cookie,
+    body: {
+      name: "Deuxième livreur Smoke",
+      email: secondDriverEmail,
+      phone: "37000005",
+      password,
+      zones: "Ouest",
+      vehicleType: "Moto",
+    },
+  });
+  const [[secondDriverLink]] = await database.query(
+    "SELECT id FROM seller_delivery_drivers WHERE seller_id=? ORDER BY id DESC LIMIT 1",
+    [secondSeller.data.user.id],
+  );
   const secondProduct = await request("/products", {
     method: "POST",
     cookie: secondSeller.cookie,
@@ -368,26 +426,6 @@ const runFlow = async () => {
     },
   });
 
-  await request("/seller/delivery-drivers", {
-    method: "POST",
-    cookie: seller.cookie,
-    body: {
-      name: "Livreur Smoke",
-      email: driverEmail,
-      phone: "37000002",
-      password,
-      zones: "Ouest",
-      vehicleType: "Moto",
-    },
-  });
-  const [[driverUser]] = await database.query(
-    "SELECT id FROM users WHERE email=?",
-    [driverEmail],
-  );
-  await database.query(
-    "UPDATE users SET profile_image_url='/uploads/profiles/smoke-driver.png' WHERE id=?",
-    [driverUser.id],
-  );
   const buyer = await register({
     name: "Client Smoke",
     email: buyerEmail,
@@ -401,7 +439,7 @@ const runFlow = async () => {
      WHERE u.email=?`,
     [buyerEmail],
   );
-  assert.equal(buyerTermsAcceptance.terms_version, "2026-06-28-v5");
+  assert.equal(buyerTermsAcceptance.terms_version, USER_TERMS_VERSION);
   assert(buyerTermsAcceptance.accepted_at);
   assert(buyerTermsAcceptance.terms_snapshot);
   const followed = await request(`/shops/${seller.data.user.id}/follow`, {
@@ -559,16 +597,15 @@ const runFlow = async () => {
   });
   paymentProofPaths.push(proof.data.proofUrl);
 
+  await request(`/admin/payments/${order.data.id}/validate`, {
+    method: "PATCH",
+    cookie: admin.cookie,
+  });
   const sellerOrders = await request("/seller/orders", { cookie: seller.cookie });
   const sale = sellerOrders.data.find(
     (item) => Number(item.order_id) === Number(order.data.id),
   );
   assert(sale, "La vente vendeur n'a pas été créée.");
-
-  await request(`/admin/payments/${order.data.id}/validate`, {
-    method: "PATCH",
-    cookie: admin.cookie,
-  });
   const sellerNotifications = await request("/notifications?role=seller", {
     cookie: seller.cookie,
   });
@@ -710,16 +747,16 @@ const runFlow = async () => {
   );
   paymentProofPaths.push(pickupProof.data.proofUrl);
 
+  await request(`/admin/payments/${pickupOrder.data.id}/validate`, {
+    method: "PATCH",
+    cookie: admin.cookie,
+  });
   const pickupSellerOrders = await request("/seller/orders", { cookie: seller.cookie });
   const pickupSale = pickupSellerOrders.data.find(
     (item) => Number(item.order_id) === Number(pickupOrder.data.id),
   );
   assert(pickupSale);
   assert.equal(pickupSale.fulfillment_method, "pickup");
-  await request(`/admin/payments/${pickupOrder.data.id}/validate`, {
-    method: "PATCH",
-    cookie: admin.cookie,
-  });
   await request(`/seller/sales/${pickupSale.sale_id}/status`, {
     method: "PATCH",
     cookie: seller.cookie,
@@ -776,6 +813,10 @@ const runFlow = async () => {
     cookie: buyer.cookie,
     body: { quantity: 1 },
   });
+  await database.query(
+    "UPDATE seller_delivery_drivers SET status='inactive' WHERE id=?",
+    [secondDriverLink.id],
+  );
   const blockedDelivery = await request("/orders", {
     method: "POST",
     cookie: buyer.cookie,
@@ -789,19 +830,10 @@ const runFlow = async () => {
     },
   });
   assert.match(blockedDelivery.data.message, /aucun livreur actif/i);
-
-  await request("/seller/delivery-drivers", {
-    method: "POST",
-    cookie: secondSeller.cookie,
-    body: {
-      name: "Deuxième livreur Smoke",
-      email: secondDriverEmail,
-      phone: "37000005",
-      password,
-      zones: "Ouest",
-      vehicleType: "Moto",
-    },
-  });
+  await database.query(
+    "UPDATE seller_delivery_drivers SET status='active' WHERE id=?",
+    [secondDriverLink.id],
+  );
 
   const mixedOrder = await request("/orders", {
     method: "POST",

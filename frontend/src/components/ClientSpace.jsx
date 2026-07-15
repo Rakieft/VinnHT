@@ -1565,10 +1565,17 @@ export function ClientCheckoutContent({
         amount: 0,
         line_count: 0,
         unit_count: 0,
+        products: [],
       };
       current.amount += Number(item.price || 0) * Number(item.quantity || 0);
       current.line_count += 1;
       current.unit_count += Number(item.quantity || 0) * Number(item.pack_size || 1);
+      current.products.push({
+        id: item.id,
+        name: item.name,
+        quantity: Number(item.quantity || 0),
+        pack_size: Number(item.pack_size || 1),
+      });
       if (!current.moncash_number && item.seller_moncash) current.moncash_number = item.seller_moncash;
       rows.set(sellerKey, current);
     }
@@ -1844,6 +1851,17 @@ export function ClientCheckoutContent({
                     <small>
                       {seller.amount.toLocaleString("fr-HT")} HTG · {seller.line_count} article{seller.line_count > 1 ? "s" : ""} · {seller.unit_count} unité{seller.unit_count > 1 ? "s" : ""}
                     </small>
+                    <small className="checkout-shop-product-preview">
+                      {seller.products
+                        .slice(0, 3)
+                        .map((product) =>
+                          product.pack_size > 1
+                            ? `${product.name} (${product.quantity} lot(s) de ${product.pack_size})`
+                            : `${product.name} (${product.quantity})`,
+                        )
+                        .join(" · ")}
+                      {seller.products.length > 3 ? ` · +${seller.products.length - 3} autre(s)` : ""}
+                    </small>
                   </div>
                   <em className={`checkout-shop-choice-status ${selectedMethod}`}>
                     {selectedMethod === "delivery" ? "Choix actuel · Livraison" : "Choix actuel · Retrait"}
@@ -1864,7 +1882,16 @@ export function ClientCheckoutContent({
                       <span>
                         <b>Retrait en boutique</b>
                         <small>
-                          {seller.pickup_address ? "Gratuit · vous passez récupérer" : "Adresse de retrait indisponible"}
+                          {seller.pickup_address ? (
+                            <>
+                              Gratuit · retrait à{" "}
+                              <span className="checkout-pickup-address-highlight">
+                                {seller.pickup_address}
+                              </span>
+                            </>
+                          ) : (
+                            "Adresse de retrait indisponible"
+                          )}
                         </small>
                       </span>
                       {selectedMethod === "pickup" && <CheckCircle2 />}
@@ -2383,6 +2410,7 @@ function ClientPageFrame({ eyebrow, title, text, children }) {
     </div>
   );
 }
+
 
 
 

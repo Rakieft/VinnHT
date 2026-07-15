@@ -109,12 +109,14 @@ export default function CatalogTaxonomy({
   const chooseRayon = (rayon) => {
     onSelectRayon(rayon.slug);
     setOpenRayon("");
+    setMobileOpen(false);
   };
 
   const chooseGroup = (rayon, group) => {
     onSelectGroup(rayon.slug, group.slug);
     setOpenGroup(group.slug);
     setOpenRayon("");
+    setMobileOpen(false);
   };
 
   const chooseType = (rayon, group, type) => {
