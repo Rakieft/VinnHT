@@ -102,9 +102,9 @@ test("le cookie de session est inaccessible au JavaScript", () => {
   assert.equal(options.path, "/");
 });
 
-test("la rétention des messages utilise 30 jours par défaut", () => {
-  assert.equal(normalizeRetentionDays(undefined), 30);
-  assert.equal(normalizeRetentionDays("0"), 30);
+test("la rétention des messages utilise 60 jours par défaut", () => {
+  assert.equal(normalizeRetentionDays(undefined), 60);
+  assert.equal(normalizeRetentionDays("0"), 60);
   assert.equal(normalizeRetentionDays("45"), 45);
 });
 

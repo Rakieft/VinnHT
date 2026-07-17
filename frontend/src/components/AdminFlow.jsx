@@ -53,6 +53,7 @@ import {
   Smartphone,
   Sofa,
   Sparkles,
+  Star,
   Store,
   TrendingUp,
   Trash2,
@@ -2279,7 +2280,14 @@ export function AdminSettingsContent({ api, role = "admin" }) {
   );
 }
 
-export function AdminContactRequestsContent({ api, onMobileConversationChange }) {
+export function AdminContactRequestsContent({
+  api,
+  onMobileConversationChange,
+  externalStatusFilter,
+  onExternalStatusFilterChange,
+  externalQuery,
+  onExternalQueryChange,
+}) {
   const [requests, setRequests] = useState([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -2364,7 +2372,9 @@ export function AdminContactRequestsContent({ api, onMobileConversationChange })
     }
   };
 
-  const matchesStatusFilter = (request, filter = statusFilter) =>
+  const currentStatusFilter = externalStatusFilter ?? statusFilter;
+  const currentQuery = externalQuery ?? query;
+  const matchesStatusFilter = (request, filter = currentStatusFilter) =>
     filter === "all" ||
     (filter === "unread"
       ? Number(request.unread_count || 0) > 0
@@ -2374,31 +2384,15 @@ export function AdminContactRequestsContent({ api, onMobileConversationChange })
     const matchesStatus = matchesStatusFilter(request);
     const matchesQuery = `${request.reference} ${request.name} ${request.email} ${request.phone || ""} ${request.subject}`
       .toLowerCase()
-      .includes(query.toLowerCase());
+      .includes(currentQuery.toLowerCase());
     return matchesStatus && matchesQuery;
   });
-  const counts = requests.reduce(
-    (summary, request) => ({
-      ...summary,
-      [request.status]: Number(summary[request.status] || 0) + 1,
-    }),
-    {},
-  );
-  const unreadTotal = requests.reduce(
-    (total, item) => total + Number(item.unread_count || 0),
-    0,
-  );
-  const statusFilters = [
-    [Boxes, "Tous", "all", requests.length],
-    [MessageCircle, "Nouveaux", "new", counts.new],
-    [Clock3, "En traitement", "in_progress", counts.in_progress],
-    [CheckCircle2, "Résolus", "resolved", counts.resolved],
-    [Bell, "Non lus", "unread", unreadTotal],
-  ];
-  const activeFilterLabel =
-    statusFilters.find(([, , filter]) => filter === statusFilter)?.[1] || "Tous";
   const applyStatusFilter = (filter) => {
-    setStatusFilter(filter);
+    if (onExternalStatusFilterChange) {
+      onExternalStatusFilterChange(filter);
+    } else {
+      setStatusFilter(filter);
+    }
     if (selected && !matchesStatusFilter(selected, filter)) {
       setSelected(null);
       setThread([]);
@@ -2422,58 +2416,8 @@ export function AdminContactRequestsContent({ api, onMobileConversationChange })
     >
       {message && <div className="admin-message">{message}</div>}
       {error && <div className="admin-error">{error}</div>}
-      <nav className="admin-support-status-filters" aria-label="Filtrer les dossiers support">
-        {statusFilters.map(([Icon, label, filter, value]) => (
-          <button
-            type="button"
-            className={statusFilter === filter ? "active" : ""}
-            aria-pressed={statusFilter === filter}
-            onClick={() => applyStatusFilter(filter)}
-            key={filter}
-          >
-            <Icon />
-            <span><small>{label}</small><b>{Number(value || 0)}</b></span>
-          </button>
-        ))}
-      </nav>
-      <section className="admin-support-mobile-summary" aria-label="Résumé des dossiers visibles">
-        <span>
-          <small>Filtre actif</small>
-          <b>{activeFilterLabel}</b>
-        </span>
-        <span>
-          <small>Dossiers visibles</small>
-          <b>{visible.length}</b>
-        </span>
-      </section>
       <div className="admin-support-layout">
         <aside className="admin-support-list">
-          <div className="admin-support-list-tools">
-            <label className="admin-search">
-              <Search />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Rechercher un dossier"
-              />
-            </label>
-            <div>
-              <select
-                value={statusFilter}
-                onChange={(event) => applyStatusFilter(event.target.value)}
-                aria-label="Statut des dossiers"
-              >
-                <option value="all">Tous les statuts</option>
-                <option value="new">Nouveaux</option>
-                <option value="in_progress">En traitement</option>
-                <option value="resolved">Résolus</option>
-                <option value="unread">Non lus</option>
-              </select>
-              <button type="button" onClick={load} aria-label="Actualiser les dossiers">
-                <RefreshCw />
-              </button>
-            </div>
-          </div>
           <div className="admin-support-list-scroll">
             {visible.map((request) => (
               <button
@@ -2582,6 +2526,273 @@ export function AdminContactRequestsContent({ api, onMobileConversationChange })
             </>
           ) : (
             <div className="admin-empty">Sélectionnez une demande pour ouvrir la discussion.</div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+export function DeliveryFeedbackSupportContent({
+  api,
+  onMobileConversationChange,
+  externalStatusFilter,
+  onExternalStatusFilterChange,
+  externalQuery,
+  onExternalQueryChange,
+}) {
+  const [items, setItems] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [supportNote, setSupportNote] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [mobileItemOpen, setMobileItemOpen] = useState(false);
+  const issueLabels = {
+    positive: "Tout s'est bien passé",
+    delay: "Retard",
+    behavior: "Comportement",
+    handover: "Remise / confiance",
+    product_issue: "Souci observé à la remise",
+    other: "Autre remarque",
+  };
+
+  const currentStatusFilter = externalStatusFilter ?? statusFilter;
+  const currentQuery = externalQuery ?? query;
+  const load = async (nextStatus = currentStatusFilter, nextQuery = currentQuery) => {
+    try {
+      const params = {};
+      if (nextStatus !== "all") params.status = nextStatus;
+      if (nextQuery.trim()) params.q = nextQuery.trim();
+      const { data } = await api.get("/admin/delivery-feedback", { params });
+      setItems(Array.isArray(data.items) ? data.items : []);
+      setSummary(data.summary || {});
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message ||
+          "Impossible de charger les avis livreurs.",
+      );
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  useEffect(() => {
+    if (externalQuery !== undefined) {
+      load(currentStatusFilter, externalQuery);
+    }
+  }, [externalQuery, currentStatusFilter]);
+
+  useEffect(
+    () => () => onMobileConversationChange?.(false),
+    [onMobileConversationChange],
+  );
+
+  const openItem = (item) => {
+    setSelected(item);
+    setSupportNote(item.support_note || "");
+    setMobileItemOpen(true);
+    onMobileConversationChange?.(true);
+  };
+
+  const closeMobileItem = () => {
+    setMobileItemOpen(false);
+    onMobileConversationChange?.(false);
+  };
+
+  const applyStatus = async (status) => {
+    if (onExternalStatusFilterChange) {
+      onExternalStatusFilterChange(status);
+    } else {
+      setStatusFilter(status);
+    }
+    await load(status, query);
+  };
+
+  const submitUpdate = async (status) => {
+    if (!selected) return;
+    setSaving(true);
+    setError("");
+    try {
+      const { data } = await api.patch(`/admin/delivery-feedback/${selected.id}`, {
+        status,
+        supportNote,
+      });
+      setMessage(data.message);
+      const updatedSelected = {
+        ...selected,
+        status,
+        support_note: supportNote,
+      };
+      setSelected(updatedSelected);
+      await load(currentStatusFilter, query);
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message ||
+          "Impossible de mettre à jour cet avis.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const visibleItems =
+    currentStatusFilter === "alerts"
+      ? items.filter((item) => Number(item.rating || 0) <= 3)
+      : items;
+
+  return (
+    <div
+      className={`admin-flow admin-support-dossiers admin-delivery-feedback-page ${
+        mobileItemOpen ? "mobile-request-open" : ""
+      }`}
+    >
+      {message && <div className="admin-message">{message}</div>}
+      {error && <div className="admin-error">{error}</div>}
+      <div className="admin-support-layout">
+        <aside className="admin-support-list">
+          <div className="admin-support-list-scroll">
+            {visibleItems.map((item) => (
+              <button
+                className={`${selected?.id === item.id ? "active" : ""} ${
+                  item.status === "new" ? "unread" : ""
+                }`}
+                onClick={() => openItem(item)}
+                key={item.id}
+              >
+                <span className="admin-support-avatar image">
+                  {item.delivery_profile_image_url ? (
+                    <img src={assetUrl(item.delivery_profile_image_url)} alt={item.delivery_name} />
+                  ) : (
+                    <Truck />
+                  )}
+                </span>
+                <p>
+                  <b>{item.shop_name}</b>
+                  <strong>{item.delivery_name}</strong>
+                  <small>{item.client_name} · {item.order_number}</small>
+                  <small>{item.comment || "Aucun commentaire complémentaire."}</small>
+                </p>
+                <div className="admin-delivery-feedback-meta">
+                  <span className="admin-delivery-feedback-rating">
+                    <Star /> {Number(item.rating || 0)}/5
+                  </span>
+                  <Status value={item.status} />
+                </div>
+              </button>
+            ))}
+            {!visibleItems.length && (
+              <div className="admin-empty">
+                Aucun avis livreur ne correspond au filtre actuel.
+              </div>
+            )}
+          </div>
+        </aside>
+        <section className="admin-support-room">
+          {selected ? (
+            <>
+              <header>
+                <button
+                  type="button"
+                  className="admin-support-mobile-back"
+                  onClick={closeMobileItem}
+                  aria-label="Retour à la liste des avis"
+                >
+                  <ChevronLeft />
+                </button>
+                <div>
+                  <span className="admin-support-avatar image large">
+                    {selected.delivery_profile_image_url ? (
+                      <img
+                        src={assetUrl(selected.delivery_profile_image_url)}
+                        alt={selected.delivery_name}
+                      />
+                    ) : (
+                      <Truck />
+                    )}
+                  </span>
+                  <p>
+                    <small className="admin-support-reference">
+                      {selected.order_number} · {selected.shop_name}
+                    </small>
+                    <b>{selected.delivery_name}</b>
+                    <strong>{selected.client_name}</strong>
+                    <small className="admin-support-contact-line">
+                      {selected.client_phone || "Téléphone client non renseigné"}
+                    </small>
+                  </p>
+                </div>
+                <Status value={selected.status} />
+              </header>
+              <div className="admin-delivery-feedback-detail">
+                <article>
+                  <small>Note laissée</small>
+                  <strong>{Number(selected.rating || 0)}/5</strong>
+                </article>
+                <article>
+                  <small>Sujet</small>
+                  <strong>{issueLabels[selected.issue_type] || "Autre remarque"}</strong>
+                </article>
+                <article>
+                  <small>Date</small>
+                  <strong>{shortDate(selected.created_at)}</strong>
+                </article>
+                <article>
+                  <small>Téléphone livreur</small>
+                  <strong>{selected.delivery_phone || "Non renseigné"}</strong>
+                </article>
+              </div>
+              <div className="admin-support-history admin-delivery-feedback-thread">
+                <article className="client">
+                  <small>{selected.client_name}</small>
+                  <p>{selected.comment || "Le client n'a laissé aucun commentaire supplémentaire."}</p>
+                  <time>{new Date(selected.created_at).toLocaleString("fr-HT")}</time>
+                </article>
+              </div>
+              <form
+                className="admin-support-reply-form admin-delivery-feedback-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submitUpdate(selected.status);
+                }}
+              >
+                <label className="admin-delivery-feedback-note">
+                  <span>Note interne support</span>
+                  <textarea
+                    rows="4"
+                    value={supportNote}
+                    onChange={(event) => setSupportNote(event.target.value)}
+                    placeholder="Résumé du suivi support ou décision prise."
+                  />
+                </label>
+                <div className="admin-support-status-actions">
+                  <button
+                    type="button"
+                    onClick={() => submitUpdate("in_review")}
+                    disabled={saving}
+                  >
+                    <Clock3 /> En traitement
+                  </button>
+                  <button
+                    type="button"
+                    className="success"
+                    onClick={() => submitUpdate("resolved")}
+                    disabled={saving}
+                  >
+                    <CheckCircle2 /> Résoudre
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : (
+            <div className="admin-empty">
+              Sélectionnez un avis livreur pour ouvrir le suivi support dédié.
+            </div>
           )}
         </section>
       </div>

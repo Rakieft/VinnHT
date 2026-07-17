@@ -948,6 +948,72 @@ const notifyUser = async (
   return true;
 };
 
+const notifyConversationMessage = async (
+  executor,
+  {
+    recipientId,
+    recipientRole,
+    conversationId,
+    senderLabel,
+    senderUserId,
+    link,
+  },
+) => {
+  const [[existingNotification]] = await executor.query(
+    `SELECT id
+     FROM notifications
+     WHERE user_id=?
+       AND type='message.received'
+       AND entity_type='conversation'
+       AND entity_id=?
+       AND read_at IS NULL
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [recipientId, conversationId],
+  );
+
+  const [[unreadRow]] = await executor.query(
+    `SELECT COUNT(*) unread_count
+     FROM messages
+     WHERE conversation_id=?
+       AND sender_id=?
+       AND read_at IS NULL`,
+    [conversationId, senderUserId],
+  );
+
+  const unreadCount = Number(unreadRow?.unread_count || 0);
+  const message =
+    unreadCount > 1
+      ? `${senderLabel} vous a écrit.`
+      : `${senderLabel} vous a envoyé un message.`;
+
+  if (existingNotification) {
+    await executor.query(
+      `UPDATE notifications
+       SET title=?,
+           message=?,
+           link=?,
+           created_at=NOW(),
+           read_at=NULL
+       WHERE id=?`,
+      [senderLabel, message, link, existingNotification.id],
+    );
+    return true;
+  }
+
+  return notifyUser(
+    executor,
+    recipientId,
+    recipientRole,
+    "message.received",
+    senderLabel,
+    message,
+    link,
+    "conversation",
+    conversationId,
+  );
+};
+
 const notifyShopFollowers = async (
   executor,
   sellerId,
@@ -3739,7 +3805,7 @@ app.patch(
         });
       }
       const [[driver]] = await connection.query(
-        `SELECT u.id,u.name
+        `SELECT u.id,u.name,u.profile_image_url
          FROM seller_delivery_drivers sdd
          JOIN users u ON u.id=sdd.delivery_user_id
          WHERE sdd.seller_id=? AND sdd.delivery_user_id=? AND sdd.status='active' AND u.status='active'`,
@@ -3748,6 +3814,13 @@ app.patch(
       if (!driver) {
         await connection.rollback();
         return res.status(404).json({ message: "Livreur introuvable pour votre boutique." });
+      }
+      if (!driver.profile_image_url) {
+        await connection.rollback();
+        return res.status(409).json({
+          message:
+            "Ce livreur doit d'abord ajouter sa photo de profil avant de recevoir une mission.",
+        });
       }
       await connection.query(
         `INSERT INTO seller_delivery_assignments
@@ -4357,6 +4430,12 @@ app.get(
         sda.status delivery_status,
         sda.confirmed_at signature_captured_at,
         drc.confirmed_at client_confirmed_at,
+        df.id feedback_id,
+        df.rating feedback_rating,
+        df.issue_type feedback_issue_type,
+        df.comment feedback_comment,
+        df.status feedback_status,
+        df.created_at feedback_created_at,
         u.id delivery_user_id,
         u.name delivery_name,
         u.phone delivery_phone,
@@ -4368,9 +4447,12 @@ app.get(
        LEFT JOIN seller_profiles sp ON sp.seller_id=sda.seller_id
        LEFT JOIN delivery_receipt_confirmations drc
          ON drc.seller_delivery_assignment_id=sda.id
+       LEFT JOIN delivery_feedback df
+         ON df.seller_delivery_assignment_id=sda.id
+        AND df.client_id=?
        WHERE sda.order_id=?
        ORDER BY shop_name,u.name`,
-      [order.id],
+      [req.user.id, order.id],
     );
     const deliveryPeople = [...sellerDeliveryPeople];
 
@@ -4389,8 +4471,37 @@ app.get(
         delivery_profile_image_url: order.delivery_profile_image_url,
         signature_captured_at: order.delivery_signature_captured_at,
         client_confirmed_at: order.delivery_client_confirmed_at,
+        feedback_id: null,
+        feedback_rating: null,
+        feedback_issue_type: null,
+        feedback_comment: null,
+        feedback_status: null,
+        feedback_created_at: null,
         shop_name: null,
       });
+    }
+
+    if (order.delivery_id) {
+      const [[mainFeedback]] = await pool.query(
+        `SELECT id,rating,issue_type,comment,status,created_at
+         FROM delivery_feedback
+         WHERE delivery_id=? AND client_id=?
+         LIMIT 1`,
+        [order.delivery_id, req.user.id],
+      );
+      if (mainFeedback) {
+        const mainDelivery = deliveryPeople.find(
+          (person) => String(person.assignment_id || "").startsWith("main-"),
+        );
+        if (mainDelivery) {
+          mainDelivery.feedback_id = mainFeedback.id;
+          mainDelivery.feedback_rating = mainFeedback.rating;
+          mainDelivery.feedback_issue_type = mainFeedback.issue_type;
+          mainDelivery.feedback_comment = mainFeedback.comment;
+          mainDelivery.feedback_status = mainFeedback.status;
+          mainDelivery.feedback_created_at = mainFeedback.created_at;
+        }
+      }
     }
 
     res.json({
@@ -4598,6 +4709,236 @@ app.patch(
         message: newlyConfirmed
           ? "Merci. Votre réception est confirmée depuis votre compte VinnHT."
           : "Cette réception avait déjà été confirmée depuis votre compte.",
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }),
+);
+
+app.post(
+  "/api/orders/:id/delivery-feedback",
+  authenticate,
+  authorize("client"),
+  writeRateLimiter,
+  [
+    body("assignmentReference")
+      .trim()
+      .matches(/^(seller|main)-\d+$/)
+      .withMessage("Livraison invalide."),
+    body("rating").isInt({ min: 1, max: 5 }),
+    body("issueType")
+      .isIn(["positive", "delay", "behavior", "handover", "product_issue", "other"]),
+    body("comment").optional({ checkFalsy: true }).trim().isLength({ max: 1000 }),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const orderId = Number(req.params.id);
+    const assignmentReference = String(req.body.assignmentReference || "");
+    const [, assignmentType, rawAssignmentId] =
+      assignmentReference.match(/^(seller|main)-(\d+)$/) || [];
+    const assignmentId = Number(rawAssignmentId);
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      const [[order]] = await connection.query(
+        `SELECT id,order_number
+         FROM orders
+         WHERE id=? AND client_id=? FOR UPDATE`,
+        [orderId, req.user.id],
+      );
+
+      if (!order) {
+        await connection.rollback();
+        return res.status(404).json({ message: "Commande introuvable." });
+      }
+
+      let feedbackScope = null;
+      let supportMessage = "";
+      let sellerIds = [];
+
+      if (assignmentType === "seller") {
+        const [[assignment]] = await connection.query(
+          `SELECT sda.id,sda.order_id,sda.seller_id,sda.seller_sale_id,sda.delivery_user_id,
+            drc.confirmed_at client_confirmed_at,
+            delivery_user.name delivery_name,
+            COALESCE(sp.shop_name,seller.name) shop_name
+           FROM seller_delivery_assignments sda
+           JOIN users delivery_user ON delivery_user.id=sda.delivery_user_id
+           JOIN users seller ON seller.id=sda.seller_id
+           LEFT JOIN seller_profiles sp ON sp.seller_id=sda.seller_id
+           LEFT JOIN delivery_receipt_confirmations drc
+             ON drc.seller_delivery_assignment_id=sda.id
+           WHERE sda.id=? AND sda.order_id=? FOR UPDATE`,
+          [assignmentId, orderId],
+        );
+
+        if (!assignment) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Livraison boutique introuvable." });
+        }
+        if (!assignment.client_confirmed_at) {
+          await connection.rollback();
+          return res.status(409).json({
+            message:
+              "Confirmez d'abord depuis votre compte que la livraison a bien été reçue.",
+          });
+        }
+
+        feedbackScope = {
+          sellerSaleId: assignment.seller_sale_id,
+          sellerAssignmentId: assignment.id,
+          deliveryId: null,
+          sellerId: assignment.seller_id,
+          deliveryUserId: assignment.delivery_user_id,
+          deliveryName: assignment.delivery_name,
+          shopName: assignment.shop_name,
+        };
+        sellerIds = [assignment.seller_id];
+        supportMessage = `${assignment.shop_name} · ${assignment.delivery_name}`;
+      } else {
+        const [[delivery]] = await connection.query(
+          `SELECT d.id,d.order_id,d.delivery_user_id,
+            drc.confirmed_at client_confirmed_at,
+            delivery_user.name delivery_name
+           FROM deliveries d
+           JOIN users delivery_user ON delivery_user.id=d.delivery_user_id
+           LEFT JOIN delivery_receipt_confirmations drc ON drc.delivery_id=d.id
+           WHERE d.id=? AND d.order_id=? FOR UPDATE`,
+          [assignmentId, orderId],
+        );
+
+        if (!delivery) {
+          await connection.rollback();
+          return res.status(404).json({ message: "Livraison introuvable." });
+        }
+        if (!delivery.client_confirmed_at) {
+          await connection.rollback();
+          return res.status(409).json({
+            message:
+              "Confirmez d'abord depuis votre compte que la livraison a bien été reçue.",
+          });
+        }
+
+        const [sellerRows] = await connection.query(
+          "SELECT DISTINCT seller_id FROM seller_sales WHERE order_id=?",
+          [orderId],
+        );
+        sellerIds = sellerRows.map((item) => Number(item.seller_id));
+        feedbackScope = {
+          sellerSaleId: null,
+          sellerAssignmentId: null,
+          deliveryId: delivery.id,
+          sellerId: sellerIds[0] || null,
+          deliveryUserId: delivery.delivery_user_id,
+          deliveryName: delivery.delivery_name,
+          shopName: "Livraison VinnHT",
+        };
+        supportMessage = delivery.delivery_name;
+      }
+
+      const issueLabelMap = {
+        positive: "Retour positif",
+        delay: "Retard signalé",
+        behavior: "Comportement signalé",
+        handover: "Remise signalée",
+        product_issue: "Produit signalé",
+        other: "Avis livreur",
+      };
+
+      const [existingRows] = await connection.query(
+        `SELECT id
+         FROM delivery_feedback
+         WHERE client_id=?
+           AND (
+             (seller_delivery_assignment_id IS NOT NULL AND seller_delivery_assignment_id=?)
+             OR (delivery_id IS NOT NULL AND delivery_id=?)
+           )
+         LIMIT 1`,
+        [req.user.id, feedbackScope.sellerAssignmentId, feedbackScope.deliveryId],
+      );
+
+      let feedbackId = existingRows[0]?.id || null;
+      const payload = [
+        req.body.rating,
+        req.body.issueType,
+        req.body.comment || null,
+        feedbackScope.sellerId,
+        feedbackScope.deliveryUserId,
+      ];
+
+      if (feedbackId) {
+        await connection.query(
+          `UPDATE delivery_feedback
+           SET rating=?,issue_type=?,comment=?,seller_id=?,delivery_user_id=?,
+               status='new',support_note=NULL,reviewed_by=NULL,reviewed_at=NULL
+           WHERE id=?`,
+          [...payload, feedbackId],
+        );
+      } else {
+        const [created] = await connection.query(
+          `INSERT INTO delivery_feedback
+            (order_id,seller_sale_id,seller_delivery_assignment_id,delivery_id,
+             seller_id,delivery_user_id,client_id,rating,issue_type,comment)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          [
+            orderId,
+            feedbackScope.sellerSaleId,
+            feedbackScope.sellerAssignmentId,
+            feedbackScope.deliveryId,
+            feedbackScope.sellerId,
+            feedbackScope.deliveryUserId,
+            req.user.id,
+            req.body.rating,
+            req.body.issueType,
+            req.body.comment || null,
+          ],
+        );
+        feedbackId = created.insertId;
+      }
+
+      for (const sellerId of sellerIds) {
+        await notifyUser(
+          connection,
+          sellerId,
+          "seller",
+          "delivery.feedback",
+          "Avis client sur un livreur",
+          `Le client a laissé un avis sur ${supportMessage} pour ${order.order_number}.`,
+          "/seller/orders",
+          "order",
+          orderId,
+        );
+      }
+
+      await notifyRole(
+        connection,
+        "support",
+        "support.delivery_feedback",
+        issueLabelMap[req.body.issueType] || "Avis livreur",
+        `Nouvel avis livreur pour ${order.order_number} · ${supportMessage}.`,
+        "/support",
+        "delivery_feedback",
+        feedbackId,
+      );
+
+      await audit(req, "delivery.feedback.create", "delivery_feedback", feedbackId, {
+        orderId,
+        assignmentReference,
+        rating: req.body.rating,
+        issueType: req.body.issueType,
+      });
+
+      await connection.commit();
+      res.status(201).json({
+        id: feedbackId,
+        message:
+          "Merci. Votre avis sur le livreur a bien été transmis au support VinnHT.",
       });
     } catch (error) {
       await connection.rollback();
@@ -8415,6 +8756,99 @@ app.get(
     res.json(rows);
   }),
 );
+app.get(
+  "/api/admin/delivery-feedback",
+  authenticate,
+  authorize("admin", "support"),
+  noStore,
+  asyncRoute(async (req, res) => {
+    const query = String(req.query.q || "").trim();
+    const status = ["new", "in_review", "resolved"].includes(req.query.status)
+      ? req.query.status
+      : null;
+    const searchValue = `%${query}%`;
+    const where = [
+      `(?='' OR o.order_number LIKE ? OR client.name LIKE ? OR driver.name LIKE ?
+        OR COALESCE(sp.shop_name,seller.name,'Livraison VinnHT') LIKE ? OR COALESCE(df.comment,'') LIKE ?)`,
+      "(? IS NULL OR df.status=?)",
+    ].join(" AND ");
+    const params = [
+      query,
+      searchValue,
+      searchValue,
+      searchValue,
+      searchValue,
+      searchValue,
+      status,
+      status,
+    ];
+    const [rows] = await pool.query(
+      `SELECT
+        df.*,
+        o.order_number,
+        client.name client_name,
+        client.phone client_phone,
+        driver.name delivery_name,
+        driver.phone delivery_phone,
+        driver.profile_image_url delivery_profile_image_url,
+        COALESCE(sp.shop_name,seller.name,'Livraison VinnHT') shop_name,
+        reviewer.name reviewed_by_name
+       FROM delivery_feedback df
+       JOIN orders o ON o.id=df.order_id
+       JOIN users client ON client.id=df.client_id
+       JOIN users driver ON driver.id=df.delivery_user_id
+       LEFT JOIN users seller ON seller.id=df.seller_id
+       LEFT JOIN seller_profiles sp ON sp.seller_id=df.seller_id
+       LEFT JOIN users reviewer ON reviewer.id=df.reviewed_by
+       WHERE ${where}
+       ORDER BY
+         CASE df.status
+           WHEN 'new' THEN 0
+           WHEN 'in_review' THEN 1
+           ELSE 2
+         END,
+         df.created_at DESC`,
+      params,
+    );
+    const [[summary]] = await pool.query(
+      `SELECT
+        COUNT(*) total,
+        SUM(status='new') new_count,
+        SUM(status='in_review') in_review_count,
+        SUM(status='resolved') resolved_count,
+        SUM(rating<=3) alert_count
+       FROM delivery_feedback`,
+    );
+    res.json({ items: rows, summary });
+  }),
+);
+app.patch(
+  "/api/admin/delivery-feedback/:id",
+  authenticate,
+  authorize("admin", "support"),
+  writeRateLimiter,
+  [
+    body("status").isIn(["new", "in_review", "resolved"]),
+    body("supportNote").optional({ checkFalsy: true }).trim().isLength({ max: 500 }),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const [result] = await pool.query(
+      `UPDATE delivery_feedback
+       SET status=?,support_note=?,reviewed_by=?,reviewed_at=NOW()
+       WHERE id=?`,
+      [req.body.status, req.body.supportNote || null, req.user.id, req.params.id],
+    );
+    if (!result.affectedRows) {
+      return res.status(404).json({ message: "Avis livreur introuvable." });
+    }
+    await audit(req, "delivery.feedback.update", "delivery_feedback", req.params.id, {
+      status: req.body.status,
+      supportNote: req.body.supportNote || null,
+    });
+    res.json({ message: "Suivi support mis à jour." });
+  }),
+);
 app.patch(
   "/api/admin/contact-requests/:id",
   authenticate,
@@ -8512,6 +8946,39 @@ app.patch(
     res.json({ message: "Toutes les notifications sont lues." });
   }),
 );
+app.delete(
+  "/api/notifications/:id",
+  authenticate,
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const [result] = await pool.query(
+      "DELETE FROM notifications WHERE id=? AND user_id=?",
+      [req.params.id, req.user.id],
+    );
+    if (!result.affectedRows) {
+      return res.status(404).json({ message: "Notification introuvable." });
+    }
+    res.json({ message: "Notification supprimée." });
+  }),
+);
+app.delete(
+  "/api/notifications",
+  authenticate,
+  writeRateLimiter,
+  [body("role").optional({ checkFalsy: true }).isIn(["client", "seller", "delivery", "supervisor", "manager", "support", "finance", "admin"])],
+  validate,
+  asyncRoute(async (req, res) => {
+    const role = req.body.role || null;
+    if (role && !req.user.roles.includes(role) && !req.user.roles.includes("admin")) {
+      return res.status(403).json({ message: "Rôle de notification non autorisé." });
+    }
+    await pool.query(
+      "DELETE FROM notifications WHERE user_id=? AND (? IS NULL OR role=? OR role IS NULL)",
+      [req.user.id, role, role],
+    );
+    res.json({ message: "Notifications supprimées." });
+  }),
+);
 
 app.get(
   "/api/messages/contacts",
@@ -8542,24 +9009,60 @@ app.get(
       ["support", "admin"].includes(role),
     );
     const [rows] = await pool.query(
-      `SELECT c.id,c.client_id,c.seller_id,c.updated_at,
+      `SELECT c.id,c.client_id,c.seller_id,c.support_context,c.updated_at,
+        CASE
+          WHEN seller.role IN ('admin','support') AND c.support_context='support_seller'
+            THEN 'Support vendeur'
+          WHEN seller.role IN ('admin','support')
+            THEN 'Support client'
+          ELSE 'Discussion boutique'
+        END context_label,
+        CASE
+          WHEN ?=1 AND seller.role IN ('admin','support') AND c.support_context='support_seller'
+            THEN client.name
+          ELSE NULL
+        END owner_name,
         CASE
           WHEN c.client_id=? AND seller.role IN ('admin','support') THEN 'Support VinnHT'
+          WHEN ?=1 AND seller.role IN ('admin','support') AND c.support_context='support_seller'
+            THEN COALESCE(client_shop.shop_name,client.name)
+          WHEN ?=1 AND seller.role IN ('admin','support')
+            THEN client.name
           WHEN c.client_id=? THEN COALESCE(sp.shop_name,seller.name)
           ELSE client.name
         END name,
         CASE
           WHEN c.client_id=? AND seller.role IN ('admin','support') THEN '/vinnht-logo.png'
+          WHEN ?=1 AND seller.role IN ('admin','support') AND c.support_context='support_seller'
+            THEN COALESCE(client_shop.shop_logo_url,client.profile_image_url)
           WHEN c.client_id=? THEN COALESCE(sp.shop_logo_url,seller.profile_image_url)
           ELSE client.profile_image_url
         END image_url,
-        (SELECT body FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) last_message,
-        (SELECT created_at FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) last_message_at,
-        (SELECT COUNT(*) FROM messages WHERE conversation_id=c.id AND sender_id<>? AND read_at IS NULL) unread_count
+        (SELECT m.body
+         FROM messages m
+         LEFT JOIN user_hidden_messages uhm ON uhm.message_id=m.id AND uhm.user_id=?
+         WHERE m.conversation_id=c.id AND uhm.id IS NULL
+         ORDER BY m.created_at DESC
+         LIMIT 1) last_message,
+        (SELECT m.created_at
+         FROM messages m
+         LEFT JOIN user_hidden_messages uhm ON uhm.message_id=m.id AND uhm.user_id=?
+         WHERE m.conversation_id=c.id AND uhm.id IS NULL
+         ORDER BY m.created_at DESC
+         LIMIT 1) last_message_at,
+        (SELECT COUNT(*)
+         FROM messages m
+         LEFT JOIN user_hidden_messages uhm ON uhm.message_id=m.id AND uhm.user_id=?
+         WHERE m.conversation_id=c.id
+           AND m.sender_id<>?
+           AND m.read_at IS NULL
+           AND uhm.id IS NULL) unread_count
        FROM conversations c
        JOIN users client ON client.id=c.client_id
        JOIN users seller ON seller.id=c.seller_id
        LEFT JOIN seller_profiles sp ON sp.seller_id=c.seller_id
+       LEFT JOIN seller_profiles client_shop ON client_shop.seller_id=c.client_id
+       LEFT JOIN user_hidden_conversations uhc ON uhc.conversation_id=c.id AND uhc.user_id=?
        WHERE (
          c.client_id=? OR c.seller_id=?
          OR (?=1 AND EXISTS(
@@ -8568,6 +9071,7 @@ app.get(
              AND support_role.role IN ('support','admin')
          ))
        )
+       AND uhc.id IS NULL
        AND (
          c.client_id<>?
          OR seller.role NOT IN ('admin','support')
@@ -8575,7 +9079,9 @@ app.get(
            SELECT c2.id
            FROM conversations c2
            JOIN users seller2 ON seller2.id=c2.seller_id
-           WHERE c2.client_id=? AND seller2.role IN ('admin','support')
+           WHERE c2.client_id=c.client_id
+             AND c2.support_context=c.support_context
+             AND seller2.role IN ('admin','support')
            ORDER BY COALESCE(
              (SELECT created_at FROM messages WHERE conversation_id=c2.id ORDER BY created_at DESC LIMIT 1),
              c2.updated_at
@@ -8586,6 +9092,14 @@ app.get(
        )
        ORDER BY COALESCE(last_message_at,c.updated_at) DESC`,
       [
+        sharedSupportAccess ? 1 : 0,
+        req.user.id,
+        sharedSupportAccess ? 1 : 0,
+        sharedSupportAccess ? 1 : 0,
+        req.user.id,
+        req.user.id,
+        sharedSupportAccess ? 1 : 0,
+        req.user.id,
         req.user.id,
         req.user.id,
         req.user.id,
@@ -8594,7 +9108,6 @@ app.get(
         req.user.id,
         req.user.id,
         sharedSupportAccess ? 1 : 0,
-        req.user.id,
         req.user.id,
       ],
     );
@@ -8615,12 +9128,16 @@ app.post(
     );
     if (!seller) return res.status(404).json({ message: "Vendeur introuvable." });
     await pool.query(
-      "INSERT IGNORE INTO conversations (client_id,seller_id) VALUES (?,?)",
+      "INSERT IGNORE INTO conversations (client_id,seller_id,support_context) VALUES (?,?,'marketplace')",
       [req.user.id, req.body.sellerId],
     );
     const [[conversation]] = await pool.query(
-      "SELECT id FROM conversations WHERE client_id=? AND seller_id=?",
+      "SELECT id FROM conversations WHERE client_id=? AND seller_id=? AND support_context='marketplace'",
       [req.user.id, req.body.sellerId],
+    );
+    await pool.query(
+      "DELETE FROM user_hidden_conversations WHERE user_id=? AND conversation_id=?",
+      [req.user.id, conversation.id],
     );
     res.status(201).json(conversation);
   }),
@@ -8628,7 +9145,18 @@ app.post(
 app.post(
   "/api/messages/support",
   authenticate,
+  [
+    body("context")
+      .optional({ checkFalsy: true })
+      .isIn(["client", "seller"]),
+  ],
+  validate,
   asyncRoute(async (req, res) => {
+    const roles = await getUserRoles(req.user.id, req.user.role);
+    const requestedContext =
+      req.body.context === "seller" && roles.includes("seller")
+        ? "support_seller"
+        : "support_client";
     const [[support]] = await pool.query(
       `SELECT u.id
        FROM users u
@@ -8642,25 +9170,31 @@ app.post(
       `SELECT c.id
        FROM conversations c
        JOIN users seller ON seller.id=c.seller_id
-       WHERE c.client_id=? AND seller.role IN ('support','admin')
+       WHERE c.client_id=?
+         AND c.support_context=?
+         AND seller.role IN ('support','admin')
        ORDER BY COALESCE(
          (SELECT created_at FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1),
          c.updated_at
        ) DESC,
        c.id DESC
        LIMIT 1`,
-      [req.user.id],
+      [req.user.id, requestedContext],
     );
     if (existingConversation) {
+      await pool.query(
+        "DELETE FROM user_hidden_conversations WHERE user_id=? AND conversation_id=?",
+        [req.user.id, existingConversation.id],
+      );
       return res.status(201).json(existingConversation);
     }
     await pool.query(
-      "INSERT IGNORE INTO conversations (client_id,seller_id) VALUES (?,?)",
-      [req.user.id, support.id],
+      "INSERT IGNORE INTO conversations (client_id,seller_id,support_context) VALUES (?,?,?)",
+      [req.user.id, support.id, requestedContext],
     );
     const [[conversation]] = await pool.query(
-      "SELECT id FROM conversations WHERE client_id=? AND seller_id=?",
-      [req.user.id, support.id],
+      "SELECT id FROM conversations WHERE client_id=? AND seller_id=? AND support_context=?",
+      [req.user.id, support.id, requestedContext],
     );
     res.status(201).json(conversation);
   }),
@@ -8681,19 +9215,36 @@ app.get(
            WHERE support_role.user_id=c.seller_id
              AND support_role.role IN ('support','admin')
          ))
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM user_hidden_conversations uhc
+         WHERE uhc.conversation_id=c.id AND uhc.user_id=?
        )`,
-      [req.params.id, req.user.id, req.user.id, sharedSupportAccess ? 1 : 0],
+      [req.params.id, req.user.id, req.user.id, sharedSupportAccess ? 1 : 0, req.user.id],
     );
     if (!conversation) return res.status(404).json({ message: "Conversation introuvable." });
     await pool.query(
       "UPDATE messages SET read_at=COALESCE(read_at,NOW()) WHERE conversation_id=? AND sender_id<>?",
       [req.params.id, req.user.id],
     );
+    await pool.query(
+      `UPDATE notifications
+       SET read_at=COALESCE(read_at,NOW())
+       WHERE user_id=?
+         AND entity_type='conversation'
+         AND entity_id=?`,
+      [req.user.id, req.params.id],
+    );
     const [messages] = await pool.query(
       `SELECT m.id,m.body,m.created_at,m.sender_id,u.name sender_name
-       FROM messages m JOIN users u ON u.id=m.sender_id
-       WHERE m.conversation_id=? ORDER BY m.created_at`,
-      [req.params.id],
+       FROM messages m
+       JOIN users u ON u.id=m.sender_id
+       LEFT JOIN user_hidden_messages uhm ON uhm.message_id=m.id AND uhm.user_id=?
+       WHERE m.conversation_id=?
+         AND uhm.id IS NULL
+       ORDER BY m.created_at`,
+      [req.user.id, req.params.id],
     );
     res.json(messages);
   }),
@@ -8708,7 +9259,7 @@ app.post(
       ["support", "admin"].includes(role),
     );
     const [[conversation]] = await pool.query(
-      `SELECT id,client_id,seller_id
+      `SELECT id,client_id,seller_id,support_context
        FROM conversations
        WHERE id=? AND (
          client_id=? OR seller_id=?
@@ -8726,6 +9277,10 @@ app.post(
       [req.params.id, req.user.id, req.body.body],
     );
     await pool.query("UPDATE conversations SET updated_at=NOW() WHERE id=?", [req.params.id]);
+    await pool.query(
+      "DELETE FROM user_hidden_conversations WHERE conversation_id=? AND user_id IN (?,?)",
+      [req.params.id, conversation.client_id, conversation.seller_id],
+    );
     const recipientId =
       Number(conversation.client_id) === Number(req.user.id)
         ? conversation.seller_id
@@ -8742,6 +9297,19 @@ app.post(
         : recipientIsClient
           ? "client"
           : "seller";
+    const [[senderProfile]] = await pool.query(
+      `SELECT u.name,
+              u.role,
+              COALESCE(sp.shop_name,u.name) sender_label
+       FROM users u
+       LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
+       WHERE u.id=?`,
+      [req.user.id],
+    );
+    const senderLabel =
+      conversation.support_context === "support_seller"
+        ? senderProfile?.sender_label || senderProfile?.name || req.user.name
+        : senderProfile?.name || req.user.name;
     const notificationLink = {
       admin: "/admin/contact-requests",
       support: "/support",
@@ -8753,26 +9321,108 @@ app.post(
         pool,
         "support",
         "message.received",
-        "Nouveau message client",
-        `${req.user.name} a écrit au support VinnHT.`,
+        conversation.support_context === "support_seller"
+          ? "Nouveau message vendeur"
+          : "Nouveau message client",
+        `${senderLabel} a écrit au support VinnHT.`,
         "/support",
         "conversation",
         conversation.id,
       );
     } else {
-      await notifyUser(
+      await notifyConversationMessage(
         pool,
-        recipientId,
-        recipientRole,
-        "message.received",
-        "Nouveau message",
-        `${req.user.name} vous a envoyé un message.`,
-        notificationLink,
-        "conversation",
-        conversation.id,
+        {
+          recipientId,
+          recipientRole,
+          conversationId: conversation.id,
+          senderLabel,
+          senderUserId: req.user.id,
+          link: notificationLink,
+        },
       );
     }
     res.status(201).json({ id: result.insertId, message: "Message envoyé." });
+  }),
+);
+app.delete(
+  "/api/messages/conversations/:id",
+  authenticate,
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const sharedSupportAccess = req.user.roles.some((role) =>
+      ["support", "admin"].includes(role),
+    );
+    const [[conversation]] = await pool.query(
+      `SELECT c.id
+       FROM conversations c
+       WHERE c.id=? AND (
+         c.client_id=? OR c.seller_id=?
+         OR (?=1 AND EXISTS(
+           SELECT 1 FROM user_roles support_role
+           WHERE support_role.user_id=c.seller_id
+             AND support_role.role IN ('support','admin')
+         ))
+       )`,
+      [req.params.id, req.user.id, req.user.id, sharedSupportAccess ? 1 : 0],
+    );
+    if (!conversation) return res.status(404).json({ message: "Conversation introuvable." });
+    await pool.query(
+      "INSERT IGNORE INTO user_hidden_conversations (user_id,conversation_id) VALUES (?,?)",
+      [req.user.id, req.params.id],
+    );
+    await pool.query(
+      "DELETE FROM notifications WHERE user_id=? AND entity_type='conversation' AND entity_id=?",
+      [req.user.id, req.params.id],
+    );
+    res.json({ message: "Discussion supprimée de votre espace." });
+  }),
+);
+app.delete(
+  "/api/messages/:id",
+  authenticate,
+  writeRateLimiter,
+  asyncRoute(async (req, res) => {
+    const sharedSupportAccess = req.user.roles.some((role) =>
+      ["support", "admin"].includes(role),
+    );
+    const [[message]] = await pool.query(
+      `SELECT m.id,m.conversation_id
+       FROM messages m
+       JOIN conversations c ON c.id=m.conversation_id
+       WHERE m.id=?
+         AND (
+           c.client_id=? OR c.seller_id=?
+           OR (?=1 AND EXISTS(
+             SELECT 1 FROM user_roles support_role
+             WHERE support_role.user_id=c.seller_id
+               AND support_role.role IN ('support','admin')
+           ))
+         )`,
+      [req.params.id, req.user.id, req.user.id, sharedSupportAccess ? 1 : 0],
+    );
+    if (!message) return res.status(404).json({ message: "Message introuvable." });
+    await pool.query(
+      "INSERT IGNORE INTO user_hidden_messages (user_id,message_id) VALUES (?,?)",
+      [req.user.id, req.params.id],
+    );
+    const [[visibleMessages]] = await pool.query(
+      `SELECT COUNT(*) visible_count
+       FROM messages m
+       LEFT JOIN user_hidden_messages uhm ON uhm.message_id=m.id AND uhm.user_id=?
+       WHERE m.conversation_id=? AND uhm.id IS NULL`,
+      [req.user.id, message.conversation_id],
+    );
+    if (!Number(visibleMessages?.visible_count || 0)) {
+      await pool.query(
+        "INSERT IGNORE INTO user_hidden_conversations (user_id,conversation_id) VALUES (?,?)",
+        [req.user.id, message.conversation_id],
+      );
+    }
+    res.json({
+      message: "Message supprimé de votre espace.",
+      conversationHidden: !Number(visibleMessages?.visible_count || 0),
+    });
   }),
 );
 

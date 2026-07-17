@@ -721,6 +721,7 @@ export function ClientOrdersContent({
   receiptProcessing = false,
   receiptMessage = "",
   receiptError = "",
+  onSubmitDeliveryFeedback,
 }) {
   const [filter, setFilter] = useState("Toutes");
   const [query, setQuery] = useState("");
@@ -824,6 +825,7 @@ export function ClientOrdersContent({
             receiptProcessing={receiptProcessing}
             receiptMessage={receiptMessage}
             receiptError={receiptError}
+            onSubmitDeliveryFeedback={onSubmitDeliveryFeedback}
           />
         </div>
       )}
@@ -843,12 +845,20 @@ function ClientOrderDetail({
   receiptProcessing = false,
   receiptMessage = "",
   receiptError = "",
+  onSubmitDeliveryFeedback,
 }) {
   const [proofFile, setProofFile] = useState(null);
   const [proofNote, setProofNote] = useState("");
   const [showPaymentProof, setShowPaymentProof] = useState(false);
   const [receiptToConfirm, setReceiptToConfirm] = useState(null);
   const [receiptAcknowledged, setReceiptAcknowledged] = useState(false);
+  const [feedbackTarget, setFeedbackTarget] = useState(null);
+  const [feedbackRating, setFeedbackRating] = useState(5);
+  const [feedbackIssueType, setFeedbackIssueType] = useState("positive");
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [feedbackProcessing, setFeedbackProcessing] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
   const steps = ["confirmed", "processing", "shipped", "delivered"];
   const currentIndex = steps.indexOf(order.status);
   const paymentInstructions = order.paymentInstructions || [];
@@ -882,11 +892,56 @@ function ClientOrderDetail({
           },
         ]
       : [];
+  const feedbackTypeLabels = {
+    positive: "Tout s'est bien passé",
+    delay: "Retard",
+    behavior: "Comportement",
+    handover: "Remise / confiance",
+    product_issue: "Souci observé à la remise",
+    other: "Autre remarque",
+  };
 
   const submitProof = (event) => {
     event.preventDefault();
     if (!proofFile || !canSendProof) return;
     onSubmitPaymentProof(order.id, { file: proofFile, note: proofNote });
+  };
+
+  const openFeedbackModal = (person) => {
+    setFeedbackTarget(person);
+    setFeedbackRating(Number(person.feedback_rating) || 5);
+    setFeedbackIssueType(person.feedback_issue_type || "positive");
+    setFeedbackComment(person.feedback_comment || "");
+    setFeedbackError("");
+    setFeedbackMessage("");
+  };
+
+  const submitDeliveryFeedback = async (event) => {
+    event.preventDefault();
+    if (!feedbackTarget || !onSubmitDeliveryFeedback) return;
+    setFeedbackProcessing(true);
+    setFeedbackError("");
+    setFeedbackMessage("");
+    try {
+      const response = await onSubmitDeliveryFeedback(order.id, {
+        assignmentReference: feedbackTarget.assignment_id,
+        rating: Number(feedbackRating),
+        issueType: feedbackIssueType,
+        comment: feedbackComment.trim(),
+      });
+      setFeedbackMessage(
+        response?.message ||
+          "Votre avis sur ce livreur a bien été transmis au support VinnHT.",
+      );
+      setFeedbackTarget(null);
+    } catch (requestError) {
+      setFeedbackError(
+        requestError?.response?.data?.message ||
+          "Impossible d'envoyer votre avis pour le moment.",
+      );
+    } finally {
+      setFeedbackProcessing(false);
+    }
   };
 
   useEffect(() => {
@@ -1186,17 +1241,49 @@ function ClientOrderDetail({
                     </button>
                   )}
                   {person.client_confirmed_at && (
-                    <span className="client-receipt-confirmed">
-                      <ShieldCheck />
-                      Confirmé depuis votre compte
-                    </span>
+                    <>
+                      <span className="client-receipt-confirmed">
+                        <ShieldCheck />
+                        Confirmé depuis votre compte
+                      </span>
+                      <button
+                        type="button"
+                        className="client-delivery-feedback-action"
+                        onClick={() => openFeedbackModal(person)}
+                      >
+                        <Star />
+                        {person.feedback_id ? "Modifier mon avis" : "Laisser un avis"}
+                      </button>
+                    </>
                   )}
                 </div>
+                <div className="client-delivery-identity">
+                  <small>Nom du livreur</small>
+                  <strong>{person.delivery_name}</strong>
+                  {person.delivery_phone && <span>{person.delivery_phone}</span>}
+                </div>
+                {person.feedback_id && (
+                  <div className="client-delivery-feedback-card">
+                    <small>Avis envoyé au support</small>
+                    <strong>
+                      {person.feedback_rating}/5 ·{" "}
+                      {feedbackTypeLabels[person.feedback_issue_type] ||
+                        "Avis enregistré"}
+                    </strong>
+                    {person.feedback_comment && <p>{person.feedback_comment}</p>}
+                  </div>
+                )}
               </article>
             ))}
           </div>
           {receiptMessage && <div className="client-payment-feedback success">{receiptMessage}</div>}
           {receiptError && <div className="client-payment-feedback error">{receiptError}</div>}
+          {feedbackMessage && (
+            <div className="client-payment-feedback success">{feedbackMessage}</div>
+          )}
+          {feedbackError && (
+            <div className="client-payment-feedback error">{feedbackError}</div>
+          )}
         </section>
       )}
       {receiptToConfirm && (
@@ -1254,13 +1341,107 @@ function ClientOrderDetail({
                         order.id,
                         receiptToConfirm.assignment_id,
                       );
-                  if (confirmed) setReceiptToConfirm(null);
+                  if (confirmed) {
+                    const confirmedReceipt = receiptToConfirm;
+                    setReceiptToConfirm(null);
+                    if (confirmedReceipt.receipt_type === "delivery") {
+                      openFeedbackModal(confirmedReceipt);
+                    }
+                  }
                 }}
               >
                 <CheckCircle2 />
                 {receiptProcessing ? "Confirmation..." : "Oui, je confirme"}
               </button>
             </div>
+          </section>
+        </div>
+      )}
+      {feedbackTarget && (
+        <div className="client-receipt-modal-backdrop" role="presentation">
+          <section
+            className="client-receipt-modal client-feedback-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="client-feedback-title"
+          >
+            <span><Star /></span>
+            <small>Avis livreur</small>
+            <h2 id="client-feedback-title">Comment s'est passée cette livraison ?</h2>
+            <p>
+              Votre retour est transmis au support VinnHT dans une page dédiée et aide
+              aussi la boutique à suivre la qualité de ses livreurs.
+            </p>
+            <div className="client-feedback-driver-summary">
+              <span className="client-delivery-photo">
+                {feedbackTarget.delivery_profile_image_url ? (
+                  <img
+                    src={orderImageSource(feedbackTarget.delivery_profile_image_url)}
+                    alt={`Photo de ${feedbackTarget.delivery_name}`}
+                    onError={useOrderImageFallback}
+                  />
+                ) : (
+                  <UserRound />
+                )}
+              </span>
+              <div>
+                <small>{feedbackTarget.shop_name || "Livraison VinnHT"}</small>
+                <strong>{feedbackTarget.delivery_name}</strong>
+              </div>
+            </div>
+            <form className="client-feedback-form" onSubmit={submitDeliveryFeedback}>
+              <label>
+                Note
+                <div className="client-feedback-rating">
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <button
+                      type="button"
+                      className={feedbackRating >= value ? "active" : ""}
+                      onClick={() => setFeedbackRating(value)}
+                      key={value}
+                    >
+                      <Star />
+                      <span>{value}</span>
+                    </button>
+                  ))}
+                </div>
+              </label>
+              <label>
+                Sujet
+                <select
+                  value={feedbackIssueType}
+                  onChange={(event) => setFeedbackIssueType(event.target.value)}
+                >
+                  {Object.entries(feedbackTypeLabels).map(([value, label]) => (
+                    <option value={value} key={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Commentaire
+                <textarea
+                  rows="4"
+                  value={feedbackComment}
+                  onChange={(event) => setFeedbackComment(event.target.value)}
+                  placeholder="Expliquez rapidement ce qui s'est bien passé ou ce qui doit être revu."
+                />
+              </label>
+              <div className="client-feedback-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setFeedbackTarget(null)}
+                >
+                  Plus tard
+                </button>
+                <button type="submit" disabled={feedbackProcessing}>
+                  <Send />
+                  {feedbackProcessing ? "Envoi..." : "Envoyer mon avis"}
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       )}

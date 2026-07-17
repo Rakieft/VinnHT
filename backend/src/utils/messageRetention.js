@@ -1,4 +1,4 @@
-const DEFAULT_RETENTION_DAYS = 30;
+const DEFAULT_RETENTION_DAYS = 60;
 
 export const normalizeRetentionDays = (value) => {
   const days = Number.parseInt(value, 10);

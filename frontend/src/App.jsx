@@ -52,6 +52,7 @@ import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import "swiper/css/pagination";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Link,
   Navigate,
@@ -128,6 +129,10 @@ const loadAdminFlow = () => import("./components/AdminFlow.jsx");
 const AdminCategoriesContent = lazyNamed(loadAdminFlow, "AdminCategoriesContent");
 const AdminContactRequestsContent = lazyNamed(loadAdminFlow, "AdminContactRequestsContent");
 const AdminDashboardContent = lazyNamed(loadAdminFlow, "AdminDashboardContent");
+const DeliveryFeedbackSupportContent = lazyNamed(
+  loadAdminFlow,
+  "DeliveryFeedbackSupportContent",
+);
 const AdminPaymentsContent = lazyNamed(loadAdminFlow, "AdminPaymentsContent");
 const AdminProfileContent = lazyNamed(loadAdminFlow, "AdminProfileContent");
 const AdminProductsContent = lazyNamed(loadAdminFlow, "AdminProductsContent");
@@ -3822,6 +3827,11 @@ function MobileDashboardNav() {
 function DashboardNotifications({ role }) {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+  const [clearingAll, setClearingAll] = useState(false);
+  const panelRef = useRef(null);
+  const triggerRef = useRef(null);
+  const [panelStyle, setPanelStyle] = useState(null);
   const unread = notifications.filter((notification) => !notification.read_at).length;
 
   useEffect(() => {
@@ -3832,9 +3842,65 @@ function DashboardNotifications({ role }) {
         .then(({ data }) => setNotifications(data))
         .catch(() => setNotifications([]));
     load();
+    const refreshListener = () => load();
+    window.addEventListener("vinnht:notifications-refresh", refreshListener);
     const interval = window.setInterval(load, 30000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.removeEventListener("vinnht:notifications-refresh", refreshListener);
+      window.clearInterval(interval);
+    };
   }, [role]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const syncPanelPosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+
+      const rect = trigger.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const panelWidth = Math.min(viewportWidth - 28, viewportWidth <= 720 ? 360 : 370);
+      const left = Math.max(
+        14,
+        Math.min(rect.right - panelWidth, viewportWidth - panelWidth - 14),
+      );
+
+      setPanelStyle({
+        position: "fixed",
+        top: rect.bottom + 10,
+        left,
+        width: panelWidth,
+      });
+    };
+
+    const handlePointerDown = (event) => {
+      if (panelRef.current?.contains(event.target)) return;
+      if (event.target.closest(".notification-trigger")) return;
+      setOpen(false);
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.body.classList.add("dashboard-notifications-open");
+    syncPanelPosition();
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", syncPanelPosition);
+    window.addEventListener("scroll", syncPanelPosition, true);
+
+    return () => {
+      document.body.classList.remove("dashboard-notifications-open");
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", syncPanelPosition);
+      window.removeEventListener("scroll", syncPanelPosition, true);
+    };
+  }, [open]);
 
   const markRead = async (id) => {
     await api.patch(`/notifications/${id}/read`);
@@ -3850,6 +3916,45 @@ function DashboardNotifications({ role }) {
     );
   };
 
+  const notificationTarget = (notification) => {
+    const baseTarget = notification.link || roleHome[role];
+    if (
+      notification.entity_type !== "conversation" ||
+      !notification.entity_id ||
+      !baseTarget
+    ) {
+      return baseTarget;
+    }
+
+    const [pathname, currentQuery = ""] = baseTarget.split("?");
+    const params = new URLSearchParams(currentQuery);
+    if (!params.get("conversation")) {
+      params.set("conversation", String(notification.entity_id));
+    }
+    const serialized = params.toString();
+    return serialized ? `${pathname}?${serialized}` : pathname;
+  };
+
+  const deleteNotification = async (id) => {
+    try {
+      setBusyId(id);
+      await api.delete(`/notifications/${id}`);
+      setNotifications((items) => items.filter((item) => item.id !== id));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const deleteAllNotifications = async () => {
+    try {
+      setClearingAll(true);
+      await api.delete("/notifications", { data: { role } });
+      setNotifications([]);
+    } finally {
+      setClearingAll(false);
+    }
+  };
+
   return (
     <div className="dashboard-notifications">
       <button
@@ -3857,51 +3962,88 @@ function DashboardNotifications({ role }) {
         onClick={() => setOpen((current) => !current)}
         aria-label="Notifications"
         aria-expanded={open}
+        ref={triggerRef}
       >
         <Bell />
         {unread > 0 && <b>{unread}</b>}
       </button>
       {open && (
-        <motion.div
-          className="notification-panel"
-          initial={{ opacity: 0, y: -8, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-        >
-          <header>
-            <div>
-              <strong>Notifications</strong>
-              <span>
-                {unread} non lue{unread > 1 ? "s" : ""}
-              </span>
-            </div>
-            <button onClick={markAllRead}>Tout marquer comme lu</button>
-          </header>
-          <div>
-            {notifications.map((notification) => (
-              <Link
-                className={notification.read_at ? "read" : ""}
-                to={notification.link || roleHome[role]}
-                onClick={() => {
-                  markRead(notification.id);
-                  setOpen(false);
-                }}
-                key={notification.id}
-              >
-                <span>
-                  <Bell />
-                </span>
-                <p>
-                  <b>{notification.title}</b>
-                  <small>{notification.message}</small>
-                </p>
-                {!notification.read_at && <i />}
-              </Link>
-            ))}
-            {!notifications.length && (
-              <div className="notification-empty">Aucune notification pour le moment.</div>
-            )}
-          </div>
-        </motion.div>
+        createPortal(
+          <>
+            <button
+              type="button"
+              className="notification-backdrop"
+              aria-label="Fermer les notifications"
+              onClick={() => setOpen(false)}
+            />
+            <motion.div
+              className="notification-panel"
+              ref={panelRef}
+              style={panelStyle || undefined}
+              initial={{ opacity: 0, y: -8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+            >
+              <header>
+                <div>
+                  <strong>Notifications</strong>
+                  <span>
+                    {unread} non lue{unread > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="notification-header-actions">
+                  <button onClick={markAllRead}>Tout marquer comme lu</button>
+                  <button
+                    className="danger"
+                    onClick={deleteAllNotifications}
+                    disabled={!notifications.length || clearingAll}
+                  >
+                    Supprimer tout
+                  </button>
+                </div>
+              </header>
+              <div>
+                {notifications.map((notification) => (
+                  <article
+                    className={`notification-row ${notification.read_at ? "read" : ""}`}
+                    key={notification.id}
+                  >
+                    <Link
+                      className="notification-row-link"
+                      to={notificationTarget(notification)}
+                      onClick={() => {
+                        markRead(notification.id);
+                        setOpen(false);
+                      }}
+                    >
+                      <span>
+                        <Bell />
+                      </span>
+                      <p>
+                        <b>{notification.title}</b>
+                        <small>{notification.message}</small>
+                      </p>
+                      {!notification.read_at && <i />}
+                    </Link>
+                    <button
+                      type="button"
+                      className="notification-delete-button"
+                      aria-label="Supprimer cette notification"
+                      title="Supprimer"
+                      disabled={busyId === notification.id}
+                      onClick={() => deleteNotification(notification.id)}
+                    >
+                      <X size={15} />
+                    </button>
+                  </article>
+                ))}
+                {!notifications.length && (
+                  <div className="notification-empty">Aucune notification pour le moment.</div>
+                )}
+              </div>
+            </motion.div>
+          </>,
+          document.body,
+        )
       )}
     </div>
   );
@@ -4410,6 +4552,14 @@ function ClientOrdersPage() {
     }
   };
 
+  const submitDeliveryFeedback = async (orderId, payload) => {
+    const { data } = await api.post(`/orders/${orderId}/delivery-feedback`, payload);
+    await selectOrder(orderId);
+    const { data: refreshedOrders } = await api.get("/orders/mine");
+    setOrders(refreshedOrders);
+    return data;
+  };
+
   return (
     <DashboardLayout>
       <ClientOrdersContent
@@ -4427,6 +4577,7 @@ function ClientOrdersPage() {
         receiptProcessing={receiptProcessing}
         receiptMessage={receiptMessage}
         receiptError={receiptError}
+        onSubmitDeliveryFeedback={submitDeliveryFeedback}
       />
     </DashboardLayout>
   );
@@ -4859,10 +5010,62 @@ function AdminContactRequestsPage() {
   const { user } = useAuth();
   const [supportView, setSupportView] = useState("requests");
   const [mobileDiscussionOpen, setMobileDiscussionOpen] = useState(false);
+  const [mobileSupportMenuOpen, setMobileSupportMenuOpen] = useState(false);
+  const [supportFilters, setSupportFilters] = useState({
+    requests: "all",
+    "delivery-feedback": "all",
+  });
+  const [supportQueries, setSupportQueries] = useState({
+    requests: "",
+    "delivery-feedback": "",
+  });
+  const mobileSupportFilterOptions =
+    supportView === "requests"
+      ? [
+          ["all", "Tous"],
+          ["new", "Nouveaux"],
+          ["in_progress", "En traitement"],
+          ["resolved", "Résolus"],
+          ["unread", "Non lus"],
+        ]
+      : supportView === "delivery-feedback"
+        ? [
+            ["all", "Tous"],
+            ["new", "Nouveaux"],
+            ["in_review", "En traitement"],
+            ["resolved", "Résolus"],
+            ["alerts", "Alertes"],
+          ]
+        : [];
+  const headerSearchPlaceholder =
+    supportView === "messages"
+      ? "Rechercher une discussion"
+      : supportView === "requests"
+      ? "Rechercher un dossier"
+      : supportView === "delivery-feedback"
+        ? "Rechercher client, boutique ou livreur"
+        : "";
 
   useEffect(() => {
     loadAdminFlow();
   }, []);
+
+  useEffect(() => {
+    if (!mobileSupportMenuOpen) return undefined;
+
+    const closeMenu = (event) => {
+      const menuRoot = event.target?.closest?.(".admin-support-view-switcher");
+      if (!menuRoot) setMobileSupportMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeMenu);
+    document.addEventListener("touchstart", closeMenu);
+
+    return () => {
+      document.removeEventListener("mousedown", closeMenu);
+      document.removeEventListener("touchstart", closeMenu);
+    };
+  }, [mobileSupportMenuOpen]);
 
   return (
     <DashboardLayout className="dashboard-messages-view">
@@ -4872,7 +5075,7 @@ function AdminContactRequestsPage() {
         }`}
       >
         <header className="admin-support-view-switcher">
-          <div>
+          <div className="admin-support-view-copy">
             <span>Centre de support</span>
             <h1>Messages et demandes clients</h1>
             <p>
@@ -4880,12 +5083,77 @@ function AdminContactRequestsPage() {
               sont regroupés ici.
             </p>
           </div>
-          <nav>
+          <button
+            type="button"
+            className="admin-support-mobile-menu-trigger"
+            onClick={() => setMobileSupportMenuOpen((current) => !current)}
+            aria-label="Ouvrir les options du centre support"
+          >
+            <Menu />
+          </button>
+          {supportView === "messages" ? (
+            <div className="admin-support-header-tools">
+              <label className="admin-support-header-search">
+                <Search />
+                <input
+                  value={supportQueries.messages || ""}
+                  onChange={(event) =>
+                    setSupportQueries((current) => ({
+                      ...current,
+                      messages: event.target.value,
+                    }))
+                  }
+                  placeholder={headerSearchPlaceholder}
+                  aria-label={headerSearchPlaceholder}
+                />
+              </label>
+            </div>
+          ) : mobileSupportFilterOptions.length ? (
+            <div className="admin-support-header-tools">
+              <select
+                className="admin-support-mobile-filter"
+                value={supportFilters[supportView] || "all"}
+                onChange={(event) =>
+                  setSupportFilters((current) => ({
+                    ...current,
+                    [supportView]: event.target.value,
+                  }))
+                }
+                aria-label={
+                  supportView === "requests"
+                    ? "Filtrer les dossiers support"
+                    : "Filtrer les avis livreurs"
+                }
+              >
+                {mobileSupportFilterOptions.map(([value, label]) => (
+                  <option value={value} key={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <label className="admin-support-header-search">
+                <Search />
+                <input
+                  value={supportQueries[supportView] || ""}
+                  onChange={(event) =>
+                    setSupportQueries((current) => ({
+                      ...current,
+                      [supportView]: event.target.value,
+                    }))
+                  }
+                  placeholder={headerSearchPlaceholder}
+                  aria-label={headerSearchPlaceholder}
+                />
+              </label>
+            </div>
+          ) : null}
+          <nav className={mobileSupportMenuOpen ? "mobile-open" : ""}>
             <button
               className={supportView === "messages" ? "active" : ""}
               onClick={() => {
                 setSupportView("messages");
                 setMobileDiscussionOpen(false);
+                setMobileSupportMenuOpen(false);
               }}
             >
               <MessageCircle /> Discussions directes
@@ -4895,9 +5163,20 @@ function AdminContactRequestsPage() {
               onClick={() => {
                 setSupportView("requests");
                 setMobileDiscussionOpen(false);
+                setMobileSupportMenuOpen(false);
               }}
             >
               <Headphones /> Dossiers support
+            </button>
+            <button
+              className={supportView === "delivery-feedback" ? "active" : ""}
+              onClick={() => {
+                setSupportView("delivery-feedback");
+                setMobileDiscussionOpen(false);
+                setMobileSupportMenuOpen(false);
+              }}
+            >
+              <Truck /> Avis livreurs
             </button>
           </nav>
         </header>
@@ -4907,11 +5186,51 @@ function AdminContactRequestsPage() {
             user={user}
             sellerMode
             onMobileConversationChange={setMobileDiscussionOpen}
+            externalQuery={supportQueries.messages || ""}
+            onExternalQueryChange={(value) =>
+              setSupportQueries((current) => ({
+                ...current,
+                messages: value,
+              }))
+            }
+          />
+        ) : supportView === "delivery-feedback" ? (
+          <DeliveryFeedbackSupportContent
+            api={api}
+            onMobileConversationChange={setMobileDiscussionOpen}
+            externalStatusFilter={supportFilters["delivery-feedback"]}
+            onExternalStatusFilterChange={(value) =>
+              setSupportFilters((current) => ({
+                ...current,
+                "delivery-feedback": value,
+              }))
+            }
+            externalQuery={supportQueries["delivery-feedback"]}
+            onExternalQueryChange={(value) =>
+              setSupportQueries((current) => ({
+                ...current,
+                "delivery-feedback": value,
+              }))
+            }
           />
         ) : (
           <AdminContactRequestsContent
             api={api}
             onMobileConversationChange={setMobileDiscussionOpen}
+            externalStatusFilter={supportFilters.requests}
+            onExternalStatusFilterChange={(value) =>
+              setSupportFilters((current) => ({
+                ...current,
+                requests: value,
+              }))
+            }
+            externalQuery={supportQueries.requests}
+            onExternalQueryChange={(value) =>
+              setSupportQueries((current) => ({
+                ...current,
+                requests: value,
+              }))
+            }
           />
         )}
       </div>
@@ -5585,8 +5904,3 @@ export default function App() {
     </Providers>
   );
 }
-
-
-
-
-

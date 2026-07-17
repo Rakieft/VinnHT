@@ -809,7 +809,11 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
         setCategories(Array.isArray(categoriesResponse.data) ? categoriesResponse.data : []);
         const drivers = Array.isArray(driversResponse.data) ? driversResponse.data : [];
         setDeliveryDrivers(drivers);
-        setDriversReady(drivers.some((driver) => driver.status === "active"));
+        setDriversReady(
+          drivers.some(
+            (driver) => driver.status === "active" && Boolean(driver.profile_image_url),
+          ),
+        );
       })
       .catch(() => {
         setCategories([]);
@@ -894,7 +898,7 @@ export function AddSellerProductContent({ api, embedded = false, onCreated }) {
               </Link>
               <small>
                 {deliveryDrivers.length
-                  ? "Aucun livreur actif n'est disponible pour le moment."
+                  ? "Aucun livreur actif avec photo de profil n'est disponible pour le moment."
                   : "Aucun livreur n'est encore enregistre sur cette boutique."}
               </small>
             </div>
@@ -1288,7 +1292,11 @@ function LegacyAddSellerProductContent({ api, embedded = false, onCreated }) {
         setCategories(Array.isArray(categoriesResponse.data) ? categoriesResponse.data : []);
         const drivers = Array.isArray(driversResponse.data) ? driversResponse.data : [];
         setDeliveryDrivers(drivers);
-        setDriversReady(drivers.some((driver) => driver.status === "active"));
+        setDriversReady(
+          drivers.some(
+            (driver) => driver.status === "active" && Boolean(driver.profile_image_url),
+          ),
+        );
       })
       .catch(() => {
         setCategories([]);
@@ -1590,7 +1598,7 @@ export function SellerOrdersContent({ api }) {
   const createDriver = async (event) => {
     event.preventDefault();
     const { data } = await api.post("/seller/delivery-drivers", driverForm);
-    setMessage(data.message);
+    setMessage(`${data.message} Le livreur devra ensuite ajouter sa photo pour pouvoir être assigné.`);
     setDriverForm({
       name: "",
       email: "",
@@ -1645,6 +1653,9 @@ export function SellerOrdersContent({ api }) {
   const selectedClientConfirmedAt =
     selected?.seller_delivery_client_confirmed_at || selected?.delivery_client_confirmed_at;
   const selectedPaymentIsValid = selectedPaymentStatus === "paid";
+  const assignableDrivers = drivers.filter(
+    (driver) => driver.status === "active" && Boolean(driver.profile_image_url),
+  );
 
   return (
     <SellerPageHeader
@@ -2023,20 +2034,26 @@ export function SellerOrdersContent({ api }) {
                 onChange={(event) => setAssigningDriverId(event.target.value)}
               >
                 <option value="">Sélectionner un livreur</option>
-                {drivers.map((driver) => (
+                {assignableDrivers.map((driver) => (
                   <option value={driver.id} key={driver.id}>
                     {driver.name} {driver.vehicle_type ? `- ${driver.vehicle_type}` : ""}
                   </option>
                 ))}
               </select>
-              {drivers.length ? (
+              {assignableDrivers.length ? (
                 <button type="button" onClick={assignDriver} disabled={!assigningDriverId}>
                   <Truck /> Assigner au livreur
                 </button>
               ) : (
-                <button type="button" onClick={() => setShowDriverForm(true)}>
-                  <Plus /> Ajouter un livreur
-                </button>
+                <div className="seller-driver-photo-warning">
+                  <small>Aucun livreur assignable</small>
+                  <strong>
+                    Il faut au moins un livreur actif avec photo de profil.
+                  </strong>
+                  <button type="button" onClick={() => setShowDriverForm(true)}>
+                    <Plus /> Ajouter un livreur
+                  </button>
+                </div>
               )}
             </section>
           )}
