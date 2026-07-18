@@ -2695,6 +2695,7 @@
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   color: #0f172a;
   font-size: 16px;
   line-height: 1.35;
@@ -5279,6 +5280,7 @@
     min-height: 44px;
   }
 }
+
 
 
 
