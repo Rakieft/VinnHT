@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import CountUp from "react-countup";
 import { motion } from "framer-motion";
 import {
@@ -84,6 +84,66 @@ const transactionMeta = {
     Icon: History,
   },
 };
+
+const payoutStepMeta = {
+  pending: {
+    title: "En attente de validation",
+    text: "L’admin doit confirmer l’identité MonCash et le montant demandé.",
+    tone: "warning",
+  },
+  approved: {
+    title: "Prête pour la finance",
+    text: "La demande est approuvée et peut être prise en charge pour le transfert.",
+    tone: "approved",
+  },
+  processing: {
+    title: "Traitement en cours",
+    text: "L’équipe finance contrôle le bénéficiaire puis lance le virement MonCash.",
+    tone: "processing",
+  },
+  verification_required: {
+    title: "Réconciliation requise",
+    text: "MonCash doit être interrogé avant toute nouvelle action sur cette demande.",
+    tone: "warning",
+  },
+  paid: {
+    title: "Paiement terminé",
+    text: "Le virement a été confirmé et le wallet vendeur a été débité définitivement.",
+    tone: "success",
+  },
+  failed: {
+    title: "Transfert à relancer",
+    text: "Le transfert n’a pas abouti. Le montant redevient disponible côté vendeur.",
+    tone: "danger",
+  },
+  rejected: {
+    title: "Demande refusée",
+    text: "La demande a été stoppée avant transfert.",
+    tone: "danger",
+  },
+  cancelled: {
+    title: "Demande annulée",
+    text: "Le vendeur a récupéré ce montant dans son solde disponible.",
+    tone: "muted",
+  },
+};
+
+function getWalletRequestBlocker({ wallet, payoutAccount, activeRequest, minimumRequestAmount }) {
+  if (!payoutAccount?.moncash_number || !payoutAccount?.moncash_account_name) {
+    return "Ajoutez votre vrai numéro MonCash et le nom exact du titulaire dans Ma boutique avant toute demande.";
+  }
+  if (activeRequest) {
+    return `La demande ${activeRequest.request_number} doit d’abord sortir du circuit actuel avant d’en créer une nouvelle.`;
+  }
+  if (Number(wallet.available_balance || 0) < Number(minimumRequestAmount || 0)) {
+    return `Votre solde disponible doit atteindre au moins ${money(minimumRequestAmount)} pour ouvrir une demande.`;
+  }
+  return "Votre wallet est prêt pour une nouvelle demande de paiement.";
+}
+
+function getPayoutStepDetails(request) {
+  return payoutStepMeta[request?.status] || payoutStepMeta.pending;
+}
 
 function WalletStatus({ value }) {
   const meta = statusMeta[value] || statusMeta.pending;
@@ -215,6 +275,37 @@ export function SellerWalletContent({ api }) {
     payoutAccount?.moncash_number &&
     payoutAccount?.moncash_account_name &&
     !activeRequest;
+  const requestBlocker = getWalletRequestBlocker({
+    wallet,
+    payoutAccount,
+    activeRequest,
+    minimumRequestAmount: data?.minimumRequestAmount,
+  });
+  const readinessItems = [
+    {
+      label: "Compte MonCash",
+      ready: Boolean(payoutAccount?.moncash_number && payoutAccount?.moncash_account_name),
+      text:
+        payoutAccount?.moncash_number && payoutAccount?.moncash_account_name
+          ? `${payoutAccount.moncash_account_name} · ${payoutAccount.moncash_number}`
+          : "Le compte de réception n’est pas encore complet.",
+    },
+    {
+      label: "Solde retirable",
+      ready: Number(wallet.available_balance || 0) >= Number(data?.minimumRequestAmount || 0),
+      text:
+        Number(wallet.available_balance || 0) >= Number(data?.minimumRequestAmount || 0)
+          ? `${money(wallet.available_balance)} peuvent être demandés maintenant.`
+          : `Minimum requis : ${money(data?.minimumRequestAmount)}.`,
+    },
+    {
+      label: "Circuit de validation",
+      ready: !activeRequest,
+      text: activeRequest
+        ? `${activeRequest.request_number} est encore ${statusMeta[activeRequest.status]?.label?.toLowerCase?.() || "en cours"}.`
+        : "Aucune demande active ne bloque un nouveau retrait.",
+    },
+  ];
 
   useEffect(() => {
     if (!data) return;
@@ -351,7 +442,23 @@ export function SellerWalletContent({ api }) {
               <ArrowUpRight /> Demander mon paiement
             </button>
           )}
+          <div className={`wallet-action-hint ${canRequest ? "ready" : "blocked"}`}>
+            <small>{canRequest ? "Prêt pour la demande" : "Action bloquée pour le moment"}</small>
+            <p>{requestBlocker}</p>
+          </div>
         </aside>
+      </section>
+
+      <section className="seller-wallet-readiness">
+        {readinessItems.map((item) => (
+          <article className={item.ready ? "ready" : "blocked"} key={item.label}>
+            <span>{item.ready ? <CheckCircle2 /> : <AlertTriangle />}</span>
+            <div>
+              <small>{item.label}</small>
+              <p>{item.text}</p>
+            </div>
+          </article>
+        ))}
       </section>
 
       <section className="wallet-metric-grid">
@@ -394,26 +501,39 @@ export function SellerWalletContent({ api }) {
             </div>
           </header>
           <div className="seller-request-list">
-            {requests.map((request) => (
-              <article key={request.id}>
-                <div>
-                  <small>{request.request_number}</small>
-                  <strong>{money(request.amount)}</strong>
-                  <span>{shortDate(request.created_at)}</span>
-                </div>
-                <WalletStatus value={request.status} />
-                {request.admin_note && <p>Décision admin : {request.admin_note}</p>}
-                {request.failure_reason && <p>Suivi manager : {request.failure_reason}</p>}
-                {request.payment_reference && (
-                  <p className="wallet-reference">Référence : {request.payment_reference}</p>
-                )}
-                {request.status === "pending" && (
-                  <button type="button" disabled={busy} onClick={() => cancelRequest(request)}>
-                    Annuler la demande
-                  </button>
-                )}
-              </article>
-            ))}
+            {requests.map((request) => {
+              const step = getPayoutStepDetails(request);
+              return (
+                <article key={request.id}>
+                  <div>
+                    <small>{request.request_number}</small>
+                    <strong>{money(request.amount)}</strong>
+                    <span>{shortDate(request.created_at)}</span>
+                  </div>
+                  <WalletStatus value={request.status} />
+                  <div className={`wallet-request-step ${step.tone}`}>
+                    <b>{step.title}</b>
+                    <small>{step.text}</small>
+                  </div>
+                  {request.reviewed_by_name && (
+                    <p>Validation : {request.reviewed_by_name}</p>
+                  )}
+                  {request.manager_name && (
+                    <p>Exécution finance : {request.manager_name}</p>
+                  )}
+                  {request.admin_note && <p>Décision admin : {request.admin_note}</p>}
+                  {request.failure_reason && <p>Suivi finance : {request.failure_reason}</p>}
+                  {request.payment_reference && (
+                    <p className="wallet-reference">Référence : {request.payment_reference}</p>
+                  )}
+                  {request.status === "pending" && (
+                    <button type="button" disabled={busy} onClick={() => cancelRequest(request)}>
+                      Annuler la demande
+                    </button>
+                  )}
+                </article>
+              );
+            })}
             {!requests.length && (
               <div className="wallet-empty">
                 <ReceiptText />
@@ -546,6 +666,8 @@ function usePayoutDesk(api, endpoint) {
 }
 
 function PayoutDeskCard({ request, onOpen, actionLabel }) {
+  const step = getPayoutStepDetails(request);
+
   return (
     <motion.article
       className="payout-desk-card"
@@ -571,6 +693,10 @@ function PayoutDeskCard({ request, onOpen, actionLabel }) {
         <span>Montant demandé</span>
         <strong>{money(request.amount)}</strong>
       </div>
+      <div className={`payout-desk-step ${step.tone}`}>
+        <b>{step.title}</b>
+        <p>{step.text}</p>
+      </div>
       <div className="payout-desk-summary">
         <span>Commission retenue</span>
         <b>{money(request.commission_total_amount)}</b>
@@ -580,6 +706,18 @@ function PayoutDeskCard({ request, onOpen, actionLabel }) {
         <div><dt>Titulaire</dt><dd>{request.moncash_account_name}</dd></div>
         <div><dt>Ventes liées</dt><dd>{request.payout_count || 0}</dd></div>
       </dl>
+      {request.reviewed_by_name && (
+        <p className="payout-desk-note">Validation admin : {request.reviewed_by_name}</p>
+      )}
+      {request.manager_name && (
+        <p className="payout-desk-note">Responsable finance : {request.manager_name}</p>
+      )}
+      {request.provider_transfer_reference && (
+        <p className="payout-desk-reference">Réf. sécurisée : {request.provider_transfer_reference}</p>
+      )}
+      {request.failure_reason && (
+        <p className="payout-desk-reference danger">Incident : {request.failure_reason}</p>
+      )}
       <button type="button" onClick={() => onOpen(request)}>
         {actionLabel} <ArrowUpRight />
       </button>
@@ -722,6 +860,17 @@ export function ManagerPayoutOperationsContent({ api }) {
   const [transferConfirmed, setTransferConfirmed] = useState(false);
   const [providerBalance, setProviderBalance] = useState(null);
   const provider = data.provider || {};
+  const payoutFilterOptions = [
+    ["ready", "À traiter"],
+    ["pending", "En attente finance"],
+    ["approved", "Approuvée"],
+    ["processing", "Transfert en cours"],
+    ["verification_required", "À vérifier"],
+    ["paid", "Payée"],
+    ["failed", "Échec du transfert"],
+    ["rejected", "Refusée"],
+    ["all", "Toutes"],
+  ];
   const activeFilterLabel =
     filter === "ready"
       ? "À traiter"
@@ -871,11 +1020,20 @@ export function ManagerPayoutOperationsContent({ api }) {
         <WalletMetric icon={CheckCircle2} label="Transféré" value={data.stats.paid_amount} note="Références enregistrées" tone="green" />
       </section>
       <section className="payout-desk-toolbar">
-        <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Boutique, demande ou MonCash" /></label>
+        <label className="payout-desk-toolbar-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Boutique, demande ou MonCash" /></label>
+        <label className="payout-desk-toolbar-select" aria-label="Filtrer les demandes finance">
+          <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+            {payoutFilterOptions.map(([value, label]) => (
+              <option value={value} key={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
         <nav>
-          {["ready", "pending", "approved", "processing", "verification_required", "paid", "failed", "rejected", "all"].map((status) => (
-            <button className={filter === status ? "active" : ""} onClick={() => setFilter(status)} key={status}>
-              {status === "ready" ? "À traiter" : status === "all" ? "Toutes" : statusMeta[status]?.label || status}
+          {payoutFilterOptions.map(([value, label]) => (
+            <button className={filter === value ? "active" : ""} onClick={() => setFilter(value)} key={value}>
+              {label}
             </button>
           ))}
         </nav>
@@ -954,9 +1112,15 @@ export function ManagerPayoutOperationsContent({ api }) {
               </div>
             )}
             {selected.status === "approved" && (
-              <button className="manager-start-transfer" disabled={busy} onClick={() => runAction("processing")}>
-                <PlayCircle /> Prendre en charge ce transfert
-              </button>
+              <div className="manager-transfer-actions">
+                <div className="wallet-modal-notice">
+                  <ShieldCheck />
+                  <p>La validation administrative est terminée. Cette demande peut maintenant être verrouillée sur votre compte finance avant le transfert.</p>
+                </div>
+                <button className="manager-start-transfer" disabled={busy} onClick={() => runAction("processing")}>
+                  <PlayCircle /> Prendre en charge ce transfert
+                </button>
+              </div>
             )}
             {selected.status === "processing" && provider.enabled && provider.configured && (
               <div className="manager-transfer-actions moncash-api-actions">
@@ -964,6 +1128,9 @@ export function ManagerPayoutOperationsContent({ api }) {
                   <ShieldCheck />
                   <p>VinnHT vérifiera le bénéficiaire et le solde Prefunded avant l’envoi. Le PIN MonCash ne doit jamais être demandé.</p>
                 </div>
+                {selected.provider_transfer_reference && (
+                  <p className="wallet-reference">Référence sécurisée en cours : {selected.provider_transfer_reference}</p>
+                )}
                 <button
                   className={beneficiaryChecked ? "moncash-check-success" : "moncash-check-button"}
                   type="button"
@@ -1055,23 +1222,29 @@ export function FinanceReportContent({ api }) {
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [monthlyDownloading, setMonthlyDownloading] = useState(false);
+  const [weeklyLoading, setWeeklyLoading] = useState(true);
+  const [monthlyLoading, setMonthlyLoading] = useState(true);
 
   useEffect(() => {
+    setWeeklyLoading(true);
     api
       .get("/admin/weekly-report")
       .then(({ data }) => setReport(data))
       .catch((requestError) =>
         setError(requestError.response?.data?.message || "Rapport financier indisponible."),
-      );
+      )
+      .finally(() => setWeeklyLoading(false));
   }, [api]);
 
   useEffect(() => {
+    setMonthlyLoading(true);
     api
       .get("/finance/monthly-transfers", { params: { month: monthlyKey } })
       .then(({ data }) => setMonthlyReport(data))
       .catch((requestError) =>
         setError(requestError.response?.data?.message || "Rapport mensuel indisponible."),
-      );
+      )
+      .finally(() => setMonthlyLoading(false));
   }, [api, monthlyKey]);
 
   const download = async () => {
@@ -1116,6 +1289,9 @@ export function FinanceReportContent({ api }) {
   };
 
   const totals = report?.totals || {};
+  const monthlyAvailable = Boolean(monthlyReport?.period?.available);
+  const weeklyHasData = Boolean(report?.merchants?.length);
+
   return (
     <div className="wallet-flow finance-report-flow">
       <WalletPageHeading
@@ -1137,6 +1313,13 @@ export function FinanceReportContent({ api }) {
               <h3>Registre Word des virements vendeurs</h3>
             </div>
           </div>
+          <span className={`finance-report-status ${monthlyAvailable ? "ready" : "pending"}`}>
+            {monthlyLoading
+              ? "Chargement..."
+              : monthlyAvailable
+                ? "Prêt à télécharger"
+                : "Disponible le 30"}
+          </span>
           <div className="finance-monthly-actions">
             <input
               type="month"
@@ -1154,16 +1337,32 @@ export function FinanceReportContent({ api }) {
             </button>
           </div>
         </header>
-        <div className="finance-monthly-summary">
-          <span><small>Virements</small><b>{monthlyReport?.totals?.transfers || 0}</b></span>
-          <span><small>Boutiques payées</small><b>{monthlyReport?.totals?.shops || 0}</b></span>
-          <span><small>Total transféré</small><b>{money(monthlyReport?.totals?.amount)}</b></span>
+        {monthlyLoading ? (
+          <div className="wallet-empty compact">Préparation du registre mensuel...</div>
+        ) : (
+          <>
+            <div className="finance-monthly-summary">
+              <span><small>Virements</small><b>{monthlyReport?.totals?.transfers || 0}</b></span>
+              <span><small>Boutiques payées</small><b>{monthlyReport?.totals?.shops || 0}</b></span>
+              <span><small>Total transféré</small><b>{money(monthlyReport?.totals?.amount)}</b></span>
+            </div>
+            <p>
+              {monthlyReport?.period?.available
+                ? `Le registre de ${monthlyReport.period.label} est prêt au téléchargement.`
+                : "Le registre du mois courant devient disponible automatiquement à partir du 30."}
+            </p>
+          </>
+        )}
+        <div className="finance-report-notes">
+          <article>
+            <small>Usage</small>
+            <p>Le PDF sert au suivi hebdomadaire des ventes et le Word archive les virements déjà exécutés.</p>
+          </article>
+          <article>
+            <small>Rappel</small>
+            <p>Une demande payée ne sort du wallet vendeur qu’après confirmation du transfert côté finance.</p>
+          </article>
         </div>
-        <p>
-          {monthlyReport?.period?.available
-            ? `Le registre de ${monthlyReport.period.label} est prêt au téléchargement.`
-            : "Le registre du mois courant devient disponible automatiquement à partir du 30."}
-        </p>
       </section>
       <div className="finance-weekly-heading">
         <div>
@@ -1174,34 +1373,52 @@ export function FinanceReportContent({ api }) {
           <span>{shortDate(report.period.start)} – {shortDate(report.period.end)}</span>
         )}
       </div>
-      <section className="wallet-metric-grid finance-report-metrics">
-        <WalletMetric icon={Store} label="Marchands" value={totals.merchants} note="Actifs cette semaine" tone="blue" suffix="" />
-        <WalletMetric icon={ReceiptText} label="Commandes" value={totals.orders} note="Commandes encaissées" tone="gold" suffix="" />
-        <WalletMetric icon={CircleDollarSign} label="Ventes globales" value={totals.grossSales} note="Volume brut" tone="green" />
-        <WalletMetric icon={Wallet} label="Net vendeurs" value={totals.netSales} note="Avant demandes de transfert" tone="blue" />
-      </section>
-      <section className="wallet-panel finance-merchant-panel">
-        <header>
-          <div>
-            <span><ReceiptText /></span>
-            <div>
-              <small>Détail contrôlable</small>
-              <h3>Marchands de la période</h3>
+      {weeklyLoading ? (
+        <WalletLoading />
+      ) : (
+        <>
+          <section className="wallet-metric-grid finance-report-metrics">
+            <WalletMetric icon={Store} label="Marchands" value={totals.merchants} note="Actifs cette semaine" tone="blue" suffix="" />
+            <WalletMetric icon={ReceiptText} label="Commandes" value={totals.orders} note="Commandes encaissées" tone="gold" suffix="" />
+            <WalletMetric icon={CircleDollarSign} label="Ventes globales" value={totals.grossSales} note="Volume brut" tone="green" />
+            <WalletMetric icon={Wallet} label="Net vendeurs" value={totals.netSales} note="Avant demandes de transfert" tone="blue" />
+          </section>
+          <section className="wallet-panel finance-merchant-panel">
+            <header>
+              <div>
+                <span><ReceiptText /></span>
+                <div>
+                  <small>Détail contrôlable</small>
+                  <h3>Marchands de la période</h3>
+                </div>
+              </div>
+              {report?.period && <b>{shortDate(report.period.start)} – {shortDate(report.period.end)}</b>}
+            </header>
+            <div className="finance-merchant-list">
+              {(report?.merchants || []).map((merchant) => (
+                <article key={merchant.seller_id}>
+                  <span><Store /></span>
+                  <div>
+                    <b>{merchant.merchant_name}</b>
+                    <small>{merchant.order_count} commande(s) · {merchant.item_count || 0} article(s)</small>
+                  </div>
+                  <div className="finance-merchant-amounts">
+                    <small>{money(merchant.gross_sales)} brut</small>
+                    <strong>{money(merchant.net_sales)}</strong>
+                  </div>
+                </article>
+              ))}
+              {report && !weeklyHasData && (
+                <div className="wallet-empty">
+                  Aucune vente encaissée sur cette période.
+                </div>
+              )}
             </div>
-          </div>
-          {report?.period && <b>{shortDate(report.period.start)} – {shortDate(report.period.end)}</b>}
-        </header>
-        <div className="finance-merchant-list">
-          {(report?.merchants || []).map((merchant) => (
-            <article key={merchant.seller_id}>
-              <span><Store /></span>
-              <div><b>{merchant.merchant_name}</b><small>{merchant.order_count} commande(s)</small></div>
-              <strong>{money(merchant.net_sales)}</strong>
-            </article>
-          ))}
-          {report && !report.merchants?.length && <div className="wallet-empty">Aucune vente encaissée sur cette période.</div>}
-        </div>
-      </section>
+          </section>
+        </>
+      )}
     </div>
   );
 }
+
+

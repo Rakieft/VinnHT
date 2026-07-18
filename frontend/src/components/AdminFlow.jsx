@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import "../styles/admin-flow.css";
 import {
   AlertTriangle,
@@ -37,6 +37,7 @@ import {
   Mail,
   MapPin,
   MessageCircle,
+  MoreVertical,
   Music,
   Package,
   PawPrint,
@@ -391,8 +392,8 @@ export function AdminDashboardContent({ api, user }) {
     [Users, "Gérer les utilisateurs", "/admin/users"],
     [Boxes, "Contrôler les produits", "/admin/products"],
     [CreditCard, "Vérifier les paiements", "/admin/payments"],
-    [FileText, "Rapport hebdomadaire", "#weekly-report"],
-    [FileText, "Suivre la progression", "/admin#weekly-report"],
+    [FileText, "Rapport hebdomadaire", "/admin#weekly-report"],
+    [Settings, "Paramètres admin", "/admin/settings"],
     [Store, "Suivre les boutiques", "/admin/users"],
     [Truck, "Coordonner les livraisons", "/manager/deliveries"],
   ];
@@ -612,6 +613,9 @@ export function AdminDashboardContent({ api, user }) {
                   <small>{money(item.amount)}</small>
                 </p>
               ))}
+              {!paymentHealth.length && (
+                <div className="admin-empty compact">Aucun paiement à signaler pour cette période.</div>
+              )}
             </div>
             <div>
               <h3>Livraisons</h3>
@@ -621,6 +625,9 @@ export function AdminDashboardContent({ api, user }) {
                   <b>{item.total}</b>
                 </p>
               ))}
+              {!deliveryHealth.length && (
+                <div className="admin-empty compact">Aucune anomalie livraison sur cette période.</div>
+              )}
             </div>
           </div>
         </section>
@@ -677,7 +684,7 @@ export function AdminDashboardContent({ api, user }) {
             onClick={downloadWeeklyReport}
           >
             <Download />
-              {downloadingReport ? "Generation du PDF..." : "Telecharger le rapport PDF"}
+            {downloadingReport ? "Génération du PDF..." : "Télécharger le rapport PDF"}
           </button>
         </section>
 
@@ -687,6 +694,7 @@ export function AdminDashboardContent({ api, user }) {
 }
 
 export function AdminUsersContent({ api, currentUser }) {
+  const navigate = useNavigate();
   const [sellers, setSellers] = useState([]);
   const [summary, setSummary] = useState({});
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
@@ -699,6 +707,7 @@ export function AdminUsersContent({ api, currentUser }) {
   const [busyUser, setBusyUser] = useState(null);
   const [selectedSeller, setSelectedSeller] = useState(null);
   const [sellerDetail, setSellerDetail] = useState(null);
+  const [selectedDriverId, setSelectedDriverId] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showStaffForm, setShowStaffForm] = useState(false);
   const [staffForm, setStaffForm] = useState({
@@ -709,6 +718,7 @@ export function AdminUsersContent({ api, currentUser }) {
     role: "manager",
   });
   const [creatingStaff, setCreatingStaff] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [sponsorship, setSponsorship] = useState({
     amount: "",
     paymentReference: "",
@@ -749,6 +759,10 @@ export function AdminUsersContent({ api, currentUser }) {
     setter(event.target.value);
     setPagination((current) => ({ ...current, page: 1 }));
   };
+
+  useEffect(() => {
+    setMobileFiltersOpen(false);
+  }, [statusFilter, visibilityFilter, catalogFilter, query, pagination.page]);
 
   const updateStatus = async (seller) => {
     const nextStatus = seller.status === "active" ? "suspended" : "active";
@@ -801,6 +815,7 @@ export function AdminUsersContent({ api, currentUser }) {
 
   const openSellerDetail = async (seller) => {
     setDetailLoading(true);
+    setSelectedDriverId(null);
     setSellerDetail({ seller, products: [], campaigns: [], auditHistory: [] });
     try {
       const { data } = await api.get(`/admin/sellers/${seller.id}`);
@@ -843,6 +858,24 @@ export function AdminUsersContent({ api, currentUser }) {
     const { data } = await api.patch(`/admin/sellers/${user.id}/sponsorship/cancel`);
     setMessage(data.message);
     load();
+  };
+
+  const openSellerConversation = async () => {
+    if (!sellerDetail?.seller?.id) return;
+    setError("");
+    setMessage("");
+    setBusyUser(sellerDetail.seller.id);
+    try {
+      const { data } = await api.post(`/admin/sellers/${sellerDetail.seller.id}/contact`);
+      navigate(`/admin/contact-requests?view=messages&conversation=${data.id}`);
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message
+          || "Impossible d’ouvrir la discussion de cette boutique.",
+      );
+    } finally {
+      setBusyUser(null);
+    }
   };
 
   return (
@@ -913,29 +946,44 @@ export function AdminUsersContent({ api, currentUser }) {
         ))}
       </section>
       <section className="admin-seller-filters">
-        <label className="admin-search">
-          <Search />
-          <input
-            value={query}
-            onChange={resetPage(setQuery)}
-            placeholder="Boutique, propriétaire, téléphone, email ou catégorie"
-          />
-        </label>
-        <select value={statusFilter} onChange={resetPage(setStatusFilter)}>
-          <option value="all">Tous les statuts</option>
-          <option value="active">Actifs</option>
-          <option value="suspended">Suspendus</option>
-        </select>
-        <select value={visibilityFilter} onChange={resetPage(setVisibilityFilter)}>
-          <option value="all">Toute visibilité</option>
-          <option value="sponsored">Sponsorisés</option>
-          <option value="standard">Classement naturel</option>
-        </select>
-        <select value={catalogFilter} onChange={resetPage(setCatalogFilter)}>
-          <option value="all">Tous les catalogues</option>
-          <option value="with_products">Avec produits</option>
-          <option value="without_products">Sans produit</option>
-        </select>
+        <div className="admin-seller-filter-bar">
+          <label className="admin-search">
+            <Search />
+            <input
+              value={query}
+              onChange={resetPage(setQuery)}
+              placeholder="Boutique, propriétaire, téléphone, email ou catégorie"
+            />
+          </label>
+          <div className="admin-seller-filter-menu">
+            <button
+              type="button"
+              className="admin-seller-filter-trigger"
+              onClick={() => setMobileFiltersOpen((current) => !current)}
+              aria-expanded={mobileFiltersOpen}
+              aria-label="Ouvrir les filtres vendeurs"
+            >
+              <MoreVertical />
+            </button>
+            <div className={`admin-seller-filter-options ${mobileFiltersOpen ? "mobile-open" : ""}`}>
+              <select value={statusFilter} onChange={resetPage(setStatusFilter)}>
+                <option value="all">Tous les statuts</option>
+                <option value="active">Actifs</option>
+                <option value="suspended">Suspendus</option>
+              </select>
+              <select value={visibilityFilter} onChange={resetPage(setVisibilityFilter)}>
+                <option value="all">Toute visibilité</option>
+                <option value="sponsored">Sponsorisés</option>
+                <option value="standard">Classement naturel</option>
+              </select>
+              <select value={catalogFilter} onChange={resetPage(setCatalogFilter)}>
+                <option value="all">Tous les catalogues</option>
+                <option value="with_products">Avec produits</option>
+                <option value="without_products">Sans produit</option>
+              </select>
+            </div>
+          </div>
+        </div>
       </section>
       <div className="admin-results-count">
         {pagination.total} vendeur(s) correspondant aux filtres
@@ -952,44 +1000,15 @@ export function AdminUsersContent({ api, currentUser }) {
                 )}
               </span>
               <div>
-                <small>{seller.category || "Boutique VinnHT"}</small>
+                <small>{seller.owner_name}</small>
                 <h3>{seller.shop_name}</h3>
-                <p>{seller.owner_name}</p>
               </div>
               <Status value={seller.status} />
             </header>
-            <div className="admin-seller-contact">
-              <span><Mail /> {seller.email}</span>
-              <span><Phone /> {seller.whatsapp || seller.phone || "Non renseigné"}</span>
-              <span><MapPin /> {seller.pickup_address || "Adresse non renseignée"}</span>
-            </div>
-            <div className="admin-seller-metrics">
-              <span><b>{seller.active_product_count || 0}</b><small>produits actifs</small></span>
-              <span><b>{seller.order_count || 0}</b><small>commandes</small></span>
-              <span><b>{money(seller.sales_volume)}</b><small>volume ventes</small></span>
-              <span><b>{Number(seller.rating || 0).toFixed(1)}</b><small>{seller.review_count || 0} avis</small></span>
-            </div>
-            <div className="admin-sponsor-mini">
-              <TrendingUp />
-              <span>
-                <b>{seller.sponsored ? "Visibilité payée active" : "Classement naturel"}</b>
-                <small>
-                  {seller.sponsored
-                    ? `Jusqu'au ${shortDate(seller.sponsorship_ends_at)}`
-                    : seller.sponsorship_status
-                      ? `Dernier statut : ${seller.sponsorship_status}`
-                      : "Aucune campagne validée"}
-                </small>
-              </span>
-              {seller.sponsorship_payment_reference && (
-                <em>Réf. {seller.sponsorship_payment_reference}</em>
-              )}
-            </div>
             <footer>
               <button className="secondary" onClick={() => openSellerDetail(seller)}>
                 <Eye /> Voir la fiche
               </button>
-              <Link to={`/shops/${seller.id}`} target="_blank"><ExternalLink /> Boutique</Link>
               <button
                 className={seller.sponsored ? "gold" : ""}
                 onClick={() => seller.sponsored ? cancelCampaign(seller) : openCampaign(seller)}
@@ -1054,12 +1073,60 @@ export function AdminUsersContent({ api, currentUser }) {
                 <span><b>WhatsApp</b>{sellerDetail.seller.whatsapp || sellerDetail.seller.phone || "Non renseigné"}</span>
                 <span><b>Adresse</b>{sellerDetail.seller.pickup_address || "Non renseignée"}</span>
                 <span><b>Ouverture</b>{sellerDetail.seller.opening_hours || "Non renseignée"}</span>
+                <span><b>MonCash</b>{sellerDetail.seller.moncash_number || "Non renseigné"}</span>
+                <span><b>Nom MonCash</b>{sellerDetail.seller.moncash_account_name || "Non renseigné"}</span>
               </section>
               <section className="admin-detail-metrics">
                 <span><b>{sellerDetail.seller.active_product_count}</b><small>produits actifs</small></span>
                 <span><b>{sellerDetail.seller.order_count}</b><small>commandes</small></span>
                 <span><b>{money(sellerDetail.seller.sales_volume)}</b><small>ventes</small></span>
                 <span><b>{Number(sellerDetail.seller.rating || 0).toFixed(1)}</b><small>note</small></span>
+              </section>
+              <section>
+                <h3>Livreurs de la boutique</h3>
+                <div className="admin-driver-list">
+                  {(sellerDetail.drivers || []).map((driver) => (
+                    <article key={driver.id}>
+                      <span className="admin-driver-avatar">
+                        {driver.profile_image_url ? (
+                          <img src={assetUrl(driver.profile_image_url)} alt={driver.name} />
+                        ) : (
+                          <Truck />
+                        )}
+                      </span>
+                      <div>
+                        <b>{driver.name}</b>
+                        <small>
+                          {driver.vehicle_type || "Véhicule non précisé"} · {driver.assignment_count || 0} mission(s)
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() =>
+                          setSelectedDriverId((current) =>
+                            current === driver.id ? null : driver.id,
+                          )
+                        }
+                      >
+                        <Eye /> Voir le profil
+                      </button>
+                      {selectedDriverId === driver.id && (
+                        <div className="admin-driver-profile">
+                          <span><b>Statut compte</b>{statusLabel[driver.status] || driver.status}</span>
+                          <span><b>Statut boutique</b>{statusLabel[driver.assignment_status] || driver.assignment_status}</span>
+                          <span><b>Email</b>{driver.email || "Non renseigné"}</span>
+                          <span><b>Téléphone</b>{driver.phone || "Non renseigné"}</span>
+                          <span><b>Zones</b>{driver.zones || "Non renseignées"}</span>
+                          <span><b>Note</b>{Number(driver.rating || 0).toFixed(1)} · {driver.review_count || 0} avis</span>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                  {!sellerDetail.drivers?.length && (
+                    <div className="admin-empty">Aucun livreur lié à cette boutique.</div>
+                  )}
+                </div>
               </section>
               <section>
                 <h3>Produits récents</h3>
@@ -1101,7 +1168,17 @@ export function AdminUsersContent({ api, currentUser }) {
                 </div>
               </section>
               <footer>
-                <a href={`mailto:${sellerDetail.seller.email}`}><Mail /> Contacter</a>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busyUser === sellerDetail.seller.id}
+                  onClick={openSellerConversation}
+                >
+                  <MessageCircle />
+                  {busyUser === sellerDetail.seller.id
+                    ? "Ouverture..."
+                    : "Contacter la boutique"}
+                </button>
                 <button
                   className="danger"
                   disabled={busyUser === sellerDetail.seller.id || sellerDetail.seller.id === currentUser?.id}
@@ -1127,6 +1204,8 @@ export function AdminCategoriesContent({ api }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [mobileCategoryActionsOpen, setMobileCategoryActionsOpen] = useState(false);
+  const [mobileCategoryFormOpen, setMobileCategoryFormOpen] = useState(false);
   const load = () =>
     api
       .get("/admin/categories")
@@ -1156,6 +1235,7 @@ export function AdminCategoriesContent({ api }) {
       setMessage(response.data.message);
       setForm(empty);
       setEditing(null);
+      setMobileCategoryFormOpen(false);
       load();
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Impossible d’enregistrer cette catégorie.");
@@ -1165,6 +1245,8 @@ export function AdminCategoriesContent({ api }) {
   };
   const edit = (category) => {
     setEditing(category.id);
+    setMobileCategoryFormOpen(true);
+    setMobileCategoryActionsOpen(false);
     setForm({
       name: category.name,
       slug: category.slug,
@@ -1172,6 +1254,13 @@ export function AdminCategoriesContent({ api }) {
         ? category.icon
         : inferCategoryIcon(`${category.name} ${category.slug}`),
     });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const prepareNewCategory = () => {
+    setEditing(null);
+    setForm(empty);
+    setMobileCategoryActionsOpen(false);
+    setMobileCategoryFormOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const remove = async (category) => {
@@ -1185,6 +1274,7 @@ export function AdminCategoriesContent({ api }) {
       if (editing === category.id) {
         setEditing(null);
         setForm(empty);
+        setMobileCategoryFormOpen(false);
       }
       load();
     } catch (requestError) {
@@ -1199,7 +1289,7 @@ export function AdminCategoriesContent({ api }) {
         title="Catégories et rayons"
         text="Organisez le catalogue sans perdre les produits déjà publiés par les vendeurs."
       >
-        <button onClick={() => { setEditing(null); setForm(empty); }}>
+        <button className="admin-category-heading-action" onClick={prepareNewCategory}>
           <Plus /> Nouvelle catégorie
         </button>
       </AdminHeading>
@@ -1219,13 +1309,30 @@ export function AdminCategoriesContent({ api }) {
         ))}
       </section>
       <div className="admin-category-layout">
-        <form className="admin-panel admin-category-form" onSubmit={submit}>
+        <form
+          className={`admin-panel admin-category-form ${
+            mobileCategoryFormOpen ? "mobile-open" : ""
+          }`}
+          onSubmit={submit}
+        >
           <header>
             <span><Edit3 /></span>
             <div>
               <small>{editing ? "Modification" : "Nouveau rayon"}</small>
               <h2>{editing ? "Modifier la catégorie" : "Créer une catégorie"}</h2>
             </div>
+            <button
+              type="button"
+              className="admin-category-form-close"
+              onClick={() => {
+                setMobileCategoryFormOpen(false);
+                setEditing(null);
+                setForm(empty);
+              }}
+              aria-label="Fermer le formulaire de rayon"
+            >
+              <X />
+            </button>
           </header>
           <label>
             Nom visible
@@ -1293,7 +1400,11 @@ export function AdminCategoriesContent({ api }) {
               <button
                 type="button"
                 className="secondary"
-                onClick={() => { setEditing(null); setForm(empty); }}
+                onClick={() => {
+                  setEditing(null);
+                  setForm(empty);
+                  setMobileCategoryFormOpen(false);
+                }}
               >
                 Annuler
               </button>
@@ -1304,14 +1415,39 @@ export function AdminCategoriesContent({ api }) {
           </div>
         </form>
         <div className="admin-category-browser">
-          <label className="admin-search">
-            <Search />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Rechercher un rayon"
-            />
-          </label>
+          <div className="admin-category-browser-toolbar">
+            <label className="admin-search">
+              <Search />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Rechercher un rayon"
+              />
+            </label>
+            <div className="admin-category-browser-menu">
+              <button
+                type="button"
+                className="admin-category-browser-trigger"
+                onClick={() =>
+                  setMobileCategoryActionsOpen((current) => !current)
+                }
+                aria-expanded={mobileCategoryActionsOpen}
+                aria-label="Ouvrir les actions des rayons"
+              >
+                <MoreVertical />
+              </button>
+              <div
+                className={`admin-category-browser-actions ${
+                  mobileCategoryActionsOpen ? "mobile-open" : ""
+                }`}
+              >
+                <button type="button" onClick={prepareNewCategory}>
+                  <Plus />
+                  Nouveau rayon
+                </button>
+              </div>
+            </div>
+          </div>
           <section className="admin-category-grid">
             {visible.map((category) => (
               <article className={editing === category.id ? "selected" : ""} key={category.id}>
@@ -1320,9 +1456,9 @@ export function AdminCategoriesContent({ api }) {
                   <div><b>{category.name}</b><small>/{category.slug}</small></div>
                 </header>
                 <div className="admin-category-metrics">
-                  <span><b>{category.product_count}</b><small>produits</small></span>
-                  <span><b>{category.active_product_count || 0}</b><small>actifs</small></span>
-                  <span><b>{category.total_stock || 0}</b><small>en stock</small></span>
+                  <span><small>produits</small><b>{category.product_count}</b></span>
+                  <span><small>actifs</small><b>{category.active_product_count || 0}</b></span>
+                  <span><small>en stock</small><b>{category.total_stock || 0}</b></span>
                 </div>
                 <footer>
                   <button onClick={() => edit(category)}><Edit3 /> Modifier</button>
@@ -2283,6 +2419,7 @@ export function AdminSettingsContent({ api, role = "admin" }) {
 export function AdminContactRequestsContent({
   api,
   onMobileConversationChange,
+  onCounterChange,
   externalStatusFilter,
   onExternalStatusFilterChange,
   externalQuery,
@@ -2407,6 +2544,15 @@ export function AdminContactRequestsContent({
       .map((part) => part[0])
       .join("")
       .toUpperCase();
+
+  useEffect(() => {
+    const actionableCount = requests.filter(
+      (request) =>
+        Number(request.unread_count || 0) > 0 ||
+        ["new", "in_progress"].includes(request.status),
+    ).length;
+    onCounterChange?.(actionableCount);
+  }, [requests, onCounterChange]);
 
   return (
     <div
@@ -2536,6 +2682,7 @@ export function AdminContactRequestsContent({
 export function DeliveryFeedbackSupportContent({
   api,
   onMobileConversationChange,
+  onCounterChange,
   externalStatusFilter,
   onExternalStatusFilterChange,
   externalQuery,
@@ -2645,6 +2792,13 @@ export function DeliveryFeedbackSupportContent({
     currentStatusFilter === "alerts"
       ? items.filter((item) => Number(item.rating || 0) <= 3)
       : items;
+
+  useEffect(() => {
+    const actionableCount = items.filter((item) =>
+      ["new", "in_review"].includes(item.status),
+    ).length;
+    onCounterChange?.(actionableCount);
+  }, [items, onCounterChange]);
 
   return (
     <div

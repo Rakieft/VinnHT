@@ -51,7 +51,7 @@ import { Autoplay, Pagination } from "swiper/modules";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import "swiper/css/pagination";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Link,
@@ -5008,9 +5008,17 @@ function AdminProductsPage() {
 
 function AdminContactRequestsPage() {
   const { user } = useAuth();
+  const location = useLocation();
+  const supportPageParams = new URLSearchParams(location.search);
+  const requestedSupportView = supportPageParams.get("view");
   const [supportView, setSupportView] = useState("requests");
   const [mobileDiscussionOpen, setMobileDiscussionOpen] = useState(false);
   const [mobileSupportMenuOpen, setMobileSupportMenuOpen] = useState(false);
+  const [supportCounters, setSupportCounters] = useState({
+    messages: 0,
+    requests: 0,
+    "delivery-feedback": 0,
+  });
   const [supportFilters, setSupportFilters] = useState({
     requests: "all",
     "delivery-feedback": "all",
@@ -5048,6 +5056,110 @@ function AdminContactRequestsPage() {
 
   useEffect(() => {
     loadAdminFlow();
+  }, []);
+
+  useEffect(() => {
+    if (
+      requestedSupportView
+      && ["messages", "requests", "delivery-feedback"].includes(requestedSupportView)
+    ) {
+      setSupportView(requestedSupportView);
+    }
+  }, [requestedSupportView]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSupportCounters = async () => {
+      const [messagesResult, requestsResult, deliveryResult] = await Promise.allSettled([
+        api.get("/messages/conversations"),
+        api.get("/admin/contact-requests"),
+        api.get("/admin/delivery-feedback"),
+      ]);
+
+      if (cancelled) return;
+
+      const messagesCount =
+        messagesResult.status === "fulfilled"
+          ? (messagesResult.value.data || []).reduce(
+              (total, item) => total + Number(item.unread_count || 0),
+              0,
+            )
+          : 0;
+
+      const requestsCount =
+        requestsResult.status === "fulfilled"
+          ? (requestsResult.value.data || []).filter(
+              (request) =>
+                Number(request.unread_count || 0) > 0 ||
+                ["new", "in_progress"].includes(request.status),
+            ).length
+          : 0;
+
+      const deliveryCount =
+        deliveryResult.status === "fulfilled"
+          ? (() => {
+              const summary = deliveryResult.value.data?.summary || {};
+              const counted =
+                Number(summary.new_count || 0) + Number(summary.in_review_count || 0);
+              if (counted > 0) return counted;
+              const items = Array.isArray(deliveryResult.value.data?.items)
+                ? deliveryResult.value.data.items
+                : [];
+              return items.filter((item) => ["new", "in_review"].includes(item.status)).length;
+            })()
+          : 0;
+
+      setSupportCounters({
+        messages: messagesCount,
+        requests: requestsCount,
+        "delivery-feedback": deliveryCount,
+      });
+    };
+
+    loadSupportCounters();
+    const interval = window.setInterval(loadSupportCounters, 20000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const renderSupportCounter = (value) =>
+    value > 0 ? <span className="admin-support-tab-badge">{value > 99 ? "99+" : value}</span> : null;
+
+  const handleMessagesCounterChange = useCallback((value) => {
+    setSupportCounters((current) =>
+      current.messages === value
+        ? current
+        : {
+            ...current,
+            messages: value,
+          },
+    );
+  }, []);
+
+  const handleRequestsCounterChange = useCallback((value) => {
+    setSupportCounters((current) =>
+      current.requests === value
+        ? current
+        : {
+            ...current,
+            requests: value,
+          },
+    );
+  }, []);
+
+  const handleDeliveryFeedbackCounterChange = useCallback((value) => {
+    setSupportCounters((current) =>
+      current["delivery-feedback"] === value
+        ? current
+        : {
+            ...current,
+            "delivery-feedback": value,
+          },
+    );
   }, []);
 
   useEffect(() => {
@@ -5156,7 +5268,7 @@ function AdminContactRequestsPage() {
                 setMobileSupportMenuOpen(false);
               }}
             >
-              <MessageCircle /> Discussions directes
+              <MessageCircle /> Discussions directes {renderSupportCounter(supportCounters.messages)}
             </button>
             <button
               className={supportView === "requests" ? "active" : ""}
@@ -5166,7 +5278,7 @@ function AdminContactRequestsPage() {
                 setMobileSupportMenuOpen(false);
               }}
             >
-              <Headphones /> Dossiers support
+              <Headphones /> Dossiers support {renderSupportCounter(supportCounters.requests)}
             </button>
             <button
               className={supportView === "delivery-feedback" ? "active" : ""}
@@ -5176,7 +5288,7 @@ function AdminContactRequestsPage() {
                 setMobileSupportMenuOpen(false);
               }}
             >
-              <Truck /> Avis livreurs
+              <Truck /> Avis livreurs {renderSupportCounter(supportCounters["delivery-feedback"])}
             </button>
           </nav>
         </header>
@@ -5185,7 +5297,9 @@ function AdminContactRequestsPage() {
             api={api}
             user={user}
             sellerMode
+            autoSelectFirst={false}
             onMobileConversationChange={setMobileDiscussionOpen}
+                        onCounterChange={handleMessagesCounterChange}
             externalQuery={supportQueries.messages || ""}
             onExternalQueryChange={(value) =>
               setSupportQueries((current) => ({
@@ -5198,6 +5312,7 @@ function AdminContactRequestsPage() {
           <DeliveryFeedbackSupportContent
             api={api}
             onMobileConversationChange={setMobileDiscussionOpen}
+                        onCounterChange={handleDeliveryFeedbackCounterChange}
             externalStatusFilter={supportFilters["delivery-feedback"]}
             onExternalStatusFilterChange={(value) =>
               setSupportFilters((current) => ({
@@ -5217,6 +5332,7 @@ function AdminContactRequestsPage() {
           <AdminContactRequestsContent
             api={api}
             onMobileConversationChange={setMobileDiscussionOpen}
+                        onCounterChange={handleRequestsCounterChange}
             externalStatusFilter={supportFilters.requests}
             onExternalStatusFilterChange={(value) =>
               setSupportFilters((current) => ({
@@ -5715,7 +5831,7 @@ function AppRoutes() {
         path="/admin/payments"
         element={
           <Protected roles={["admin"]}>
-            <Navigate to="/admin" replace />
+            <AdminPaymentsPage />
           </Protected>
         }
       />
@@ -5904,3 +6020,4 @@ export default function App() {
     </Providers>
   );
 }
+

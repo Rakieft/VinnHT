@@ -7115,17 +7115,50 @@ app.get(
        LIMIT 8`,
       [seller.id],
     );
+    const [drivers] = await pool.query(
+      `SELECT
+         u.id,
+         u.name,
+         u.email,
+         u.phone,
+         u.status,
+         u.profile_image_url,
+         sdd.vehicle_type,
+         sdd.zones,
+         sdd.status assignment_status,
+         sdd.created_at,
+         COALESCE((
+           SELECT ROUND(AVG(df.rating),1)
+           FROM delivery_feedback df
+           WHERE df.delivery_user_id=u.id AND df.seller_id=?
+         ),0) rating,
+         (
+           SELECT COUNT(*)
+           FROM delivery_feedback df
+           WHERE df.delivery_user_id=u.id AND df.seller_id=?
+         ) review_count,
+         (
+           SELECT COUNT(*)
+           FROM seller_delivery_assignments sda
+           WHERE sda.seller_id=? AND sda.delivery_user_id=u.id
+         ) assignment_count
+       FROM seller_delivery_drivers sdd
+       JOIN users u ON u.id=sdd.delivery_user_id
+       WHERE sdd.seller_id=?
+       ORDER BY u.created_at DESC`,
+      [seller.id, seller.id, seller.id, seller.id],
+    );
     const [auditHistory] = await pool.query(
       `SELECT al.id,al.action,al.created_at,actor.name actor_name
        FROM audit_logs al
        LEFT JOIN users actor ON actor.id=al.actor_user_id
        WHERE (al.entity_type='seller' AND al.entity_id=?)
           OR (al.entity_type='user' AND al.entity_id=?)
-       ORDER BY al.created_at DESC
-       LIMIT 10`,
+      ORDER BY al.created_at DESC
+      LIMIT 10`,
       [String(seller.id), String(seller.id)],
     );
-    res.json({ seller, products, campaigns, auditHistory });
+    res.json({ seller, products, campaigns, drivers, auditHistory });
   }),
 );
 app.get(
@@ -9196,6 +9229,104 @@ app.post(
       "SELECT id FROM conversations WHERE client_id=? AND seller_id=? AND support_context=?",
       [req.user.id, support.id, requestedContext],
     );
+    res.status(201).json(conversation);
+  }),
+);
+app.post(
+  "/api/admin/sellers/:id/contact",
+  authenticate,
+  authorize("admin", "support"),
+  asyncRoute(async (req, res) => {
+    const sellerId = Number(req.params.id);
+    if (!Number.isInteger(sellerId) || sellerId < 1) {
+      return res.status(400).json({ message: "Vendeur invalide." });
+    }
+
+    const [[seller]] = await pool.query(
+      `SELECT u.id
+       FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'
+       WHERE u.id=?`,
+      [sellerId],
+    );
+    if (!seller) {
+      return res.status(404).json({ message: "Vendeur introuvable." });
+    }
+
+    const [[existingConversation]] = await pool.query(
+      `SELECT c.id
+       FROM conversations c
+       JOIN user_roles ur ON ur.user_id=c.seller_id
+       WHERE c.client_id=?
+         AND support_context='support_seller'
+         AND ur.role IN ('support','admin')
+       ORDER BY
+         EXISTS(
+           SELECT 1
+           FROM messages m
+           WHERE m.conversation_id=c.id
+         ) DESC,
+         COALESCE(
+           (
+             SELECT m.created_at
+             FROM messages m
+             WHERE m.conversation_id=c.id
+             ORDER BY m.created_at DESC
+             LIMIT 1
+           ),
+           c.updated_at
+         ) DESC,
+         c.id DESC
+       LIMIT 1`,
+      [sellerId],
+    );
+
+    const conversation =
+      existingConversation
+      || (
+        await (async () => {
+          const [[supportAccount]] = await pool.query(
+            `SELECT u.id
+             FROM users u
+             JOIN user_roles ur ON ur.user_id=u.id
+             WHERE ur.role IN ('support','admin')
+               AND u.status='active'
+             ORDER BY (u.id=?) DESC, (ur.role='support') DESC, u.id
+             LIMIT 1`,
+            [req.user.id],
+          );
+          if (!supportAccount) {
+            return null;
+          }
+
+          await pool.query(
+            "INSERT IGNORE INTO conversations (client_id,seller_id,support_context) VALUES (?,?,'support_seller')",
+            [sellerId, supportAccount.id],
+          );
+
+          const [[createdConversation]] = await pool.query(
+            `SELECT id
+             FROM conversations
+             WHERE client_id=?
+               AND seller_id=?
+               AND support_context='support_seller'
+             ORDER BY id DESC
+             LIMIT 1`,
+            [sellerId, supportAccount.id],
+          );
+          return createdConversation || null;
+        })()
+      );
+
+    if (!conversation) {
+      return res.status(404).json({ message: "Compte support indisponible." });
+    }
+
+    await pool.query(
+      "DELETE FROM user_hidden_conversations WHERE user_id=? AND conversation_id=?",
+      [req.user.id, conversation.id],
+    );
+
     res.status(201).json(conversation);
   }),
 );

@@ -40,8 +40,10 @@ export default function MarketplaceMessages({
   user,
   sellerMode = false,
   onMobileConversationChange,
+  onCounterChange,
   externalQuery,
   onExternalQueryChange,
+  autoSelectFirst = true,
 }) {
   const isSupportStaff = Array.isArray(user?.roles)
     ? user.roles.some((role) => ["support", "admin"].includes(role))
@@ -71,6 +73,14 @@ export default function MarketplaceMessages({
   }, [mobileConversationOpen, onMobileConversationChange]);
 
   useEffect(() => {
+    const unreadTotal = conversations.reduce(
+      (total, item) => total + Number(item.unread_count || 0),
+      0,
+    );
+    onCounterChange?.(unreadTotal);
+  }, [conversations, onCounterChange]);
+
+  useEffect(() => {
     document.body.classList.toggle(
       "mobile-message-conversation-open",
       mobileConversationOpen,
@@ -89,7 +99,10 @@ export default function MarketplaceMessages({
         if (candidate && data.some((item) => Number(item.id) === Number(candidate))) {
           return candidate;
         }
-        return data[0]?.id || null;
+        if (autoSelectFirst) {
+          return data[0]?.id || null;
+        }
+        return null;
       },
     );
   };
