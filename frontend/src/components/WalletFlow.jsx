@@ -18,6 +18,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  MoreHorizontal,
   Store,
   Wallet,
   X,
@@ -736,6 +737,19 @@ export function AdminPayoutApprovalContent({ api }) {
   const [filter, setFilter] = useState("pending");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const payoutFilterOptions = [
+    ["pending", "En attente finance"],
+    ["approved", "Approuvée"],
+    ["processing", "Transfert en cours"],
+    ["paid", "Payée"],
+    ["rejected", "Refusée"],
+    ["all", "Toutes"],
+  ];
+
+  useEffect(() => {
+    setMobileFiltersOpen(false);
+  }, [filter, query]);
 
   const requests = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -789,15 +803,44 @@ export function AdminPayoutApprovalContent({ api }) {
         <WalletMetric icon={ShieldCheck} label="Transmises" value={data.stats.approved_amount} note="À la finance" tone="blue" />
         <WalletMetric icon={CheckCircle2} label="Déjà payées" value={data.stats.paid_amount} note="Historique confirmé" tone="green" />
       </section>
-      <section className="payout-desk-toolbar">
-        <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Boutique, demande ou MonCash" /></label>
-        <nav>
-          {["pending", "approved", "processing", "paid", "rejected", "all"].map((status) => (
-            <button className={filter === status ? "active" : ""} onClick={() => setFilter(status)} key={status}>
-              {status === "all" ? "Toutes" : statusMeta[status]?.label || status}
-            </button>
-          ))}
-        </nav>
+      <section className={`payout-desk-toolbar ${mobileFiltersOpen ? "mobile-open" : ""}`}>
+        <label className="payout-desk-toolbar-search">
+          <Search />
+          <span>
+            <small>Recherche</small>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Boutique, demande ou MonCash"
+            />
+          </span>
+        </label>
+        <button
+          type="button"
+          className="payout-desk-toolbar-trigger"
+          aria-label="Ouvrir les filtres"
+          onClick={() => setMobileFiltersOpen((current) => !current)}
+        >
+          <MoreHorizontal />
+        </button>
+        <div className="payout-desk-toolbar-panel">
+          <label className="payout-desk-toolbar-select" aria-label="Filtrer les demandes administratives">
+            <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+              {payoutFilterOptions.map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <nav>
+            {payoutFilterOptions.map(([value, label]) => (
+              <button className={filter === value ? "active" : ""} onClick={() => setFilter(value)} key={value}>
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
       </section>
       <section className="payout-desk-grid">
         {requests.map((request) => (
@@ -859,6 +902,7 @@ export function ManagerPayoutOperationsContent({ api }) {
   const [beneficiaryChecked, setBeneficiaryChecked] = useState(false);
   const [transferConfirmed, setTransferConfirmed] = useState(false);
   const [providerBalance, setProviderBalance] = useState(null);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const provider = data.provider || {};
   const payoutFilterOptions = [
     ["ready", "À traiter"],
@@ -877,6 +921,10 @@ export function ManagerPayoutOperationsContent({ api }) {
       : filter === "all"
         ? "Toutes les demandes"
         : statusMeta[filter]?.label || filter;
+
+  useEffect(() => {
+    setMobileFiltersOpen(false);
+  }, [filter, query]);
 
   const requests = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -1019,24 +1067,44 @@ export function ManagerPayoutOperationsContent({ api }) {
         <WalletMetric icon={AlertTriangle} label="À revoir" value={data.stats.failed_amount} note={`${data.stats.failed_count || 0} incident(s)`} tone="rose" />
         <WalletMetric icon={CheckCircle2} label="Transféré" value={data.stats.paid_amount} note="Références enregistrées" tone="green" />
       </section>
-      <section className="payout-desk-toolbar">
-        <label className="payout-desk-toolbar-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Boutique, demande ou MonCash" /></label>
-        <label className="payout-desk-toolbar-select" aria-label="Filtrer les demandes finance">
-          <select value={filter} onChange={(event) => setFilter(event.target.value)}>
-            {payoutFilterOptions.map(([value, label]) => (
-              <option value={value} key={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+      <section className={`payout-desk-toolbar ${mobileFiltersOpen ? "mobile-open" : ""}`}>
+        <label className="payout-desk-toolbar-search">
+          <Search />
+          <span>
+            <small>Recherche</small>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Boutique, demande ou MonCash"
+            />
+          </span>
         </label>
-        <nav>
-          {payoutFilterOptions.map(([value, label]) => (
-            <button className={filter === value ? "active" : ""} onClick={() => setFilter(value)} key={value}>
-              {label}
-            </button>
-          ))}
-        </nav>
+        <button
+          type="button"
+          className="payout-desk-toolbar-trigger"
+          aria-label="Ouvrir les filtres"
+          onClick={() => setMobileFiltersOpen((current) => !current)}
+        >
+          <MoreHorizontal />
+        </button>
+        <div className="payout-desk-toolbar-panel">
+          <label className="payout-desk-toolbar-select" aria-label="Filtrer les demandes finance">
+            <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+              {payoutFilterOptions.map(([value, label]) => (
+                <option value={value} key={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <nav>
+            {payoutFilterOptions.map(([value, label]) => (
+              <button className={filter === value ? "active" : ""} onClick={() => setFilter(value)} key={value}>
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
       </section>
       <section className="finance-mobile-summary">
         <span>

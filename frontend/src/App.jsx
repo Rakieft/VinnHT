@@ -3768,28 +3768,24 @@ function Sidebar() {
 function MobileDashboardNav() {
   const { user, activeRole } = useAuth();
   const loc = useLocation();
+  const navRef = useRef(null);
   const activeItemRef = useRef(null);
-  const skipNextScrollAnimation = useRef(false);
   const items = mobileMenuItemsFor(activeRole, user);
 
   useEffect(() => {
-    skipNextScrollAnimation.current = true;
-  }, [activeRole]);
-
-  useEffect(() => {
-    if (!activeItemRef.current) return;
+    if (!navRef.current || !activeItemRef.current) return;
+    if (navRef.current.scrollWidth <= navRef.current.clientWidth + 4) return;
 
     activeItemRef.current.scrollIntoView({
-      behavior: skipNextScrollAnimation.current ? "auto" : "smooth",
+      behavior: "auto",
       block: "nearest",
       inline: "center",
     });
-
-    skipNextScrollAnimation.current = false;
   }, [loc.pathname, activeRole]);
 
   return (
     <nav
+      ref={navRef}
       key={activeRole}
       className={`mobile-dashboard-nav mobile-dashboard-nav-${activeRole}`}
       aria-label="Navigation du dashboard"
@@ -3808,10 +3804,8 @@ function MobileDashboardNav() {
           >
             <span className="mobile-nav-icon">
               {active && (
-                <motion.span
+                <span
                   className="mobile-nav-active"
-                  layoutId={`mobile-dashboard-active-${activeRole}`}
-                  transition={{ type: "spring", stiffness: 420, damping: 34 }}
                 />
               )}
               <Icon size={20} />

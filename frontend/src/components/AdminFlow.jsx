@@ -1503,6 +1503,7 @@ export function AdminProductsContent({ api }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [mobileProductFiltersOpen, setMobileProductFiltersOpen] = useState(false);
   const load = () => {
     setError("");
     return api
@@ -1547,6 +1548,18 @@ export function AdminProductsContent({ api }) {
     setter(event.target.value);
     setPagination((current) => ({ ...current, page: 1 }));
   };
+
+  useEffect(() => {
+    setMobileProductFiltersOpen(false);
+  }, [
+    query,
+    statusFilter,
+    stockFilter,
+    promotionFilter,
+    departmentFilter,
+    categoryFilter,
+    pagination.page,
+  ]);
 
   const updateStatus = async (product) => {
     setBusy(true);
@@ -1636,34 +1649,49 @@ export function AdminProductsContent({ api }) {
         ))}
       </section>
       <section className="admin-product-filters">
-        <label className="admin-search">
-          <Search />
-          <input value={query} onChange={resetPage(setQuery)} placeholder="Produit, boutique, catégorie, ville ou département" />
-        </label>
-        <select value={statusFilter} onChange={resetPage(setStatusFilter)}>
-          <option value="all">Tous les statuts</option>
-          <option value="active">Actifs</option>
-          <option value="inactive">Inactifs</option>
-          <option value="draft">Brouillons</option>
-        </select>
-        <select value={stockFilter} onChange={resetPage(setStockFilter)}>
-          <option value="all">Tous les stocks</option>
-          <option value="available">Disponible</option>
-          <option value="low">Stock faible</option>
-          <option value="out">Épuisé</option>
-        </select>
-        <select value={categoryFilter} onChange={resetPage(setCategoryFilter)}>
-          <option value="all">Toutes catégories</option>
-          {categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}
-        </select>
-        <select value={departmentFilter} onChange={resetPage(setDepartmentFilter)}>
-          <option value="all">Tous départements</option>
-          {departments.map((department) => <option value={department} key={department}>{department}</option>)}
-        </select>
-        <select value={promotionFilter} onChange={resetPage(setPromotionFilter)}>
-          <option value="all">Tous les produits</option>
-          <option value="active">En promotion</option>
-        </select>
+        <div className="admin-product-filter-bar">
+          <label className="admin-search">
+            <Search />
+            <input value={query} onChange={resetPage(setQuery)} placeholder="Produit, boutique, catégorie, ville ou département" />
+          </label>
+          <div className="admin-product-filter-menu">
+            <button
+              type="button"
+              className="admin-product-filter-trigger"
+              onClick={() => setMobileProductFiltersOpen((current) => !current)}
+              aria-expanded={mobileProductFiltersOpen}
+              aria-label="Ouvrir les filtres produits"
+            >
+              <MoreVertical />
+            </button>
+            <div className={`admin-product-filter-options ${mobileProductFiltersOpen ? "mobile-open" : ""}`}>
+              <select value={statusFilter} onChange={resetPage(setStatusFilter)}>
+                <option value="all">Tous les statuts</option>
+                <option value="active">Actifs</option>
+                <option value="inactive">Inactifs</option>
+                <option value="draft">Brouillons</option>
+              </select>
+              <select value={stockFilter} onChange={resetPage(setStockFilter)}>
+                <option value="all">Tous les stocks</option>
+                <option value="available">Disponible</option>
+                <option value="low">Stock faible</option>
+                <option value="out">Épuisé</option>
+              </select>
+              <select value={categoryFilter} onChange={resetPage(setCategoryFilter)}>
+                <option value="all">Toutes catégories</option>
+                {categories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}
+              </select>
+              <select value={departmentFilter} onChange={resetPage(setDepartmentFilter)}>
+                <option value="all">Tous départements</option>
+                {departments.map((department) => <option value={department} key={department}>{department}</option>)}
+              </select>
+              <select value={promotionFilter} onChange={resetPage(setPromotionFilter)}>
+                <option value="all">Tous les produits</option>
+                <option value="active">En promotion</option>
+              </select>
+            </div>
+          </div>
+        </div>
       </section>
       <div className="admin-products-toolbar">
         <span>{pagination.total} produit(s) correspondant aux filtres</span>

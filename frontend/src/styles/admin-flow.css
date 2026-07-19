@@ -1663,6 +1663,23 @@
   grid-template-columns: minmax(290px, 1.2fr) repeat(5, minmax(125px, 0.3fr));
 }
 
+.admin-product-filter-bar {
+  display: contents;
+}
+
+.admin-product-filter-menu {
+  position: relative;
+  display: contents;
+}
+
+.admin-product-filter-trigger {
+  display: none;
+}
+
+.admin-product-filter-options {
+  display: contents;
+}
+
 .admin-seller-filters select,
 .admin-product-filters select {
   min-height: 48px;
@@ -4689,6 +4706,89 @@
     width: 100%;
   }
 
+  .admin-product-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-product-filters .admin-product-filter-bar .admin-search {
+    grid-column: auto;
+  }
+
+  .admin-product-filter-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 40px;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .admin-product-filter-bar .admin-search {
+    min-width: 0;
+    width: 100%;
+    gap: 7px;
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .admin-product-filter-bar .admin-search svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+  }
+
+  .admin-product-filter-bar .admin-search input {
+    min-width: 0;
+    font-size: 11px;
+  }
+
+  .admin-product-filter-menu {
+    position: relative;
+    width: 40px;
+    display: block;
+  }
+
+  .admin-product-filter-trigger {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border: 1px solid #dbeafe;
+    border-radius: 12px;
+    color: #2563eb;
+    background: #ffffff;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+  }
+
+  .admin-product-filter-trigger svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .admin-product-filter-options {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 40;
+    width: min(240px, calc(100vw - 32px));
+    display: none;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 22px 45px rgba(15, 23, 42, 0.14);
+    backdrop-filter: blur(18px);
+  }
+
+  .admin-product-filter-options.mobile-open {
+    display: grid;
+  }
+
+  .admin-product-filter-options select {
+    width: 100%;
+    min-height: 42px;
+    border-radius: 12px;
+    font-size: 11px;
+  }
+
   .admin-seller-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4734,9 +4834,93 @@
     grid-column: auto;
   }
 
+  .admin-category-summary article {
+    flex: 0 0 min(220px, calc(100vw - 64px));
+    min-width: min(220px, calc(100vw - 64px));
+    scroll-snap-align: start;
+  }
+
+  .admin-product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .admin-product-grid > article {
+    gap: 9px;
+    padding-bottom: 12px;
+    border-radius: 20px;
+  }
+
+  .admin-product-grid header,
+  .admin-product-grid footer,
+  .admin-product-numbers,
+  .admin-product-card-body {
+    margin-inline: 12px;
+  }
+
+  .admin-product-image > b,
+  .admin-product-category {
+    font-size: 8px;
+  }
+
+  .admin-product-grid h3 {
+    min-height: 38px;
+    font-size: 13px;
+    line-height: 1.25;
+  }
+
+  .admin-product-seller b,
+  .admin-product-grid header small,
+  .admin-product-grid p,
+  .admin-product-numbers small {
+    font-size: 9px;
+  }
+
+  .admin-product-location {
+    gap: 4px;
+  }
+
+  .admin-product-location svg {
+    width: 12px;
+    flex: 0 0 12px;
+  }
+
+  .admin-product-numbers {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .admin-product-numbers span {
+    padding: 8px 9px;
+  }
+
+  .admin-product-numbers b {
+    font-size: 12px;
+  }
+
+  .admin-product-grid footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-product-grid footer button,
+  .admin-product-grid footer a {
+    min-height: 36px;
+    padding: 0 6px;
+    font-size: 9px;
+  }
+
   .admin-products-toolbar {
     align-items: stretch;
     flex-direction: column;
+    gap: 8px;
+  }
+
+  .admin-products-toolbar > div {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
   }
 
   .admin-products-toolbar > div {
