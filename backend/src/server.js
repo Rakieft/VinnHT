@@ -9021,6 +9021,7 @@ app.get(
     if (!roles.includes("client")) return res.json([]);
     const [sellers] = await pool.query(
       `SELECT DISTINCT u.id,
+        u.id seller_id,
         COALESCE(sp.shop_name,u.name) name,
         COALESCE(sp.shop_logo_url,u.profile_image_url) image_url,
         sp.category
@@ -9028,7 +9029,7 @@ app.get(
        JOIN user_roles ur ON ur.user_id=u.id AND ur.role='seller'
        LEFT JOIN seller_profiles sp ON sp.seller_id=u.id
        WHERE u.status='active' AND u.id<>?
-       ORDER BY name`,
+       ORDER BY LOWER(COALESCE(sp.shop_name,u.name))`,
       [req.user.id],
     );
     res.json(sellers);
@@ -9202,10 +9203,14 @@ app.post(
     const [[existingConversation]] = await pool.query(
       `SELECT c.id
        FROM conversations c
-       JOIN users seller ON seller.id=c.seller_id
        WHERE c.client_id=?
          AND c.support_context=?
-         AND seller.role IN ('support','admin')
+         AND EXISTS(
+           SELECT 1
+           FROM user_roles support_role
+           WHERE support_role.user_id=c.seller_id
+             AND support_role.role IN ('support','admin')
+         )
        ORDER BY COALESCE(
          (SELECT created_at FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1),
          c.updated_at

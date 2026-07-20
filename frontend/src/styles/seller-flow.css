@@ -112,6 +112,20 @@
   background: var(--blue);
 }
 
+.seller-toolbar-menu-trigger {
+  display: none;
+}
+
+.seller-toolbar-menu-panel {
+  display: contents;
+}
+
+.seller-toolbar-menu-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
 .seller-catalog-toolbar .seller-add-product-button {
   color: #ffffff;
   background: linear-gradient(135deg, var(--blue), #1d4ed8);
@@ -3403,7 +3417,6 @@
   }
 
   .seller-product-form,
-  .seller-metric-grid,
   .seller-order-information,
   .seller-shop-form,
   .seller-settings-grid,
@@ -3420,6 +3433,30 @@
   .seller-driver-assignment button,
   .seller-driver-form button {
     width: 100%;
+  }
+
+  .seller-metric-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 2px 6px;
+    scrollbar-width: none;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .seller-metric-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .seller-metric-grid article {
+    flex: 0 0 calc((100vw - 62px) / 2);
+    min-width: calc((100vw - 62px) / 2);
+    min-height: 136px;
+    scroll-snap-align: start;
   }
 
   .seller-product-grid {
@@ -3450,12 +3487,83 @@
   }
 
   .seller-catalog-toolbar {
-    align-items: stretch;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
   }
 
   .seller-catalog-toolbar label {
     min-width: 0;
+    width: 100%;
+  }
+
+  .seller-toolbar-menu-trigger {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 14px;
+    color: var(--blue);
+    background: var(--blue-soft);
+    box-shadow: 0 12px 24px rgba(37, 99, 235, 0.14);
+  }
+
+  .seller-toolbar-menu-trigger svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .seller-toolbar-menu-panel {
+    display: none;
+    grid-column: 1 / -1;
+  }
+
+  .mobile-filter-toolbar.mobile-open .seller-toolbar-menu-panel {
+    display: block;
+  }
+
+  .seller-toolbar-menu-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .seller-toolbar-menu-list button,
+  .seller-toolbar-menu-list .seller-add-product-button {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .seller-orders-toolbar .seller-small-action {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .seller-catalog-toolbar.mobile-filter-toolbar > .seller-toolbar-menu-panel {
+    width: 100%;
+    display: none !important;
+  }
+
+  .seller-catalog-toolbar.mobile-filter-toolbar.mobile-open > .seller-toolbar-menu-panel {
+    display: block !important;
+  }
+
+  .seller-catalog-toolbar.mobile-filter-toolbar > .seller-toolbar-menu-panel .seller-toolbar-menu-list {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 8px;
+  }
+
+  .seller-catalog-toolbar.mobile-filter-toolbar > .seller-toolbar-menu-panel .seller-toolbar-menu-list button,
+  .seller-catalog-toolbar.mobile-filter-toolbar > .seller-toolbar-menu-panel .seller-toolbar-menu-list .seller-add-product-button {
+    width: 100%;
+    flex: none;
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .seller-edit-panel,
@@ -4332,6 +4440,152 @@
   .seller-profile-form input,
   .seller-profile-form button {
     min-width: 0;
+  }
+
+  .seller-dashboard-hero,
+  .seller-payout-banner,
+  .seller-finance-panel,
+  .seller-order-detail,
+  .seller-shop-preview,
+  .seller-shop-form,
+  .seller-driver-form,
+  .seller-verification-panel,
+  .seller-verification-shop-card,
+  .seller-verification-checklist,
+  .seller-verification-history,
+  .seller-verification-actions {
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .seller-dashboard-hero,
+  .seller-payout-banner {
+    gap: 16px;
+  }
+
+  .seller-dashboard-hero h2,
+  .seller-payout-banner h2 {
+    line-height: 1.08;
+  }
+
+  .seller-dashboard-hero-actions {
+    width: 100%;
+    display: grid;
+  }
+
+  .seller-catalog-toolbar,
+  .seller-orders-toolbar {
+    gap: 10px;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .seller-catalog-toolbar > div:not(.seller-toolbar-menu-panel) {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .seller-catalog-toolbar > div:not(.seller-toolbar-menu-panel) button,
+  .seller-catalog-toolbar > div:not(.seller-toolbar-menu-panel) .seller-add-product-button {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
+  }
+
+  .seller-catalog-toolbar.mobile-filter-toolbar > .seller-toolbar-menu-panel {
+    width: 100%;
+  }
+
+  .seller-catalog-toolbar.mobile-filter-toolbar > .seller-toolbar-menu-panel .seller-toolbar-menu-list {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 8px;
+  }
+
+  .seller-catalog-toolbar.mobile-filter-toolbar > .seller-toolbar-menu-panel .seller-toolbar-menu-list button,
+  .seller-catalog-toolbar.mobile-filter-toolbar > .seller-toolbar-menu-panel .seller-toolbar-menu-list .seller-add-product-button {
+    width: 100%;
+    flex: none;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .seller-order-list {
+    gap: 12px;
+  }
+
+  .seller-order-list article {
+    border-radius: 22px;
+  }
+
+  .seller-order-list article > header,
+  .seller-order-list article > footer {
+    padding: 15px;
+  }
+
+  .seller-order-list article > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .seller-order-status-stack {
+    width: 100%;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .seller-order-items {
+    padding: 13px 15px;
+  }
+
+  .seller-order-items > div {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .seller-order-items img {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+  }
+
+  .seller-order-items > div > strong {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .seller-order-list footer button,
+  .seller-order-detail footer button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .seller-order-modal-content {
+    padding: 18px 16px 24px;
+  }
+
+  .seller-payment-proof-card {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .seller-payment-proof-card a,
+  .seller-payment-proof-card button,
+  .seller-payment-validated {
+    width: 100%;
+  }
+
+  .seller-finance-list article {
+    gap: 10px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .seller-product-studio-heading,
+  .seller-product-studio-footer {
+    gap: 10px;
   }
 }
 

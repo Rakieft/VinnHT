@@ -15,6 +15,7 @@ import {
   ExternalLink,
   ImagePlus,
   MapPin,
+  MoreHorizontal,
   Package,
   Plus,
   Power,
@@ -264,6 +265,7 @@ export function SellerProductsContent({ api }) {
   const [editing, setEditing] = useState(null);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const load = () =>
     api
@@ -310,6 +312,10 @@ export function SellerProductsContent({ api }) {
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [adding]);
+
+  useEffect(() => {
+    setMobileFiltersOpen(false);
+  }, [filter, query, adding]);
 
   const toggle = async (product) => {
     setError("");
@@ -403,7 +409,7 @@ export function SellerProductsContent({ api }) {
     >
       {message && <div className="flow-success">{message}</div>}
       {error && <div className="flow-error">{error}</div>}
-      <div className="seller-catalog-toolbar">
+      <div className={`seller-catalog-toolbar mobile-filter-toolbar ${mobileFiltersOpen ? "mobile-open" : ""}`}>
         <label>
           <Search />
           <input
@@ -412,28 +418,40 @@ export function SellerProductsContent({ api }) {
             placeholder="Rechercher un produit"
           />
         </label>
-        <div>
-          <button
-            className="seller-add-product-button"
-            onClick={() => setAdding((current) => !current)}
-          >
-            {adding ? <X /> : <Plus />}
-            {adding ? "Fermer" : "Ajouter un produit"}
-          </button>
-          {[
-            ["all", "Tous"],
-            ["active", "Actifs"],
-            ["inactive", "Inactifs"],
-            ["low-stock", "Stock faible"],
-          ].map(([value, label]) => (
+        <button
+          type="button"
+          className="seller-toolbar-menu-trigger"
+          aria-label="Ouvrir les actions produits"
+          onClick={() => setMobileFiltersOpen((current) => !current)}
+        >
+          <MoreHorizontal />
+        </button>
+        <div className="seller-toolbar-menu-panel">
+          <div className="seller-toolbar-menu-list">
             <button
-              className={filter === value ? "active" : ""}
-              onClick={() => setFilter(value)}
-              key={value}
+              className={`seller-add-product-button ${adding ? "active" : ""}`}
+              onClick={() => setAdding((current) => !current)}
+              type="button"
             >
-              {label}
+              {adding ? <X /> : <Plus />}
+              {adding ? "Fermer" : "Ajouter un produit"}
             </button>
-          ))}
+            {[
+              ["all", "Tous"],
+              ["active", "Actifs"],
+              ["inactive", "Inactifs"],
+              ["low-stock", "Stock faible"],
+            ].map(([value, label]) => (
+              <button
+                className={filter === value ? "active" : ""}
+                onClick={() => setFilter(value)}
+                key={value}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       {adding && (
@@ -1521,6 +1539,7 @@ export function SellerOrdersContent({ api }) {
   const [showDriverForm, setShowDriverForm] = useState(false);
   const [selected, setSelected] = useState(null);
   const [assigningDriverId, setAssigningDriverId] = useState("");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [driverForm, setDriverForm] = useState({
     name: "",
     email: "",
@@ -1580,6 +1599,10 @@ export function SellerOrdersContent({ api }) {
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [showDriverForm]);
+
+  useEffect(() => {
+    setMobileFiltersOpen(false);
+  }, [filter, showDriverForm]);
 
   const updateStatus = async (saleId, status) => {
     const { data } = await api.patch(`/seller/sales/${saleId}/status`, { status });
@@ -1664,26 +1687,7 @@ export function SellerOrdersContent({ api }) {
       text="Seules les commandes dont le paiement est validé par VinnHT apparaissent ici."
     >
       {message && <div className="flow-success">{message}</div>}
-      <div className="seller-catalog-toolbar seller-orders-toolbar">
-        <div>
-          {[
-            ["all", "Commandes actives"],
-            ["pending", "Paiement en attente"],
-            ["confirmed", "A preparer"],
-            ["preparing", "En preparation"],
-            ["ready", "Pretes"],
-            ["completed", "Livrees"],
-            ["cancelled", "Annulees"],
-          ].map(([value, label]) => (
-            <button
-              className={filter === value ? "active" : ""}
-              onClick={() => setFilter(value)}
-              key={value}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      <div className={`seller-catalog-toolbar seller-orders-toolbar mobile-filter-toolbar ${mobileFiltersOpen ? "mobile-open" : ""}`}>
         <button
           type="button"
           className="seller-small-action"
@@ -1692,6 +1696,36 @@ export function SellerOrdersContent({ api }) {
           {showDriverForm ? <X /> : <Plus />}
           {showDriverForm ? "Fermer" : "Ajouter un livreur"}
         </button>
+        <button
+          type="button"
+          className="seller-toolbar-menu-trigger"
+          aria-label="Ouvrir les filtres commandes"
+          onClick={() => setMobileFiltersOpen((current) => !current)}
+        >
+          <MoreHorizontal />
+        </button>
+        <div className="seller-toolbar-menu-panel">
+          <div className="seller-toolbar-menu-list">
+            {[
+              ["all", "Commandes actives"],
+              ["pending", "Paiement en attente"],
+              ["confirmed", "A preparer"],
+              ["preparing", "En preparation"],
+              ["ready", "Pretes"],
+              ["completed", "Livrees"],
+              ["cancelled", "Annulees"],
+            ].map(([value, label]) => (
+              <button
+                className={filter === value ? "active" : ""}
+                onClick={() => setFilter(value)}
+                key={value}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       {showDriverForm && (
         <div

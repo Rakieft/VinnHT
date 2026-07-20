@@ -35,6 +35,18 @@ function ConversationAvatar({ image, name, large = false }) {
   );
 }
 
+function normalizeSellerContact(contact) {
+  const normalizedId = Number(contact?.id ?? contact?.seller_id ?? 0);
+  if (!normalizedId) return null;
+  return {
+    id: normalizedId,
+    seller_id: normalizedId,
+    name: contact?.name || contact?.shop_name || "Boutique VinnHT",
+    image_url: contact?.image_url || contact?.shop_logo_url || null,
+    category: contact?.category || null,
+  };
+}
+
 export default function MarketplaceMessages({
   api,
   user,
@@ -45,6 +57,14 @@ export default function MarketplaceMessages({
   onExternalQueryChange,
   autoSelectFirst = true,
 }) {
+  const userRoles = Array.isArray(user?.roles)
+    ? user.roles
+    : user?.role
+      ? [user.role]
+      : [];
+  const userId = Number(user?.id || 0);
+  const isClientUser = userRoles.includes("client");
+  const isSellerUser = userRoles.includes("seller");
   const isSupportStaff = Array.isArray(user?.roles)
     ? user.roles.some((role) => ["support", "admin"].includes(role))
     : ["support", "admin"].includes(user?.role);
@@ -67,6 +87,101 @@ export default function MarketplaceMessages({
   const [activeMessageActionId, setActiveMessageActionId] = useState(null);
   const historyRef = React.useRef(null);
   const conversationActionsRef = React.useRef(null);
+  const supportContext = sellerMode ? "support_seller" : "support_client";
+
+  const isConversationAllowedInCurrentView = React.useCallback(
+    (conversation) => {
+      if (!conversation) return false;
+      const context = conversation.support_context || "marketplace";
+
+      if (isSupportStaff) return true;
+
+      if (sellerMode) {
+        if (!isSellerUser) return false;
+        if (context === "support_seller") return true;
+        if (context === "support_client") return false;
+        return Number(conversation.seller_id) === userId;
+      }
+
+      if (!isClientUser) return false;
+      if (context === "support_client") return true;
+      if (context === "support_seller") return false;
+      return Number(conversation.client_id) === userId;
+    },
+    [isClientUser, isSellerUser, isSupportStaff, sellerMode, userId],
+  );
+
+  const dedupeConversations = React.useCallback(
+    (items = []) => {
+      const seenSupportKeys = new Set();
+      return items.filter((item) => {
+        if (!["support_client", "support_seller"].includes(item.support_context)) {
+          return true;
+        }
+        const key = isSupportStaff
+          ? `${item.client_id}:${item.support_context}`
+          : item.support_context;
+        if (seenSupportKeys.has(key)) {
+          return false;
+        }
+        seenSupportKeys.add(key);
+        return true;
+      });
+    },
+    [isSupportStaff],
+  );
+
+  const findExistingSupportConversation = React.useCallback(
+    (items = []) =>
+      items.find(
+        (item) => item.support_context === supportContext,
+      ) || null,
+    [supportContext],
+  );
+
+  const loadContacts = React.useCallback(async () => {
+    if (!isClientUser || sellerMode) {
+      setContacts([]);
+      return;
+    }
+    const [contactsResult, shopsResult] = await Promise.allSettled([
+      api.get("/messages/contacts"),
+      api.get("/shops"),
+    ]);
+
+    const rawContacts = [
+      ...(contactsResult.status === "fulfilled" && Array.isArray(contactsResult.value.data)
+        ? contactsResult.value.data
+        : []),
+      ...(shopsResult.status === "fulfilled" && Array.isArray(shopsResult.value.data)
+        ? shopsResult.value.data
+        : []),
+    ];
+
+    const mappedContacts = rawContacts
+      .map(normalizeSellerContact)
+      .filter(Boolean);
+
+    const dedupedContacts = Array.from(
+      mappedContacts.reduce((map, contact) => {
+        if (!map.has(contact.id)) {
+          map.set(contact.id, contact);
+          return map;
+        }
+        const current = map.get(contact.id);
+        map.set(contact.id, {
+          ...current,
+          ...contact,
+          name: current.name || contact.name,
+          image_url: current.image_url || contact.image_url,
+          category: current.category || contact.category,
+        });
+        return map;
+      }, new Map()).values(),
+    ).sort((left, right) => left.name.localeCompare(right.name, "fr", { sensitivity: "base" }));
+
+    setContacts(dedupedContacts);
+  }, [api, isClientUser, sellerMode]);
 
   useEffect(() => {
     onMobileConversationChange?.(mobileConversationOpen);
@@ -90,24 +205,33 @@ export default function MarketplaceMessages({
     };
   }, [mobileConversationOpen]);
 
-  const loadConversations = async (preferredConversation = null) => {
+  const loadConversations = React.useCallback(async (preferredConversation = null) => {
     const { data } = await api.get("/messages/conversations");
-    setConversations(data);
+    const normalizedData = dedupeConversations(Array.isArray(data) ? data : [])
+      .filter(isConversationAllowedInCurrentView);
+    setConversations(normalizedData);
     setActive(
       (current) => {
         const candidate = preferredConversation || requestedConversation || current;
-        if (candidate && data.some((item) => Number(item.id) === Number(candidate))) {
+        if (candidate && normalizedData.some((item) => Number(item.id) === Number(candidate))) {
           return candidate;
         }
         if (autoSelectFirst) {
-          return data[0]?.id || null;
+          return normalizedData[0]?.id || null;
         }
         return null;
       },
     );
-  };
+    return normalizedData;
+  }, [
+    api,
+    autoSelectFirst,
+    dedupeConversations,
+    isConversationAllowedInCurrentView,
+    requestedConversation,
+  ]);
 
-  const loadMessages = async (id) => {
+  const loadMessages = React.useCallback(async (id) => {
     if (!id) return setMessages([]);
     const { data } = await api.get(`/messages/conversations/${id}`);
     setMessages(data);
@@ -117,20 +241,26 @@ export default function MarketplaceMessages({
       ),
     );
     window.dispatchEvent(new CustomEvent("vinnht:notifications-refresh"));
-  };
+  }, [api]);
 
   useEffect(() => {
     const initialize = async () => {
-      let supportConversation = null;
       try {
+        const loadedConversations = await loadConversations();
         if (openSupport) {
-          const { data } = await api.post("/messages/support", {
-            context: sellerMode ? "seller" : "client",
-          });
-          supportConversation = data.id;
+          const existingSupportConversation =
+            findExistingSupportConversation(loadedConversations);
+          if (existingSupportConversation) {
+            setActive(existingSupportConversation.id);
+          } else {
+            const { data } = await api.post("/messages/support", {
+              context: sellerMode ? "seller" : "client",
+            });
+            await loadConversations(data.id);
+            setActive(data.id);
+          }
           setMobileConversationOpen(true);
         }
-        await loadConversations(supportConversation);
       } catch (error) {
         setSupportError(
           error.response?.data?.message ||
@@ -140,10 +270,17 @@ export default function MarketplaceMessages({
     };
     initialize();
     if (preparedDraft) setDraft(preparedDraft);
-    if (!sellerMode) api.get("/messages/contacts").then(({ data }) => setContacts(data));
+    loadContacts();
     const interval = window.setInterval(loadConversations, 10000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [
+    findExistingSupportConversation,
+    loadContacts,
+    loadConversations,
+    openSupport,
+    preparedDraft,
+    sellerMode,
+  ]);
 
   useEffect(() => {
     loadMessages(active);
@@ -187,6 +324,15 @@ export default function MarketplaceMessages({
 
   const openSupportConversation = async () => {
     try {
+      const existingSupportConversation =
+        findExistingSupportConversation(conversations);
+      if (existingSupportConversation) {
+        await loadConversations(existingSupportConversation.id);
+        setActive(existingSupportConversation.id);
+        setMobileConversationOpen(true);
+        setSupportError("");
+        return;
+      }
       const { data } = await api.post("/messages/support", {
         context: sellerMode ? "seller" : "client",
       });
@@ -259,7 +405,7 @@ export default function MarketplaceMessages({
       {supportError && <div className="seller-message">{supportError}</div>}
       <div className={`client-messages-shell ${mobileConversationOpen ? "conversation-open" : ""}`}>
         <aside className="conversation-list">
-          {!sellerMode && (
+          {!sellerMode && isClientUser && (
             <select defaultValue="" onChange={startConversation}>
               <option value="" disabled>
                 Nouvelle conversation
@@ -271,7 +417,7 @@ export default function MarketplaceMessages({
               ))}
             </select>
           )}
-          {sellerMode && !isSupportStaff && (
+          {sellerMode && isSellerUser && !isSupportStaff && (
             <button
               type="button"
               className="conversation-support-trigger"

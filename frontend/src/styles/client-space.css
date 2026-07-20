@@ -213,6 +213,11 @@
   font-size: 12px;
 }
 
+.client-department-highlight {
+  color: #dc2626;
+  font-weight: 900;
+}
+
 .client-dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
@@ -853,6 +858,14 @@
   border: 1px solid var(--line);
   border-radius: 24px;
   background: #ffffff;
+}
+
+.client-orders-toolbar-trigger {
+  display: none;
+}
+
+.client-orders-toolbar-panel {
+  display: contents;
 }
 
 .client-filter-tabs {
@@ -4517,8 +4530,72 @@ body.client-order-modal-open {
     flex-direction: column;
   }
 
+  .client-stats-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 2px 6px;
+    scrollbar-width: none;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .client-stats-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .client-stats-grid .client-stat-card {
+    flex: 0 0 calc((100vw - 62px) / 2);
+    min-width: calc((100vw - 62px) / 2);
+    min-height: 136px;
+    scroll-snap-align: start;
+  }
+
+  .client-orders-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
   .client-orders-toolbar label {
     min-width: 0;
+    width: 100%;
+  }
+
+  .client-orders-toolbar-trigger {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 14px;
+    color: var(--blue);
+    background: var(--blue-soft);
+    box-shadow: 0 12px 24px rgba(37, 99, 235, 0.14);
+  }
+
+  .client-orders-toolbar-panel {
+    display: none;
+    grid-column: 1 / -1;
+  }
+
+  .client-orders-toolbar.mobile-open .client-orders-toolbar-panel {
+    display: block;
+  }
+
+  .client-filter-tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .client-filter-tabs button {
+    width: 100%;
+    text-align: left;
   }
 
   .client-order-card,
@@ -5265,6 +5342,95 @@ body.client-order-modal-open {
   .profile-form-grid input,
   .profile-form-grid select {
     min-width: 0;
+  }
+
+  .client-welcome-hero,
+  .client-page-header,
+  .client-order-events,
+  .client-profile-card,
+  .client-cart-summary,
+  .client-cart-seller,
+  .client-order-detail,
+  .client-order-payment-panel,
+  .client-order-items-section {
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .client-welcome-hero {
+    gap: 16px;
+  }
+
+  .client-welcome-hero h1,
+  .client-page-header h1 {
+    line-height: 1.08;
+  }
+
+  .client-orders-toolbar,
+  .client-help-footer,
+  .client-profile-form header,
+  .favorites-showcase {
+    gap: 12px;
+  }
+
+  .client-orders-toolbar > *,
+  .client-help-footer nav,
+  .client-profile-form header > * {
+    width: 100%;
+  }
+
+  .client-help-footer nav {
+    flex-wrap: wrap;
+  }
+
+  .client-order-card,
+  .client-cart-item,
+  .checkout-result-card {
+    gap: 10px;
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .client-order-card img,
+  .client-cart-item img {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+  }
+
+  .client-order-card button,
+  .client-cart-item > button {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+  }
+
+  .client-cart-item .cart-quantity-control,
+  .client-cart-item > strong,
+  .client-cart-item span {
+    justify-self: start;
+  }
+
+  .client-profile-card button,
+  .client-profile-save-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .client-order-events article {
+    gap: 10px;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .client-order-events article > svg {
+    width: 30px;
+    height: 30px;
+    padding: 7px;
+  }
+
+  .client-messages-shell {
+    border-radius: 22px;
   }
 }
 

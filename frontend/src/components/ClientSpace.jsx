@@ -21,6 +21,7 @@ import {
   Mail,
   MapPin,
   MessageCircle,
+  MoreHorizontal,
   Package,
   Phone,
   Search,
@@ -326,7 +327,11 @@ function ClientStats({ dashboard, seller }) {
   return (
     <div className="client-stats-grid">
       {stats.map(([Icon, label, count, note]) => (
-        <motion.article className="client-stat-card" whileHover={{ y: -5 }} key={label}>
+        <motion.article
+          className={`client-stat-card ${label === "Statut vendeur" ? "seller-status-highlight" : ""}`}
+          whileHover={{ y: -5 }}
+          key={label}
+        >
           <span>
             <Icon />
           </span>
@@ -388,8 +393,8 @@ export function ClientDashboardContent({
           </span>
           <h1>Bonjour, {user.name || "Client"}</h1>
           <p>
-            Privilégiez les produits disponibles dans votre département et vérifiez la photo de
-            profil ainsi que les informations de la boutique avant d’acheter.
+            Privilégiez les produits disponibles dans votre <span className="client-department-highlight">département</span> et vérifiez la <span className="client-department-highlight">photo de
+            profil</span> ainsi que les informations de la boutique avant d’acheter.
           </p>
           <div className="client-hero-actions">
             <Link className="button primary" to="/products">
@@ -725,7 +730,13 @@ export function ClientOrdersContent({
 }) {
   const [filter, setFilter] = useState("Toutes");
   const [query, setQuery] = useState("");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const filters = ["Toutes", "En attente", "En livraison", "Livrées", "Annulées"];
+
+  useEffect(() => {
+    setMobileFiltersOpen(false);
+  }, [filter, query]);
+
   const normalizedOrders = ordersData.map((order) => ({
     ...order,
     displayId: order.order_number || order.id,
@@ -752,18 +763,7 @@ export function ClientOrdersContent({
       title="Mes commandes"
       text="Suivez chaque achat, de la confirmation jusqu’à la livraison."
     >
-      <div className="client-orders-toolbar">
-        <div className="client-filter-tabs">
-          {filters.map((item) => (
-            <button
-              className={filter === item ? "active" : ""}
-              onClick={() => setFilter(item)}
-              key={item}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
+      <div className={`client-orders-toolbar ${mobileFiltersOpen ? "mobile-open" : ""}`}>
         <label>
           <Search />
           <input
@@ -772,6 +772,27 @@ export function ClientOrdersContent({
             placeholder="Rechercher une commande"
           />
         </label>
+        <button
+          type="button"
+          className="client-orders-toolbar-trigger"
+          aria-label="Ouvrir les filtres de commandes"
+          onClick={() => setMobileFiltersOpen((current) => !current)}
+        >
+          <MoreHorizontal size={18} />
+        </button>
+        <div className="client-orders-toolbar-panel">
+          <div className="client-filter-tabs">
+            {filters.map((item) => (
+              <button
+                className={filter === item ? "active" : ""}
+                onClick={() => setFilter(item)}
+                key={item}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       <div className="client-orders-list">
         {loading && <div className="client-api-notice">Chargement de vos commandes...</div>}
