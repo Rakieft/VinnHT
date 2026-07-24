@@ -142,6 +142,9 @@ const startTemporaryServer = async () => {
       VINNHT_MONCASH_NUMBER: "37000000",
       VINNHT_MONCASH_ACCOUNT_NAME: "VinnHT Smoke",
       JWT_SECRET: "vinnht-smoke-secret-only-for-local-validation",
+      AUTH_RATE_LIMIT_MAX: "200",
+      WRITE_RATE_LIMIT_MAX: "400",
+      API_RATE_LIMIT_MAX: "2000",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

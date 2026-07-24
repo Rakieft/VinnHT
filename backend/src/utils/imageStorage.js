@@ -2,31 +2,62 @@ import fs from "node:fs/promises";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { v2 as cloudinary } from "cloudinary";
 
-const storageProvider = String(process.env.IMAGE_STORAGE || "local").toLowerCase();
+const requestedStorageProvider = String(process.env.IMAGE_STORAGE || "local").toLowerCase();
+const warnedFallbackProviders = new Set();
+
 const cloudEnabled = () =>
-  storageProvider === "cloudinary" &&
+  requestedStorageProvider === "cloudinary" &&
   process.env.CLOUDINARY_CLOUD_NAME &&
   process.env.CLOUDINARY_API_KEY &&
   process.env.CLOUDINARY_API_SECRET;
+
 const s3Enabled = () =>
-  ["s3", "r2"].includes(storageProvider) &&
+  ["s3", "r2"].includes(requestedStorageProvider) &&
   process.env.S3_ENDPOINT &&
   process.env.S3_BUCKET &&
   process.env.S3_ACCESS_KEY_ID &&
   process.env.S3_SECRET_ACCESS_KEY &&
   process.env.S3_PUBLIC_URL;
 
-if (storageProvider === "cloudinary" && !cloudEnabled()) {
-  throw new Error("Configuration Cloudinary incomplète.");
-}
+const warnStorageFallback = (provider, reason) => {
+  if (warnedFallbackProviders.has(provider)) return;
+  warnedFallbackProviders.add(provider);
+  console.warn(`[VinnHT] ${reason} Bascule automatique vers le stockage local.`);
+};
 
-if (["s3", "r2"].includes(storageProvider) && !s3Enabled()) {
-  throw new Error(
-    "Configuration S3/R2 incomplète. Vérifiez S3_ENDPOINT, S3_BUCKET, les clés et S3_PUBLIC_URL.",
-  );
-}
+const strictImageStorage = process.env.IMAGE_STORAGE_STRICT === "true";
 
-if (cloudEnabled()) {
+const resolveImageStorageProvider = () => {
+  if (requestedStorageProvider === "cloudinary" && !cloudEnabled()) {
+    if (strictImageStorage) {
+      throw new Error("Configuration Cloudinary incomplète.");
+    }
+    warnStorageFallback(
+      "cloudinary",
+      "Configuration Cloudinary incomplète.",
+    );
+    return "local";
+  }
+
+  if (["s3", "r2"].includes(requestedStorageProvider) && !s3Enabled()) {
+    if (strictImageStorage) {
+      throw new Error(
+        "Configuration S3/R2 incomplète. Vérifiez S3_ENDPOINT, S3_BUCKET, les clés et S3_PUBLIC_URL.",
+      );
+    }
+    warnStorageFallback(
+      requestedStorageProvider,
+      "Configuration S3/R2 incomplète.",
+    );
+    return "local";
+  }
+
+  return requestedStorageProvider;
+};
+
+export const resolvedImageStorageProvider = resolveImageStorageProvider();
+
+if (resolvedImageStorageProvider === "cloudinary") {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -35,7 +66,7 @@ if (cloudEnabled()) {
   });
 }
 
-const s3Client = s3Enabled()
+const s3Client = resolvedImageStorageProvider === "s3" || resolvedImageStorageProvider === "r2"
   ? new S3Client({
       region: process.env.S3_REGION || "auto",
       endpoint: process.env.S3_ENDPOINT,
@@ -47,36 +78,53 @@ const s3Client = s3Enabled()
     })
   : null;
 
+const removeTempFile = async (filePath) => {
+  if (!filePath) return;
+  await fs.unlink(filePath).catch(() => {});
+};
+
 const uploadToS3 = async (file, folder) => {
   const key = `vinnht/${folder}/${file.filename}`;
   const content = await fs.readFile(file.path);
 
-  await s3Client.send(
-    new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET,
-      Key: key,
-      Body: content,
-      ContentType: file.mimetype,
-      CacheControl: "public, max-age=31536000, immutable",
-    }),
-  );
-  await fs.unlink(file.path).catch(() => {});
+  try {
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET,
+        Key: key,
+        Body: content,
+        ContentType: file.mimetype,
+        CacheControl: "public, max-age=31536000, immutable",
+      }),
+    );
+    return `${process.env.S3_PUBLIC_URL.replace(/\/+$/, "")}/${key}`;
+  } finally {
+    await removeTempFile(file.path);
+  }
+};
 
-  return `${process.env.S3_PUBLIC_URL.replace(/\/+$/, "")}/${key}`;
+const uploadToCloudinary = async (file, folder) => {
+  try {
+    const result = await cloudinary.uploader.upload(file.path, {
+      folder: `vinnht/${folder}`,
+      resource_type: "image",
+      overwrite: false,
+    });
+    return result.secure_url;
+  } finally {
+    await removeTempFile(file.path);
+  }
 };
 
 export const storeImage = async (file, folder) => {
   if (!file) return null;
-  if (s3Enabled()) return uploadToS3(file, folder);
-  if (!cloudEnabled()) return `/uploads/${folder}/${file.filename}`;
-
-  const result = await cloudinary.uploader.upload(file.path, {
-    folder: `vinnht/${folder}`,
-    resource_type: "image",
-    overwrite: false,
-  });
-  await fs.unlink(file.path).catch(() => {});
-  return result.secure_url;
+  if (resolvedImageStorageProvider === "s3" || resolvedImageStorageProvider === "r2") {
+    return uploadToS3(file, folder);
+  }
+  if (resolvedImageStorageProvider === "cloudinary") {
+    return uploadToCloudinary(file, folder);
+  }
+  return `/uploads/${folder}/${file.filename}`;
 };
 
 export const storeImages = (files, folder) =>

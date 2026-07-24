@@ -76,13 +76,19 @@ test("les espaces support et finance restent séparés", () => {
 
 test("le limiteur bloque après le nombre autorisé", () => {
   const limiter = createRateLimiter({ windowMs: 60_000, max: 2 });
-  const req = { ip: "127.0.0.77", path: "/test-rate-limit" };
+  const req = { ip: "127.0.0.77", path: "/test-rate-limit", method: "POST" };
   const res = response();
   let calls = 0;
 
-  limiter(req, res, () => { calls += 1; });
-  limiter(req, res, () => { calls += 1; });
-  limiter(req, res, () => { calls += 1; });
+  limiter(req, res, () => {
+    calls += 1;
+  });
+  limiter(req, res, () => {
+    calls += 1;
+  });
+  limiter(req, res, () => {
+    calls += 1;
+  });
 
   assert.equal(calls, 2);
   assert.equal(res.code, 429);
@@ -94,6 +100,7 @@ test("les en-têtes essentiels sont ajoutés", () => {
 
   assert.equal(res.headers["X-Content-Type-Options"], "nosniff");
   assert.equal(res.headers["X-Frame-Options"], "DENY");
+  assert.equal(res.headers["Cross-Origin-Opener-Policy"], "same-origin");
 });
 
 test("le cookie de session est inaccessible au JavaScript", () => {
@@ -177,4 +184,29 @@ test("les réponses officielles imbriquées MonCash sont interprétées", () => 
     }),
     { transactionId: "MC-42", successful: true, status: "successful" },
   );
+});
+
+test("le stockage image retombe en local si le cloud n'est pas configuré", async () => {
+  const previous = {
+    IMAGE_STORAGE: process.env.IMAGE_STORAGE,
+    IMAGE_STORAGE_STRICT: process.env.IMAGE_STORAGE_STRICT,
+    CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+    CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY,
+    CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET,
+  };
+
+  process.env.IMAGE_STORAGE = "cloudinary";
+  process.env.IMAGE_STORAGE_STRICT = "false";
+  delete process.env.CLOUDINARY_CLOUD_NAME;
+  delete process.env.CLOUDINARY_API_KEY;
+  delete process.env.CLOUDINARY_API_SECRET;
+
+  const moduleUrl = new URL("../utils/imageStorage.js", import.meta.url);
+  const { resolvedImageStorageProvider } = await import(`${moduleUrl.href}?test=${Date.now()}`);
+  assert.equal(resolvedImageStorageProvider, "local");
+
+  Object.entries(previous).forEach(([key, value]) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  });
 });

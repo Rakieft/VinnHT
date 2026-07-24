@@ -13,6 +13,7 @@
     "db:reset-test-data": "npm --prefix backend run db:reset-test-data",
     "smoke:marketplace": "npm --prefix backend run smoke:marketplace",
     "build": "npm --prefix frontend run build",
-    "check": "npm --prefix backend run check && npm --prefix backend test && npm --prefix frontend run check"
+    "check": "npm --prefix backend run check && npm --prefix backend test && npm --prefix frontend run check",
+    "verify:preprod": "npm run check && npm run smoke:marketplace"
   }
 }

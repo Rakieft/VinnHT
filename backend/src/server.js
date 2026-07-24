@@ -1,4 +1,4 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import bcrypt from "bcryptjs";
 import cors from "cors";
 import crypto from "node:crypto";
@@ -69,17 +69,17 @@ app.use(express.json({ limit: "2mb" }));
 app.use("/uploads", express.static(`${backendDirectory}/uploads`));
 
 const authRateLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
+  windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 10),
   message: "Trop de tentatives de connexion. Réessayez dans quelques minutes.",
 });
 const writeRateLimiter = createRateLimiter({
-  windowMs: 60 * 1000,
-  max: 120,
+  windowMs: Number(process.env.WRITE_RATE_LIMIT_WINDOW_MS || 60 * 1000),
+  max: Number(process.env.WRITE_RATE_LIMIT_MAX || 120),
 });
 const apiRateLimiter = createRateLimiter({
-  windowMs: 60 * 1000,
-  max: 600,
+  windowMs: Number(process.env.API_RATE_LIMIT_WINDOW_MS || 60 * 1000),
+  max: Number(process.env.API_RATE_LIMIT_MAX || 600),
 });
 app.use("/api", apiRateLimiter);
 
@@ -9188,7 +9188,7 @@ app.post(
   asyncRoute(async (req, res) => {
     const roles = await getUserRoles(req.user.id, req.user.role);
     const requestedContext =
-      req.body.context === "seller" && roles.includes("seller")
+      req.body?.context === "seller" && roles.includes("seller")
         ? "support_seller"
         : "support_client";
     const [[support]] = await pool.query(
