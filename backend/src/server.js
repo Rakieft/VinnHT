@@ -1103,8 +1103,55 @@ const ensureSellerWallet = async (executor, sellerId) => {
   );
 };
 
+const normalizeSellerPayoutAmounts = async (executor, sellerId) => {
+  await executor.query(
+    `UPDATE payouts po
+     JOIN seller_sales ss ON ss.id=po.seller_sale_id
+     SET po.amount=ss.net_amount
+     WHERE po.seller_id=?
+       AND po.status IN ('pending','processing')
+       AND ABS(po.amount-ss.net_amount)>0.009`,
+    [sellerId],
+  );
+};
+
 const walletSnapshot = async (executor, sellerId, lock = false) => {
   await ensureSellerWallet(executor, sellerId);
+  await normalizeSellerPayoutAmounts(executor, sellerId);
+  const [[computed]] = await executor.query(
+    `SELECT
+      COALESCE((
+        SELECT SUM(po.amount)
+        FROM payouts po
+        WHERE po.seller_id=? AND po.status='processing'
+      ),0) - COALESCE((
+        SELECT SUM(pr.amount)
+        FROM payout_requests pr
+        WHERE pr.seller_id=? AND pr.status IN ('pending','approved','processing')
+      ),0) available_balance,
+      COALESCE((
+        SELECT SUM(pr.amount)
+        FROM payout_requests pr
+        WHERE pr.seller_id=? AND pr.status IN ('pending','approved','processing')
+      ),0) reserved_balance,
+      COALESCE((
+        SELECT SUM(pr.amount)
+        FROM payout_requests pr
+        WHERE pr.seller_id=? AND pr.status='paid'
+      ),0) total_paid`,
+    [sellerId, sellerId, sellerId, sellerId],
+  );
+  await executor.query(
+    `UPDATE seller_wallets
+     SET available_balance=?,reserved_balance=?,total_paid=?,updated_at=NOW()
+     WHERE seller_id=?`,
+    [
+      computed.available_balance || 0,
+      computed.reserved_balance || 0,
+      computed.total_paid || 0,
+      sellerId,
+    ],
+  );
   const [[wallet]] = await executor.query(
     `SELECT seller_id,available_balance,reserved_balance,total_paid,updated_at
      FROM seller_wallets
@@ -1754,6 +1801,7 @@ app.get(
   authorize("client"),
   noStore,
   asyncRoute(async (req, res) => {
+    await normalizeSellerPayoutAmounts(pool, req.user.id);
     const [rows] = await pool.query(
       `SELECT cr.id,cr.reference,cr.category,cr.subject,cr.message,cr.status,
         cr.created_at,cr.resolved_at,o.order_number
@@ -2853,6 +2901,7 @@ app.get(
   authenticate,
   authorize("seller"),
   asyncRoute(async (req, res) => {
+    await normalizeSellerPayoutAmounts(pool, req.user.id);
     const [[stats]] = await pool.query(
       `SELECT
         (SELECT COUNT(*) FROM products WHERE seller_id=? AND status='active') active_products,
@@ -2969,6 +3018,7 @@ app.get(
   authenticate,
   authorize("seller"),
   asyncRoute(async (req, res) => {
+    await normalizeSellerPayoutAmounts(pool, req.user.id);
     const [orders] = await pool.query(
       `SELECT
         ss.id sale_id,
@@ -3432,19 +3482,13 @@ app.get(
   authorize("seller"),
   noStore,
   asyncRoute(async (req, res) => {
-    await ensureSellerWallet(pool, req.user.id);
+    const syncedWallet = await walletSnapshot(pool, req.user.id);
     const [
-      [[wallet]],
       [[held]],
       [[profile]],
       [requests],
       [transactions],
     ] = await Promise.all([
-      pool.query(
-        `SELECT seller_id,available_balance,reserved_balance,total_paid,updated_at
-         FROM seller_wallets WHERE seller_id=?`,
-        [req.user.id],
-      ),
       pool.query(
         `SELECT COALESCE(SUM(po.amount),0) held_balance,COUNT(*) held_sales
          FROM payouts po
@@ -3488,7 +3532,7 @@ app.get(
 
     res.json({
       wallet: {
-        ...wallet,
+        ...syncedWallet,
         held_balance: held.held_balance,
         held_sales: held.held_sales,
       },
@@ -4154,7 +4198,7 @@ app.post(
         );
         await connection.query(
           "INSERT INTO payouts (seller_sale_id,seller_id,amount) VALUES (?,?,?)",
-          [sale.insertId, sellerId, net + sellerFulfillmentOption.delivery_fee],
+          [sale.insertId, sellerId, net],
         );
       }
       await connection.query(
@@ -4864,57 +4908,32 @@ app.post(
       );
 
       let feedbackId = existingRows[0]?.id || null;
-      const payload = [
-        req.body.rating,
-        req.body.issueType,
-        req.body.comment || null,
-        feedbackScope.sellerId,
-        feedbackScope.deliveryUserId,
-      ];
-
       if (feedbackId) {
-        await connection.query(
-          `UPDATE delivery_feedback
-           SET rating=?,issue_type=?,comment=?,seller_id=?,delivery_user_id=?,
-               status='new',support_note=NULL,reviewed_by=NULL,reviewed_at=NULL
-           WHERE id=?`,
-          [...payload, feedbackId],
-        );
-      } else {
-        const [created] = await connection.query(
-          `INSERT INTO delivery_feedback
-            (order_id,seller_sale_id,seller_delivery_assignment_id,delivery_id,
-             seller_id,delivery_user_id,client_id,rating,issue_type,comment)
-           VALUES (?,?,?,?,?,?,?,?,?,?)`,
-          [
-            orderId,
-            feedbackScope.sellerSaleId,
-            feedbackScope.sellerAssignmentId,
-            feedbackScope.deliveryId,
-            feedbackScope.sellerId,
-            feedbackScope.deliveryUserId,
-            req.user.id,
-            req.body.rating,
-            req.body.issueType,
-            req.body.comment || null,
-          ],
-        );
-        feedbackId = created.insertId;
+        await connection.rollback();
+        return res.status(409).json({
+          message: "Votre avis a d?j? ?t? envoy? au support VinnHT pour cette livraison.",
+        });
       }
 
-      for (const sellerId of sellerIds) {
-        await notifyUser(
-          connection,
-          sellerId,
-          "seller",
-          "delivery.feedback",
-          "Avis client sur un livreur",
-          `Le client a laissé un avis sur ${supportMessage} pour ${order.order_number}.`,
-          "/seller/orders",
-          "order",
+      const [created] = await connection.query(
+        `INSERT INTO delivery_feedback
+          (order_id,seller_sale_id,seller_delivery_assignment_id,delivery_id,
+           seller_id,delivery_user_id,client_id,rating,issue_type,comment)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [
           orderId,
-        );
-      }
+          feedbackScope.sellerSaleId,
+          feedbackScope.sellerAssignmentId,
+          feedbackScope.deliveryId,
+          feedbackScope.sellerId,
+          feedbackScope.deliveryUserId,
+          req.user.id,
+          req.body.rating,
+          req.body.issueType,
+          req.body.comment || null,
+        ],
+      );
+      feedbackId = created.insertId;
 
       await notifyRole(
         connection,

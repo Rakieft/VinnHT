@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import CountUp from "react-countup";
 import { motion, useReducedMotion } from "framer-motion";
 import {
@@ -977,7 +977,7 @@ function ClientOrderDetail({
       document.body.classList.remove("client-order-modal-open");
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [onClose, receiptToConfirm]);
+  }, [feedbackTarget, onClose, receiptToConfirm]);
 
   return (
     <section
@@ -1119,27 +1119,6 @@ function ClientOrderDetail({
         {proofError && <div className="client-payment-feedback error">{proofError}</div>}
         {proofSuccess && <div className="client-payment-feedback success">{proofSuccess}</div>}
       </section>
-      {Array.isArray(order.events) && order.events.length > 0 && (
-        <section className="client-order-events">
-          <header>
-            <span>Historique</span>
-            <h3>Actions importantes</h3>
-          </header>
-          {order.events.map((event) => (
-            <article key={event.id}>
-              <Clock3 />
-              <div>
-                <strong>{event.title}</strong>
-                {event.message && <p>{event.message}</p>}
-                <small>
-                  {event.actor_name ? `${event.actor_name} - ` : ""}
-                  {event.created_at ? new Date(event.created_at).toLocaleString("fr-HT") : ""}
-                </small>
-              </div>
-            </article>
-          ))}
-        </section>
-      )}
       {pickupInstructions.length > 0 && (
         <section className="client-pickup-trust">
           <header>
@@ -1267,14 +1246,16 @@ function ClientOrderDetail({
                         <ShieldCheck />
                         Confirmé depuis votre compte
                       </span>
-                      <button
-                        type="button"
-                        className="client-delivery-feedback-action"
-                        onClick={() => openFeedbackModal(person)}
-                      >
-                        <Star />
-                        {person.feedback_id ? "Modifier mon avis" : "Laisser un avis"}
-                      </button>
+                      {!person.feedback_id && (
+                        <button
+                          type="button"
+                          className="client-delivery-feedback-action"
+                          onClick={() => openFeedbackModal(person)}
+                        >
+                          <Star />
+                          Laisser un avis
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -1283,17 +1264,6 @@ function ClientOrderDetail({
                   <strong>{person.delivery_name}</strong>
                   {person.delivery_phone && <span>{person.delivery_phone}</span>}
                 </div>
-                {person.feedback_id && (
-                  <div className="client-delivery-feedback-card">
-                    <small>Avis envoyé au support</small>
-                    <strong>
-                      {person.feedback_rating}/5 ·{" "}
-                      {feedbackTypeLabels[person.feedback_issue_type] ||
-                        "Avis enregistré"}
-                    </strong>
-                    {person.feedback_comment && <p>{person.feedback_comment}</p>}
-                  </div>
-                )}
               </article>
             ))}
           </div>
@@ -1378,20 +1348,42 @@ function ClientOrderDetail({
           </section>
         </div>
       )}
-      {feedbackTarget && (
-        <div className="client-receipt-modal-backdrop" role="presentation">
+            {feedbackTarget && (
+        <div
+          className="client-receipt-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !feedbackProcessing) {
+              setFeedbackTarget(null);
+            }
+          }}
+        >
           <section
             className="client-receipt-modal client-feedback-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="client-feedback-title"
+            onMouseDown={(event) => event.stopPropagation()}
           >
-            <span><Star /></span>
-            <small>Avis livreur</small>
-            <h2 id="client-feedback-title">Comment s'est passée cette livraison ?</h2>
-            <p>
-              Votre retour est transmis au support VinnHT dans une page dédiée et aide
-              aussi la boutique à suivre la qualité de ses livreurs.
+            <div className="client-feedback-topbar">
+              <div className="client-feedback-heading">
+                <span><Star /></span>
+                <small>Avis livreur</small>
+              </div>
+              <button
+                type="button"
+                className="client-feedback-close"
+                onClick={() => setFeedbackTarget(null)}
+                disabled={feedbackProcessing}
+                aria-label="Fermer la fen?tre d'avis livreur"
+              >
+                Fermer
+              </button>
+            </div>
+            <h2 id="client-feedback-title">Comment s'est pass?e cette livraison ?</h2>
+            <p className="client-feedback-intro">
+              Votre retour est transmis au support VinnHT dans une page d?di?e et aide
+              aussi la boutique ? suivre la qualit? de ses livreurs.
             </p>
             <div className="client-feedback-driver-summary">
               <span className="client-delivery-photo">
@@ -1411,25 +1403,27 @@ function ClientOrderDetail({
               </div>
             </div>
             <form className="client-feedback-form" onSubmit={submitDeliveryFeedback}>
-              <label>
-                Note
-                <div className="client-feedback-rating">
+              <div className="client-feedback-field">
+                <label htmlFor="client-feedback-rating">Note</label>
+                <div className="client-feedback-rating" id="client-feedback-rating">
                   {[1, 2, 3, 4, 5].map((value) => (
                     <button
                       type="button"
                       className={feedbackRating >= value ? "active" : ""}
                       onClick={() => setFeedbackRating(value)}
                       key={value}
+                      aria-label={`Donner la note ${value} sur 5`}
                     >
                       <Star />
                       <span>{value}</span>
                     </button>
                   ))}
                 </div>
-              </label>
-              <label>
-                Sujet
+              </div>
+              <div className="client-feedback-field">
+                <label htmlFor="client-feedback-subject">Sujet</label>
                 <select
+                  id="client-feedback-subject"
                   value={feedbackIssueType}
                   onChange={(event) => setFeedbackIssueType(event.target.value)}
                 >
@@ -1439,16 +1433,17 @@ function ClientOrderDetail({
                     </option>
                   ))}
                 </select>
-              </label>
-              <label>
-                Commentaire
+              </div>
+              <div className="client-feedback-field">
+                <label htmlFor="client-feedback-comment">Commentaire</label>
                 <textarea
+                  id="client-feedback-comment"
                   rows="4"
                   value={feedbackComment}
                   onChange={(event) => setFeedbackComment(event.target.value)}
-                  placeholder="Expliquez rapidement ce qui s'est bien passé ou ce qui doit être revu."
+                  placeholder="Expliquez rapidement ce qui s'est bien pass? ou ce qui doit ?tre revu."
                 />
-              </label>
+              </div>
               <div className="client-feedback-actions">
                 <button
                   type="button"
