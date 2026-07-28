@@ -4554,6 +4554,14 @@ function ClientOrdersPage() {
     return data;
   };
 
+  const updateOrderLocation = async (orderId, payload) => {
+    const { data } = await api.patch(`/orders/${orderId}/location`, payload);
+    await selectOrder(orderId);
+    const { data: refreshedOrders } = await api.get("/orders/mine");
+    setOrders(refreshedOrders);
+    return data;
+  };
+
   return (
     <DashboardLayout>
       <ClientOrdersContent
@@ -4572,6 +4580,7 @@ function ClientOrdersPage() {
         receiptMessage={receiptMessage}
         receiptError={receiptError}
         onSubmitDeliveryFeedback={submitDeliveryFeedback}
+        onUpdateDeliveryLocation={updateOrderLocation}
       />
     </DashboardLayout>
   );
@@ -4679,8 +4688,12 @@ function ClientCheckoutPage() {
     const { data } = await api.post("/orders", {
       fulfillmentChoices,
       deliveryAddress: includesDelivery
-        ? `${checkoutForm.address}, ${checkoutForm.city}`
+        ? [checkoutForm.address, checkoutForm.city].filter(Boolean).join(", ")
         : null,
+      deliveryLatitude: checkoutForm.deliveryLatitude ?? null,
+      deliveryLongitude: checkoutForm.deliveryLongitude ?? null,
+      deliveryLocationLabel: checkoutForm.deliveryLocationLabel || null,
+      deliveryLocationSource: checkoutForm.deliveryLocationSource || null,
       items: orderCart.map((item) => ({
         productId: item.id,
         quantity: item.quantity,

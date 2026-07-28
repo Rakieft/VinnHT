@@ -3911,7 +3911,11 @@ app.post(
           ),
       )
       .withMessage("Les modes de réception par boutique sont invalides."),
-    body("deliveryAddress").optional({ checkFalsy: true }).trim().isLength({ min: 8 }),
+    body("deliveryAddress").optional({ checkFalsy: true }).trim().isLength({ min: 3 }),
+    body("deliveryLatitude").optional({ checkFalsy: true }).isFloat({ min: -90, max: 90 }),
+    body("deliveryLongitude").optional({ checkFalsy: true }).isFloat({ min: -180, max: 180 }),
+    body("deliveryLocationLabel").optional({ checkFalsy: true }).trim().isLength({ min: 2, max: 255 }),
+    body("deliveryLocationSource").optional({ checkFalsy: true }).isIn(["browser", "manual_update"]),
   ],
   validate,
   asyncRoute(async (req, res) => {
@@ -4092,12 +4096,26 @@ app.post(
       }
 
       const deliveryAddress = String(req.body.deliveryAddress || "").trim();
+      const deliveryLatitude =
+        req.body.deliveryLatitude === undefined || req.body.deliveryLatitude === null || req.body.deliveryLatitude === ""
+          ? null
+          : Number(req.body.deliveryLatitude);
+      const deliveryLongitude =
+        req.body.deliveryLongitude === undefined || req.body.deliveryLongitude === null || req.body.deliveryLongitude === ""
+          ? null
+          : Number(req.body.deliveryLongitude);
+      const deliveryLocationLabel = String(req.body.deliveryLocationLabel || "").trim();
+      const deliveryLocationSource = String(req.body.deliveryLocationSource || "browser").trim() || "browser";
+      const hasSharedLocation =
+        Number.isFinite(deliveryLatitude) && Number.isFinite(deliveryLongitude);
+      const normalizedDeliveryAddress =
+        deliveryAddress || deliveryLocationLabel || (hasSharedLocation ? "Position GPS partag?e" : "");
       const deliveredSellers = sellerFulfillment.filter(
         (seller) => seller.fulfillment_method === "delivery",
       );
-      if (deliveredSellers.length > 0 && deliveryAddress.length < 8) {
+      if (deliveredSellers.length > 0 && normalizedDeliveryAddress.length < 3 && !hasSharedLocation) {
         throw Object.assign(
-          new Error("Renseignez une adresse complète pour les boutiques livrées."),
+          new Error("Partagez votre position ou renseignez une adresse pour les boutiques livr?es."),
           { status: 422 },
         );
       }
@@ -4106,7 +4124,7 @@ app.post(
         seller.delivery_fee =
           seller.fulfillment_method === "delivery" ? DELIVERY_FEE_PER_SELLER : 0;
         seller.delivery_address =
-          seller.fulfillment_method === "delivery" ? deliveryAddress : null;
+          seller.fulfillment_method === "delivery" ? normalizedDeliveryAddress : null;
       }
 
       const fulfillmentMethods = new Set(
@@ -4119,16 +4137,21 @@ app.post(
       const orderNumber = `VHT-${Date.now()}`;
       const [order] = await connection.query(
         `INSERT INTO orders
-          (client_id,order_number,total,delivery_address,fulfillment_method,
-           delivery_fee,fulfillment_snapshot)
-         VALUES (?,?,?,?,?,?,?)`,
+          (client_id,order_number,total,delivery_address,delivery_latitude,
+           delivery_longitude,delivery_location_label,delivery_location_source,
+           delivery_location_shared_at,fulfillment_method,delivery_fee,fulfillment_snapshot)
+         VALUES (?,?,?,?,?,?,?,?,NOW(),?,?,?)`,
         [
           req.user.id,
           orderNumber,
           total,
           deliveredSellers.length > 0
-            ? deliveryAddress
+            ? normalizedDeliveryAddress
             : sellerFulfillment.map((seller) => seller.pickup_address).join(" | "),
+          deliveredSellers.length > 0 && hasSharedLocation ? deliveryLatitude : null,
+          deliveredSellers.length > 0 && hasSharedLocation ? deliveryLongitude : null,
+          deliveredSellers.length > 0 ? (deliveryLocationLabel || null) : null,
+          deliveredSellers.length > 0 && hasSharedLocation ? deliveryLocationSource : null,
           fulfillmentMethod,
           deliveryFee,
           JSON.stringify(sellerFulfillment),
@@ -4554,6 +4577,64 @@ app.get(
       paymentInstructions,
       events,
       deliveryPeople,
+    });
+  }),
+);
+
+app.patch(
+  "/api/orders/:id/location",
+  authenticate,
+  authorize("client"),
+  writeRateLimiter,
+  [
+    body("deliveryLatitude").isFloat({ min: -90, max: 90 }),
+    body("deliveryLongitude").isFloat({ min: -180, max: 180 }),
+    body("deliveryLocationLabel").optional({ checkFalsy: true }).trim().isLength({ min: 2, max: 255 }),
+    body("deliveryLocationSource").optional({ checkFalsy: true }).isIn(["browser", "manual_update"]),
+  ],
+  validate,
+  asyncRoute(async (req, res) => {
+    const orderId = Number(req.params.id);
+    const latitude = Number(req.body.deliveryLatitude);
+    const longitude = Number(req.body.deliveryLongitude);
+    const label = String(req.body.deliveryLocationLabel || "").trim();
+    const source = String(req.body.deliveryLocationSource || "manual_update").trim() || "manual_update";
+    const [[order]] = await pool.query(
+      `SELECT id,status,fulfillment_method,delivery_address
+       FROM orders
+       WHERE id=? AND client_id=?`,
+      [orderId, req.user.id],
+    );
+    if (!order) {
+      return res.status(404).json({ message: "Commande introuvable." });
+    }
+    if (!["delivery", "mixed"].includes(order.fulfillment_method)) {
+      return res.status(409).json({ message: "Cette commande n'utilise pas la livraison." });
+    }
+    if (["delivered", "cancelled"].includes(order.status)) {
+      return res.status(409).json({ message: "La position ne peut plus ?tre modifi?e pour cette commande." });
+    }
+    const nextAddress = order.delivery_address || label || "Position GPS partag?e";
+    await pool.query(
+      `UPDATE orders
+       SET delivery_address=?,
+         delivery_latitude=?,
+         delivery_longitude=?,
+         delivery_location_label=?,
+         delivery_location_source=?,
+         delivery_location_shared_at=NOW()
+       WHERE id=? AND client_id=?`,
+      [nextAddress, latitude, longitude, label || null, source, orderId, req.user.id],
+    );
+    res.json({
+      message: "Votre position a ?t? partag?e avec le livreur.",
+      location: {
+        delivery_address: nextAddress,
+        delivery_latitude: latitude,
+        delivery_longitude: longitude,
+        delivery_location_label: label || null,
+        delivery_location_source: source,
+      },
     });
   }),
 );
@@ -5784,6 +5865,11 @@ app.get(
         dp.confirmed_at proof_confirmed_at,
         o.order_number,
         o.delivery_address,
+        o.delivery_latitude,
+        o.delivery_longitude,
+        o.delivery_location_label,
+        o.delivery_location_source,
+        o.delivery_location_shared_at,
         o.total,
         o.created_at order_created_at,
         client.name client_name,
@@ -5818,6 +5904,11 @@ app.get(
         sda.confirmed_at proof_confirmed_at,
         o.order_number,
         o.delivery_address,
+        o.delivery_latitude,
+        o.delivery_longitude,
+        o.delivery_location_label,
+        o.delivery_location_source,
+        o.delivery_location_shared_at,
         ss.gross_amount total,
         o.created_at order_created_at,
         client.name client_name,

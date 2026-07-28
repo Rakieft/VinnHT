@@ -2168,3 +2168,21 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+.delivery-location-link {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #2563EB;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.delivery-location-label,
+.delivery-location-missing {
+  display: block;
+  margin-top: 8px;
+  color: #64748B;
+}

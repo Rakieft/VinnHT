@@ -26,6 +26,7 @@ import {
   Phone,
   Search,
   Send,
+  Navigation,
   Settings,
   ShieldCheck,
   ShoppingBag,
@@ -727,6 +728,7 @@ export function ClientOrdersContent({
   receiptMessage = "",
   receiptError = "",
   onSubmitDeliveryFeedback,
+  onUpdateDeliveryLocation,
 }) {
   const [filter, setFilter] = useState("Toutes");
   const [query, setQuery] = useState("");
@@ -847,6 +849,7 @@ export function ClientOrdersContent({
             receiptMessage={receiptMessage}
             receiptError={receiptError}
             onSubmitDeliveryFeedback={onSubmitDeliveryFeedback}
+            onUpdateDeliveryLocation={onUpdateDeliveryLocation}
           />
         </div>
       )}
@@ -867,6 +870,7 @@ function ClientOrderDetail({
   receiptMessage = "",
   receiptError = "",
   onSubmitDeliveryFeedback,
+  onUpdateDeliveryLocation,
 }) {
   const [proofFile, setProofFile] = useState(null);
   const [proofNote, setProofNote] = useState("");
@@ -880,6 +884,9 @@ function ClientOrderDetail({
   const [feedbackProcessing, setFeedbackProcessing] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
   const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [locationUpdating, setLocationUpdating] = useState(false);
+  const [locationUpdateMessage, setLocationUpdateMessage] = useState("");
+  const [locationUpdateError, setLocationUpdateError] = useState("");
   const steps = ["confirmed", "processing", "shipped", "delivered"];
   const currentIndex = steps.indexOf(order.status);
   const paymentInstructions = order.paymentInstructions || [];
@@ -926,6 +933,46 @@ function ClientOrderDetail({
     event.preventDefault();
     if (!proofFile || !canSendProof) return;
     onSubmitPaymentProof(order.id, { file: proofFile, note: proofNote });
+  };
+
+  const hasSharedDeliveryLocation =
+    Number.isFinite(Number(order.delivery_latitude)) && Number.isFinite(Number(order.delivery_longitude));
+  const deliveryLocationUrl = hasSharedDeliveryLocation
+    ? `https://www.google.com/maps?q=${Number(order.delivery_latitude)},${Number(order.delivery_longitude)}`
+    : "";
+
+  const shareUpdatedLocation = () => {
+    if (!navigator.geolocation || !onUpdateDeliveryLocation) {
+      setLocationUpdateError("La mise ? jour de position n'est pas disponible sur cet appareil.");
+      return;
+    }
+    setLocationUpdating(true);
+    setLocationUpdateError("");
+    setLocationUpdateMessage("");
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const response = await onUpdateDeliveryLocation(order.id, {
+            deliveryLatitude: Number(position.coords.latitude.toFixed(6)),
+            deliveryLongitude: Number(position.coords.longitude.toFixed(6)),
+            deliveryLocationLabel: order.delivery_location_label || order.delivery_address || "Position client",
+            deliveryLocationSource: "manual_update",
+          });
+          setLocationUpdateMessage(response?.message || "Position mise ? jour.");
+        } catch (requestError) {
+          setLocationUpdateError(
+            requestError?.response?.data?.message || "Impossible de mettre ? jour la position.",
+          );
+        } finally {
+          setLocationUpdating(false);
+        }
+      },
+      () => {
+        setLocationUpdating(false);
+        setLocationUpdateError("Impossible de r?cup?rer votre position actuelle.");
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
   };
 
   const openFeedbackModal = (person) => {
@@ -1166,6 +1213,41 @@ function ClientOrderDetail({
           </div>
           {receiptMessage && <div className="client-payment-feedback success">{receiptMessage}</div>}
           {receiptError && <div className="client-payment-feedback error">{receiptError}</div>}
+        </section>
+      )}
+      {(["delivery", "mixed"].includes(order.fulfillment_method || "") || deliveryPeople.length > 0) && (
+        <section className="client-location-share-card">
+          <header>
+            <div>
+              <span>Position de livraison</span>
+              <h3>Partagez un rep?re simple pour le livreur</h3>
+              <p>
+                Votre GPS aide le livreur ? vous trouver plus facilement quand l'adresse seule ne suffit pas.
+              </p>
+            </div>
+            <MapPin />
+          </header>
+          <div className="client-location-share-actions">
+            {hasSharedDeliveryLocation ? (
+              <a href={deliveryLocationUrl} target="_blank" rel="noreferrer">
+                <Navigation /> Ouvrir ma position
+              </a>
+            ) : (
+              <span className="client-location-share-empty">Aucune position GPS partag?e pour le moment.</span>
+            )}
+            {onUpdateDeliveryLocation && order.status !== "delivered" && order.status !== "cancelled" && (
+              <button type="button" onClick={shareUpdatedLocation} disabled={locationUpdating}>
+                <MapPin /> {locationUpdating ? "Mise ? jour..." : hasSharedDeliveryLocation ? "Mettre ? jour ma position" : "Partager ma position"}
+              </button>
+            )}
+          </div>
+          {(order.delivery_location_label || order.delivery_address) && (
+            <small className="client-location-share-label">
+              {order.delivery_location_label || order.delivery_address}
+            </small>
+          )}
+          {locationUpdateMessage && <div className="client-payment-feedback success">{locationUpdateMessage}</div>}
+          {locationUpdateError && <div className="client-payment-feedback error">{locationUpdateError}</div>}
         </section>
       )}
       {deliveryPeople.length > 0 && (
@@ -1739,7 +1821,13 @@ export function ClientCheckoutContent({
     address: "",
     city: "Port-au-Prince",
     phone: user?.phone || "",
+    deliveryLatitude: null,
+    deliveryLongitude: null,
+    deliveryLocationLabel: "",
+    deliveryLocationSource: null,
   });
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState("");
   const [proof, setProof] = useState(null);
   const [proofNote, setProofNote] = useState("");
   const total = cart.reduce(
@@ -1835,6 +1923,34 @@ export function ClientCheckoutContent({
         [String(sellerId)]: method,
       },
     }));
+  };
+
+  const shareCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError("La g?olocalisation n'est pas disponible sur cet appareil.");
+      return;
+    }
+    setLocationLoading(true);
+    setLocationError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = Number(position.coords.latitude.toFixed(6));
+        const longitude = Number(position.coords.longitude.toFixed(6));
+        setForm((current) => ({
+          ...current,
+          deliveryLatitude: latitude,
+          deliveryLongitude: longitude,
+          deliveryLocationLabel: current.deliveryLocationLabel || `${current.address || current.city || "Position client"}`.trim(),
+          deliveryLocationSource: "browser",
+        }));
+        setLocationLoading(false);
+      },
+      () => {
+        setLocationLoading(false);
+        setLocationError("Impossible de r?cup?rer votre position actuelle. V?rifiez l'autorisation GPS.");
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
   };
 
   useEffect(() => {
@@ -2145,12 +2261,13 @@ export function ClientCheckoutContent({
             </p>
           </div>
           {hasDelivery && (
+            <>
             <div className="checkout-delivery-address-fields">
               <label>
                 Adresse complète
                 <input
-                  required
-                  minLength="8"
+                  required={!form.deliveryLatitude || !form.deliveryLongitude}
+                  minLength="3"
                   value={form.address}
                   onChange={(event) => setForm({ ...form, address: event.target.value })}
                   placeholder="Rue, numéro, quartier"
@@ -2165,6 +2282,27 @@ export function ClientCheckoutContent({
                 />
               </label>
             </div>
+            <div className="checkout-location-card">
+              <div>
+                <span><MapPin /></span>
+                <div>
+                  <b>Position GPS du client</b>
+                  <small>
+                    Partagez votre position pour aider le livreur ? vous retrouver plus facilement.
+                  </small>
+                </div>
+              </div>
+              <button type="button" onClick={shareCurrentLocation} disabled={locationLoading}>
+                <Navigation /> {locationLoading ? "Localisation..." : form.deliveryLatitude && form.deliveryLongitude ? "Mettre ? jour ma position" : "Partager ma position"}
+              </button>
+              {form.deliveryLatitude && form.deliveryLongitude && (
+                <p className="checkout-location-success">
+                  Position enregistr?e ? {form.deliveryLatitude}, {form.deliveryLongitude}
+                </p>
+              )}
+              {locationError && <p className="checkout-location-error">{locationError}</p>}
+            </div>
+            </>
           )}
           <label>
             Téléphone

@@ -39,6 +39,14 @@ const useDeliveryImageFallback = (event) => {
 const date = (value) =>
   value ? new Intl.DateTimeFormat("fr-HT", { dateStyle: "medium" }).format(new Date(value)) : "—";
 const reportDate = (value) => date(value?.length === 10 ? `${value}T12:00:00` : value);
+const locationLink = (mission) => {
+  const latitude = Number(mission?.delivery_latitude);
+  const longitude = Number(mission?.delivery_longitude);
+  return Number.isFinite(latitude) && Number.isFinite(longitude)
+    ? `https://www.google.com/maps?q=${latitude},${longitude}`
+    : "";
+};
+
 
 const statusLabels = {
   assigned: "Assignée",
@@ -58,6 +66,7 @@ const whatsappNumber = (value = "") => {
   const digits = value.replace(/\D/g, "");
   return digits.length === 8 ? `509${digits}` : digits;
 };
+
 
 const deliveryGuides = {
   assigned: {
@@ -736,6 +745,18 @@ export function DeliveryMissionsContent({ api, user, history = false }) {
               <small>Destination</small>
               <b>{selected.delivery_address}</b>
               <p>{money(selected.total)}</p>
+              {selected.delivery_location_label && (
+                <small className="delivery-location-label">{selected.delivery_location_label}</small>
+              )}
+              {locationLink(selected) ? (
+                <a href={locationLink(selected)} target="_blank" rel="noreferrer" className="delivery-location-link">
+                  <Navigation /> Ouvrir la position partag?e
+                </a>
+              ) : (
+                <small className="delivery-location-missing">
+                  Le client n'a pas encore partag? sa position GPS.
+                </small>
+              )}
             </article>
           </div>
           <section className="delivery-journey">
